@@ -1,5 +1,5 @@
 // Everything /api/state returns, built from D1 and the R2 photo manifest.
-import { END_SETTING_SQL, giphyStatus, gateStatus, votingEndsAtMs } from "./config.js";
+import { END_SETTING_SQL, giphyStatus, gateStatus, verificationStatus, votingEndsAtMs } from "./config.js";
 
 export const PHOTO_MANIFEST_KEY = "manifest/photos.json";
 
@@ -42,5 +42,6 @@ export async function buildState(env, now = Date.now()) {
     photos,
     gate: gateStatus(env),
     giphy: giphyStatus(env),
+    verification: verificationStatus(env),
   };
 }

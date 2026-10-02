@@ -46,6 +46,8 @@ const app = {
   closedHold: 0, // server time before which a cached "open" is not believed (after a 403 voting_closed)
   closed: false,
   gateOn: true,
+  codesOn: false,
+  resumed: false,
   giphyOn: false,
   voter: loadVoter(), // { token, first_name } | null
   meLoaded: false,
@@ -260,6 +262,7 @@ function tapShare(card) {
 // ── The gate ─────────────────────────────────────────────────────────────────────────────────
 const gate = createGate({
   onVoter,
+  codesOn: () => app.codesOn,
   heldLine(action) {
     const label = app.cards.get(action?.slug)?.track.label;
     if (!label) return "Then your likes and comments are one tap.";
@@ -547,12 +550,18 @@ function applyState(state, generatedAt) {
   app.serverClosed = state.closed === true || generatedAt < app.closedHold;
   app.gateOn = state.gate?.available !== false;
   app.giphyOn = state.giphy?.available === true;
+  app.codesOn = state.verification?.available === true;
   if (Number.isFinite(app.endMs)) els.ends.textContent = formatEndsLine(app.endMs);
   els.offNote.hidden = app.gateOn;
   gallery.update(state.photos);
   renderTracks(Array.isArray(state.tracks) ? state.tracks : [], generatedAt);
   renderWindow();
   applyDeepLink();
+  // A voter who reloaded part-way through the code step goes straight back to it (once).
+  if (!app.resumed) {
+    app.resumed = true;
+    if (!app.voter && app.gateOn && !app.closed) gate.resume();
+  }
 }
 
 let pollTimer = null;

@@ -7,6 +7,9 @@ pages_build_output_dir = "public"
 # must never carry VOTING_ENDS_AT or ALLOW_END_OVERRIDE (tests/config.test.mjs fails if it does).
 [vars]
 APP_ENV = "production"
+# The 6-digit email code at the gate: "on" or "off". It also needs the Pages secret RESEND_API_KEY;
+# /api/state names which is missing. See RUNBOOK.md, "Email verification".
+EMAIL_VERIFICATION = "on"
 
 [[d1_databases]]
 binding = "DB"
@@ -26,6 +29,7 @@ APP_ENV = "preview"
 # Lets a `settings` row (key voting_ends_at) move the end time so a short window can be proven
 # without a deploy. See RUNBOOK.md, "Prove the voting window".
 ALLOW_END_OVERRIDE = "1"
+EMAIL_VERIFICATION = "on"
 
 [[env.preview.d1_databases]]
 binding = "DB"

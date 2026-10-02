@@ -121,6 +121,7 @@
     <h2 id="tbz-gate-title">One quick step to count your vote</h2>
     <p id="tbz-gate-held" class="gate-held">Then your likes and comments are one tap.</p>
 
+    <div id="tbz-gate-details" class="gate-step">
     <div class="field field-email">
       <label for="tbz-gate-email">Email</label>
       <input id="tbz-gate-email" name="email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false" placeholder="you@example.com" required aria-describedby="tbz-gate-email-error">
@@ -146,6 +147,18 @@
       <input id="tbz-gate-optin" name="marketing_opt_in" type="checkbox">
       <span>Send me Top Barz updates</span>
     </label>
+    </div>
+
+    <div id="tbz-gate-code-step" class="gate-step" hidden>
+      <p id="tbz-gate-code-sent" class="code-sent">We sent a code to <strong id="tbz-gate-code-to"></strong>.</p>
+      <div class="field field-code">
+        <label for="tbz-gate-code">6-digit code</label>
+        <input id="tbz-gate-code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]*" autocapitalize="off" autocorrect="off" spellcheck="false" aria-describedby="tbz-gate-code-sent tbz-gate-code-help tbz-gate-code-error">
+        <p id="tbz-gate-code-help" class="code-help">It works for 10 minutes. No email? Check your spam folder.</p>
+        <p id="tbz-gate-code-error" class="field-error" role="alert" hidden></p>
+      </div>
+      <p id="tbz-gate-code-note" class="code-note" role="status" hidden></p>
+    </div>
 
     <p id="tbz-gate-error" class="gate-error" role="alert" hidden></p>
     <button type="submit" id="tbz-gate-submit" class="btn btn-gate" data-state="idle">
@@ -153,6 +166,10 @@
       <svg class="ico ico-check" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
       <span id="tbz-gate-submit-text" aria-live="polite">Count my vote</span>
     </button>
+    <div id="tbz-gate-code-actions" class="code-actions" hidden>
+      <button type="button" id="tbz-gate-resend" class="link-btn" disabled>Send a new code</button>
+      <button type="button" id="tbz-gate-change" class="link-btn">Change email</button>
+    </div>
     <p class="gate-fine">We use your email to count your vote and to send contest results. Top Barz updates only if you tick the box. <a href="/privacy" target="_blank" rel="noopener">Privacy note</a></p>
   </form>
 </dialog>

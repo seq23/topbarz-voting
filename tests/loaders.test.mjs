@@ -123,7 +123,10 @@ test("tie-break: of tracks tied on likes, the one that reached the count first i
     ev(5, 1, "unlike"), ev(6, 1, "like"), // a drops to 1 and climbs back to 2 (id 6)
     ev(7, 3, "like"), ev(8, 3, "like"), ev(9, 3, "like"), // c: 3 likes, the outright winner
   ];
+  // Events 2, 3 and 7 are from voters who entered an email code; the rest are not.
+  for (const e of events) e.verified = [2, 3, 7].includes(e.id) ? 1 : 0;
   const tally = computeTally(tracks, events, { 1: 4 });
+  assert.deepEqual(tally.map((r) => [r.slug, r.likes_verified]), [["c", 1], ["a", 2], ["b", 0], ["d", 0]], "verified likes sit beside likes and never change the order");
   assert.deepEqual(tally.map((r) => [r.rank, r.slug, r.likes, r.tie_break_order]), [[1, "c", 3, ""], [2, "a", 2, 1], [3, "b", 2, 2], [4, "d", 0, ""]]);
   const a = tally.find((r) => r.slug === "a");
   assert.equal(a.first_reached_at, "2026-10-05T00:00:03.000Z");
@@ -131,19 +134,33 @@ test("tie-break: of tracks tied on likes, the one that reached the count first i
   assert.equal(a.comments, 4);
   assert.equal(tally.find((r) => r.slug === "d").first_reached_at, null);
   const csv = tallyCsv(tally).split("\n");
-  assert.equal(csv[0], "rank,track,slug,likes,comments,tie_break_order,first_reached_at,last_reached_at");
-  assert.equal(csv[2], "2,A,a,2,4,1,2026-10-05T00:00:03.000Z,2026-10-05T00:00:06.000Z");
+  assert.equal(csv[0], "rank,track,slug,likes,likes_verified,comments,tie_break_order,first_reached_at,last_reached_at");
+  assert.equal(csv[1], "1,C,c,3,1,0,,2026-10-05T00:00:09.000Z,2026-10-05T00:00:09.000Z");
+  assert.equal(csv[2], "2,A,a,2,2,4,1,2026-10-05T00:00:03.000Z,2026-10-05T00:00:06.000Z");
+  assert.equal(csv[3], "3,B,b,2,0,0,2,2026-10-05T00:00:04.000Z,2026-10-05T00:00:04.000Z");
+  // An un-like by a verified voter takes a verified like away again; an old export with no
+  // `verified` on its events counts none as verified rather than guessing.
+  assert.equal(computeTally(tracks, [...events, { id: 10, track_id: 3, action: "unlike", created_at: "2026-10-05T00:00:10.000Z", verified: 1 }]).find((r) => r.slug === "c").likes_verified, 0);
+  assert.deepEqual(computeTally(tracks, events.map(({ verified, ...e }) => e)).map((r) => r.likes_verified), [0, 0, 0, 0]);
 });
 
 test("contacts CSV: one row per voter, quoted properly, formulas defused", () => {
   const csv = contactsCsv([
-    { name: 'Jane "JD" Doe', email: "jane@example.com", city: "Atlanta, GA", marketing_opt_in: 1, created_at: "2026-10-05T01:02:03.000Z", flagged: 0, flag_reason: null },
-    { name: "=HYPERLINK(\"http://x\")", email: "x@example.com", city: "X", marketing_opt_in: 0, created_at: "2026-10-05T01:02:04.000Z", flagged: 1, flag_reason: "bot" },
+    { name: 'Jane "JD" Doe', email: "jane@example.com", city: "Atlanta, GA", marketing_opt_in: 1, created_at: "2026-10-05T01:02:03.000Z", flagged: 0, flag_reason: null, verified: 1, unverified_reason: null },
+    { name: "=HYPERLINK(\"http://x\")", email: "x@example.com", city: "X", marketing_opt_in: 0, created_at: "2026-10-05T01:02:04.000Z", flagged: 1, flag_reason: "bot", verified: 0, unverified_reason: "mail_budget" },
+    { name: "Old Timer", email: "old@example.com", city: "Y", marketing_opt_in: 0, created_at: "2026-10-01T01:02:04.000Z", flagged: 0, flag_reason: null, verified: 0, unverified_reason: "before_verification" },
+    { name: "No Reason", email: "nr@example.com", city: "Z", marketing_opt_in: 0, created_at: "2026-10-01T01:02:05.000Z", flagged: 0, flag_reason: null, verified: 0, unverified_reason: null },
   ]).split("\n");
-  assert.equal(csv[0], "name,email,city,marketing_opt_in,first_interaction_at,flagged,flag_reason");
-  assert.equal(csv[1], '"Jane ""JD"" Doe",jane@example.com,"Atlanta, GA",yes,2026-10-05T01:02:03.000Z,no,');
+  assert.equal(csv[0], "name,email,city,marketing_opt_in,first_interaction_at,flagged,flag_reason,verified");
+  assert.equal(csv[1], '"Jane ""JD"" Doe",jane@example.com,"Atlanta, GA",yes,2026-10-05T01:02:03.000Z,no,,yes');
   assert.ok(csv[2].startsWith(`"'=HYPERLINK`));
-  assert.ok(csv[2].endsWith(",no,2026-10-05T01:02:04.000Z,yes,bot"));
+  assert.ok(csv[2].endsWith(",no,2026-10-05T01:02:04.000Z,yes,bot,no (mail_budget)"));
+  assert.equal(csv[3], "Old Timer,old@example.com,Y,no,2026-10-01T01:02:04.000Z,no,,no (before_verification)");
+  assert.ok(csv[4].endsWith(",no (unknown)"), "a voter with no reason on file is named, never shown as verified");
+  // The export reads the two new columns from the database it is pointed at.
+  const exportSource = fs.readFileSync(path.join(ROOT, "scripts", "export.mjs"), "utf8");
+  assert.match(exportSource, /SELECT e\.id, e\.track_id, e\.action, e\.created_at, v\.verified FROM like_events e JOIN voters v ON v\.id = e\.voter_id WHERE v\.flagged = 0 ORDER BY e\.id/);
+  assert.match(exportSource, /flag_reason, verified, unverified_reason FROM voters/);
   assert.equal(csvCell("+1 555"), "'+1 555");
 });
 
@@ -188,7 +205,7 @@ test("the docs name every API route, and the brand rules hold in what ships", ()
   assert.ok(routes.length >= 7, `found ${routes.length} routes`);
   for (const r of routes) assert.ok(runbook.includes(r), `RUNBOOK.md does not describe ${r}`);
   assert.ok(runbook.includes("/media/"));
-  for (const step of ["sync-drive", "load-tracks", "load-photos", "GIPHY_BETA_KEY", "hidden = 1", "flagged = 1", "npm run export", "voting_ends_at"]) {
+  for (const step of ["sync-drive", "load-tracks", "load-photos", "GIPHY_BETA_KEY", "hidden = 1", "flagged = 1", "npm run export", "voting_ends_at", "## Email verification", "EMAIL_VERIFICATION = \"off\"", "RESEND_API_KEY", "50 code emails in any rolling 24 hours", "likes_verified", "mail_budget", "code_unavailable", "tbz.pending"]) {
     assert.ok(runbook.includes(step), `RUNBOOK.md does not cover: ${step}`);
   }
   // Brand: "Top Barz" is two words; the slogan is JUMP IN THE BOOTH; never "spit your bars".

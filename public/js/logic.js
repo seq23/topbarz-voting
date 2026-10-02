@@ -225,6 +225,63 @@ export function isVoterToken(token) {
   return typeof token === "string" && /^v1\.[1-9][0-9]{0,14}\.[A-Za-z0-9_-]{43}$/.test(token);
 }
 
+// ── The email code ───────────────────────────────────────────────────────────────────────────
+// What the field holds: digits only, six at most. So a pasted "123 456" or "123-456" is the code.
+export function codeDigits(value) {
+  return String(value ?? "").replace(/[^0-9]/g, "").slice(0, 6);
+}
+
+// A voter part-way through the code step is remembered for an hour, then forgotten.
+export const PENDING_KEEP_MS = 60 * 60 * 1000;
+
+// The action a reload can pick up again: a like or a share (never a comment's words).
+export function heldToKeep(action) {
+  if (!action || (action.type !== "like" && action.type !== "share")) return null;
+  if (typeof action.slug !== "string" || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(action.slug)) return null;
+  return action.type === "like" ? { type: "like", slug: action.slug, liked: action.liked !== false } : { type: "share", slug: action.slug };
+}
+
+// What the browser keeps while the code is awaited: what was typed at the gate (so "send a new
+// code" needs no retyping) and when a new code may be asked for and the code runs out, on this
+// device's clock. NEVER the code. `answer` is the gate's code_sent answer.
+export function pendingRecord(payload, answer, now, held = null) {
+  if (answer?.verification !== "code_sent") return null;
+  const email = tidy(payload?.email).toLowerCase();
+  if (!email) return null;
+  const seconds = (v, fallback) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : fallback);
+  return {
+    email, name: tidy(payload.name), city: tidy(payload.city), marketing_opt_in: payload.marketing_opt_in === true,
+    resend_at: now + seconds(answer.resend_in_seconds, 60) * 1000,
+    expires_at: now + seconds(answer.expires_in_seconds, 600) * 1000,
+    saved_at: now, held: heldToKeep(held), dismissed: false,
+  };
+}
+
+// What was stored → a record to trust, or null (not ours, damaged, or older than an hour).
+// Only the known keys are read, so nothing else that was stored (a code, say) is ever used.
+export function readPending(rec, now) {
+  if (!rec || typeof rec !== "object") return null;
+  const text = (v) => (typeof v === "string" ? tidy(v) : "");
+  const email = text(rec.email).toLowerCase();
+  const times = [rec.resend_at, rec.expires_at, rec.saved_at];
+  if (!email || !text(rec.name) || !text(rec.city) || !times.every((t) => Number.isFinite(t))) return null;
+  if (now - rec.saved_at > PENDING_KEEP_MS || rec.saved_at > now + 60_000) return null;
+  return {
+    email, name: text(rec.name), city: text(rec.city), marketing_opt_in: rec.marketing_opt_in === true,
+    resend_at: rec.resend_at, expires_at: rec.expires_at, saved_at: rec.saved_at,
+    held: heldToKeep(rec.held), dismissed: rec.dismissed === true,
+  };
+}
+
+// Whole seconds until `at` (0 = now or past).
+export function secondsUntil(at, now) {
+  return Math.max(0, Math.ceil((at - now) / 1000));
+}
+
+export function resendLabel(seconds) {
+  return seconds > 0 ? `Send a new code in ${seconds} s` : "Send a new code";
+}
+
 // ── Small formatters ─────────────────────────────────────────────────────────────────────────
 // 65.1 → "1:05"
 export function formatClock(seconds) {

@@ -1,0 +1,8 @@
+node_modules/
+.wrangler/
+.dev.vars
+# Voter data never enters the repo: scripts/export.mjs writes here.
+exports/
+# Loader work files (re-encoded audio, resized photos).
+.work/
+.DS_Store

@@ -1,0 +1,27 @@
+{
+  "name": "topbarz-voting",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test --test-force-exit --test-concurrency=1 tests/*.test.mjs",
+    "test:smoke": "node tests/smoke.mjs",
+    "check": "npm test && npm run test:smoke",
+    "dev": "wrangler pages dev public --port 8788 --binding VOTER_TOKEN_SECRET=local-dev-only-not-a-secret",
+    "dev:seed": "wrangler d1 migrations apply topbarz-voting --local && node scripts/load-tracks.mjs --env local && node scripts/load-photos.mjs --env local",
+    "migrate:preview": "wrangler d1 migrations apply topbarz-voting-preview --remote --env preview",
+    "migrate:production": "wrangler d1 migrations apply topbarz-voting --remote",
+    "deploy:staging": "npm run migrate:preview && wrangler pages deploy public --project-name topbarz-voting --branch staging --commit-dirty=true",
+    "deploy:production": "npm run migrate:production && wrangler pages deploy public --project-name topbarz-voting --branch main --commit-dirty=true",
+    "smoke:staging": "node scripts/smoke-live.mjs https://staging.topbarz-voting.pages.dev",
+    "smoke:production": "node scripts/smoke-live.mjs https://topbarz-voting.pages.dev",
+    "sync-drive": "node scripts/sync-drive.mjs",
+    "load-tracks": "node scripts/load-tracks.mjs",
+    "load-photos": "node scripts/load-photos.mjs",
+    "export": "node scripts/export.mjs"
+  },
+  "devDependencies": {
+    "sharp": "^0.34.0",
+    "smol-toml": "^1.3.0",
+    "wrangler": "^4.0.0"
+  }
+}

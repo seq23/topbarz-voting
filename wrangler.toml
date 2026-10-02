@@ -1,0 +1,38 @@
+name = "topbarz-voting"
+compatibility_date = "2026-09-25"
+pages_build_output_dir = "public"
+
+# ── PRODUCTION (branch `main` → https://topbarz-voting.pages.dev and voting.topbarz.xyz) ──────────
+# The voting end time is NOT here: it lives in functions/_lib/config.js (one place). Production
+# must never carry VOTING_ENDS_AT or ALLOW_END_OVERRIDE (tests/config.test.mjs fails if it does).
+[vars]
+APP_ENV = "production"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "topbarz-voting"
+database_id = "8758e5ef-193e-4dce-aedd-e52906af8f79"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "topbarz-voting-media"
+
+# ── PREVIEW (every other branch; `staging` is the stable one → https://staging.topbarz-voting.pages.dev)
+# Its own database and its own bucket: test tracks, test photos and test votes never touch
+# production. Preview bindings must be restated in full.
+[env.preview.vars]
+APP_ENV = "preview"
+# Lets a `settings` row (key voting_ends_at) move the end time so a short window can be proven
+# without a deploy. See RUNBOOK.md, "Prove the voting window".
+ALLOW_END_OVERRIDE = "1"
+
+[[env.preview.d1_databases]]
+binding = "DB"
+database_name = "topbarz-voting-preview"
+database_id = "c9ce90f8-7e2d-4146-a16b-abe7f38e3b68"
+migrations_dir = "migrations"
+
+[[env.preview.r2_buckets]]
+binding = "MEDIA"
+bucket_name = "topbarz-voting-media-preview"

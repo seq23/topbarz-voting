@@ -1,0 +1,29 @@
+# The MERGE GATE, and the only test run: every rule the API and the loaders must keep
+# (tests/*.test.mjs, against a real local D1 and R2) plus one pass over HTTP through
+# `wrangler pages dev` (tests/smoke.mjs). About a minute. No browser suite in this repo.
+# A green run on `main` is what fires deploy.yml.
+name: Validate
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+concurrency:
+  group: validate-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    # Normal: about a minute. 5 is a fault detector, never a budget.
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Rules (gate, token, likes, window, comments, state, media, giphy, loaders, docs)
+        run: npm test
+      - name: Every route over HTTP (wrangler pages dev, local D1 + R2)
+        run: npm run test:smoke

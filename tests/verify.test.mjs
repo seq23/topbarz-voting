@@ -60,7 +60,7 @@ test("the numbers are the owner's: 50 emails a day, 10 minutes, 5 tries, 60 s, 3
   assert.equal(VERIFICATION.maxTries, 5);
   assert.equal(VERIFICATION.resendCooldown, 60);
   assert.equal(VERIFICATION.sendsPerEmailPerHour, 3);
-  assert.equal(VERIFICATION.from, "Top Barz Voting <voting@events.westpeek.live>");
+  assert.equal(VERIFICATION.from, "Top Barz Voting <voting@joinwestpeek.com>");
   assert.equal(VERIFICATION.resendEndpoint, "https://api.resend.com/emails");
   assert.equal(VERIFICATION.dohEndpoint, "https://cloudflare-dns.com/dns-query");
   // The daily budget is written once: no other shipped file restates it next to "budget".
@@ -105,7 +105,7 @@ test("happy path: the gate emails a code and gives no token; the code gives the 
   const sent = mail.sent[0];
   assert.equal(sent.method, "POST");
   assert.equal(sent.headers.get("authorization"), `Bearer ${TEST_MAIL_KEY}`);
-  assert.equal(sent.body.from, "Top Barz Voting <voting@events.westpeek.live>");
+  assert.equal(sent.body.from, "Top Barz Voting <voting@joinwestpeek.com>");
   assert.deepEqual(sent.body.to, ["happy.path@example.com"]);
   assert.match(sent.code, /^[0-9]{6}$/);
   assert.equal(sent.body.subject, `${sent.code} is your Top Barz voting code`);

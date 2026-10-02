@@ -66,3 +66,47 @@ export function assignSlugs(parsed, existing = []) {
 }
 
 export const naturalSort = (a, b) => a.localeCompare(b, "en", { numeric: true, sensitivity: "base" });
+
+// ── Beats (the select page) ─────────────────────────────────────────────────────────────────────
+// "02 - Midnight Run.wav" → { sourceName: "02 - Midnight Run", name: "Midnight Run" }. A leading
+// number with a separator only sets the order (the files are read in natural order).
+export function parseBeatFile(fileName) {
+  const sourceName = path.basename(fileName, path.extname(fileName)).replace(/\s+/g, " ").trim();
+  const name = sourceName.replace(/^\d{1,3}\s*[-–.)_]\s*/, "").trim() || sourceName;
+  return { sourceName, name, slugBase: slugify(name) || "beat" };
+}
+
+export const STAND_IN_SLUG = /^placeholder-beat-(\d+)$/;
+
+// File names → the beats to load. A beat already loaded (same file name) keeps its slug and its
+// name for good: the slug is what a visitor's browser remembers as their pick.
+// A STAND-IN is any file from a test folder, or any file named "Test …": it never shows its own
+// name (a test track is named for a person). It becomes "Placeholder beat N".
+export function planBeats(fileNames, existing = [], { testFolder = false } = {}) {
+  const bySource = new Map(existing.map((b) => [b.source_name, b]));
+  const taken = new Set(existing.map((b) => b.slug));
+  return fileNames.map((file) => {
+    const parsed = parseBeatFile(file);
+    const standIn = testFolder || isTestName(file);
+    const have = bySource.get(parsed.sourceName);
+    if (have) return { file, sourceName: parsed.sourceName, slug: have.slug, name: have.name, standIn, isNew: false };
+    let slug, name;
+    if (standIn) {
+      let n = 1;
+      while (taken.has(`placeholder-beat-${n}`)) n++;
+      slug = `placeholder-beat-${n}`;
+      name = `Placeholder beat ${n}`;
+    } else {
+      // A real beat never takes a stand-in's slug, whatever its file is called.
+      const base = STAND_IN_SLUG.test(parsed.slugBase) ? `beat-${parsed.slugBase}` : parsed.slugBase;
+      slug = base;
+      for (let n = 2; taken.has(slug); n++) slug = `${base}-${n}`;
+      name = parsed.name;
+    }
+    taken.add(slug);
+    return { file, sourceName: parsed.sourceName, slug, name, standIn, isNew: true };
+  });
+}
+
+// True when the folder's real path has a "Test …" segment (the same rule assertLoadAllowed uses).
+export const isTestFolder = (realFolder) => path.resolve(realFolder).split(path.sep).some((seg) => isTestName(seg));

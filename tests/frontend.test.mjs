@@ -965,8 +965,9 @@ test("Back: with a popup open, the phone's Back button closes the popup instead 
 });
 
 test("phones: the lock screen names the track, and Android and iPhone each get their own text link", () => {
-  assert.match(read("js/player.js"), /navigator\.mediaSession\.metadata = new MediaMetadata\(\{ title: track\.title \|\| "CultureCon track", artist: "Top Barz at CultureCon" \}\)/);
+  assert.match(read("js/player.js"), /navigator\.mediaSession\.metadata = new MediaMetadata\(\{ title: track\.title \|\| "CultureCon track", artist: track\.artist \|\| "Top Barz at CultureCon" \}\)/);
   assert.match(read("js/app.js"), /hint: card\.audio\.duration, title: card\.track\.label \}\)/);
+  assert.ok(!/\bartist\b/.test(read("js/app.js")), "the voting page names no artist of its own, so its tracks still say Top Barz at CultureCon");
   assert.ok(smsHref("android", "a & b").startsWith("sms:?body=a%20%26%20b"), "Android: sms:?body=, with & escaped so the text is not cut");
   assert.ok(smsHref("ios", "a & b").startsWith("sms:&body=a%20%26%20b"), "iPhone: sms:&body=");
   const code = /<input id="tbz-gate-code"[^>]*>/.exec(read("index.html"))[0];
@@ -1046,7 +1047,24 @@ test("link preview: Open Graph tags and a 1200x630 image", async () => {
 });
 
 // ── Wiring: nothing the page needs is missing, nothing inline, nothing heavy ─────────────────
-test("wiring: every file a page names exists; every element the scripts look up is in index.html", () => {
+// Each page that runs a script, and the one script it runs. Every other script is reached from
+// one of these by import, and belongs to the page (or pages) that reach it.
+const PAGE_SCRIPTS = { "index.html": "app.js", "select.html": "select.js" };
+function scriptsOf(entry) {
+  const seen = new Set();
+  const walk = (file) => {
+    if (seen.has(file)) return;
+    seen.add(file);
+    for (const m of read(`js/${file}`).matchAll(/from "\.\/([^"]+)"/g)) {
+      assert.ok(fs.existsSync(path.join(PUBLIC, "js", m[1])), `${file} imports ${m[1]}`);
+      walk(m[1]);
+    }
+  };
+  walk(entry);
+  return [...seen].sort();
+}
+
+test("wiring: every file a page names exists; every element a page's scripts look up is in that page", () => {
   for (const page of HTML) {
     const html = read(page);
     const local = [...html.matchAll(/\b(?:src|href)="(\/[^"#?]*)"/g)].map((m) => m[1]).filter((p) => p !== "/");
@@ -1055,19 +1073,30 @@ test("wiring: every file a page names exists; every element the scripts look up 
       const file = path.join(PUBLIC, p);
       assert.ok(fs.existsSync(file) || fs.existsSync(`${file}.html`), `${page} names ${p}, which is not in public/`);
     }
+    const named = [...html.matchAll(/"\/js\/([^"]+)"/g)].map((m) => m[1]).sort();
+    assert.deepEqual(named, page in PAGE_SCRIPTS ? scriptsOf(PAGE_SCRIPTS[page]) : [], `${page} loads or preloads exactly the scripts it uses: no more, no fewer`);
+    assert.equal([...html.matchAll(/<script\b/g)].length, page in PAGE_SCRIPTS ? 1 : 0, `${page} runs one script, or none`);
   }
-  const index = read("index.html");
-  const ids = new Set([...index.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]));
-  assert.equal(ids.size, [...index.matchAll(/\bid="([^"]+)"/g)].length, "no id is used twice");
-  let lookups = 0;
-  for (const file of JS) {
-    const js = read(file);
-    for (const m of js.matchAll(/\$\("([^"]+)"\)/g)) { lookups++; assert.ok(ids.has(m[1]), `${file} looks up #${m[1]}, which is not in index.html`); }
-    for (const m of js.matchAll(/from "(\.\/[^"]+)"/g)) assert.ok(fs.existsSync(path.join(PUBLIC, "js", m[1])), `${file} imports ${m[1]}`);
-    assert.ok(index.includes(`"/js/${path.basename(file)}"`), `index.html loads or preloads ${file}`);
+  const lookups = {};
+  const owned = new Set();
+  for (const [page, entry] of Object.entries(PAGE_SCRIPTS)) {
+    const html = read(page);
+    assert.match(html, new RegExp(`<script type="module" src="/js/${entry.replace(".", "\\.")}"></script>`));
+    const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]));
+    assert.equal(ids.size, [...html.matchAll(/\bid="([^"]+)"/g)].length, `${page}: no id is used twice`);
+    for (const id of ids) assert.ok(id.startsWith("tbz-"), `${page} #${id}: page ids start with tbz-, so a track's own link can never collide with one`);
+    lookups[page] = 0;
+    for (const file of scriptsOf(entry)) {
+      owned.add(`js/${file}`);
+      for (const m of read(`js/${file}`).matchAll(/\$\("([^"]+)"\)/g)) { lookups[page]++; assert.ok(ids.has(m[1]), `${file} looks up #${m[1]}, which is not in ${page}`); }
+    }
   }
-  assert.ok(lookups >= 40, `checked ${lookups} element lookups`);
-  for (const id of ids) assert.ok(id.startsWith("tbz-"), `#${id}: page ids start with tbz-, so a track's own link can never collide with one`);
+  assert.deepEqual([...owned].sort(), [...JS].sort(), "every script in public/js belongs to a page");
+  assert.ok(lookups["index.html"] >= 40, `checked ${lookups["index.html"]} element lookups in index.html`);
+  assert.ok(lookups["select.html"] >= 15, `checked ${lookups["select.html"]} element lookups in select.html`);
+  // The voting page loads nothing of the select page's own.
+  const shared = scriptsOf("app.js").filter((f) => scriptsOf("select.js").includes(f));
+  assert.deepEqual(shared, ["api.js", "dom.js", "logic.js", "player.js"], "the two pages share the player and the helpers, and nothing else");
 });
 
 test("safety: text is never written as markup, nothing runs inline, and the page loads only its own files and Giphy's GIFs", () => {
@@ -1092,11 +1121,15 @@ test("safety: text is never written as markup, nothing runs inline, and the page
 
 test("weight: no libraries, and the whole page is small", () => {
   const size = (rel) => fs.statSync(path.join(PUBLIC, rel)).size;
-  const js = JS.reduce((n, f) => n + size(f), 0);
+  const pageJs = (entry) => scriptsOf(entry).reduce((n, f) => n + size(`js/${f}`), 0);
+  const js = pageJs("app.js");
   const fonts = fs.readdirSync(path.join(PUBLIC, "fonts")).reduce((n, f) => n + size(`fonts/${f}`), 0);
-  assert.ok(js < 120_000, `scripts are ${js} bytes before compression`);
+  assert.ok(js < 110_000, `the voting page's scripts are ${js} bytes before compression`);
+  assert.ok(pageJs("select.js") < 60_000, `the select page's scripts are ${pageJs("select.js")} bytes before compression`);
+  assert.ok(JS.reduce((n, f) => n + size(f), 0) < 120_000, "and every script in public/js together");
   assert.ok(size("css/site.css") < 40_000);
   assert.ok(size("index.html") < 20_000);
+  assert.ok(size("select.html") < 8_000);
   assert.ok(fonts < 60_000, `fonts are ${fonts} bytes`);
   assert.ok(size("img/logo.png") < 30_000);
   for (const file of [...HTML, ...JS]) assert.ok(!/\bcdn\.|unpkg|jsdelivr|googleapis|gstatic|jquery|\breact\b/i.test(read(file)), `${file}: no library, no CDN`);

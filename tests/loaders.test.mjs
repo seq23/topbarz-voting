@@ -58,7 +58,7 @@ test("test folders and test files are refused for production, and allowed for pr
   assert.equal(isTestName("Contest winners"), false);
 });
 
-test("both loaders refuse a Test folder for production before touching anything (even via a symlink)", () => {
+test("every loader refuses a Test folder for production before touching anything (even via a symlink)", () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "tbz-load-"));
   const testDir = path.join(base, "Test tracks");
   fs.mkdirSync(testDir);
@@ -66,7 +66,7 @@ test("both loaders refuse a Test folder for production before touching anything 
   fs.writeFileSync(path.join(testDir, "Photo.jpg"), "x");
   const disguised = path.join(base, "Real tracks");
   fs.symlinkSync(testDir, disguised);
-  for (const script of ["load-tracks.mjs", "load-photos.mjs"]) {
+  for (const script of ["load-tracks.mjs", "load-photos.mjs", "load-beats.mjs"]) {
     for (const folder of [testDir, disguised]) {
       const r = spawnSync(process.execPath, [path.join(ROOT, "scripts", script), "--env", "production", "--folder", folder], { encoding: "utf8" });
       assert.notEqual(r.status, 0, `${script} ${folder}`);
@@ -76,7 +76,7 @@ test("both loaders refuse a Test folder for production before touching anything 
 });
 
 test("a loader with no --env stops and says so", () => {
-  for (const script of ["load-tracks.mjs", "load-photos.mjs", "export.mjs"]) {
+  for (const script of ["load-tracks.mjs", "load-photos.mjs", "load-beats.mjs", "export.mjs"]) {
     const r = spawnSync(process.execPath, [path.join(ROOT, "scripts", script)], { encoding: "utf8" });
     assert.equal(r.status, 2, script);
     assert.match(r.stderr, /--env local \| preview \| production/);
@@ -205,7 +205,7 @@ test("the docs name every API route, and the brand rules hold in what ships", ()
   assert.ok(routes.length >= 7, `found ${routes.length} routes`);
   for (const r of routes) assert.ok(runbook.includes(r), `RUNBOOK.md does not describe ${r}`);
   assert.ok(runbook.includes("/media/"));
-  for (const step of ["sync-drive", "load-tracks", "load-photos", "GIPHY_BETA_KEY", "hidden = 1", "flagged = 1", "npm run export", "voting_ends_at", "## Email verification", "EMAIL_VERIFICATION = \"off\"", "RESEND_API_KEY", "50 code emails in any rolling 24 hours", "likes_verified", "mail_budget", "code_unavailable", "tbz.pending", "spam or junk"]) {
+  for (const step of ["sync-drive", "load-tracks", "load-photos", "load-beats", "## The select page", "GIPHY_BETA_KEY", "hidden = 1", "flagged = 1", "npm run export", "voting_ends_at", "## Email verification", "EMAIL_VERIFICATION = \"off\"", "RESEND_API_KEY", "50 code emails in any rolling 24 hours", "likes_verified", "mail_budget", "code_unavailable", "tbz.pending", "spam or junk"]) {
     assert.ok(runbook.includes(step), `RUNBOOK.md does not cover: ${step}`);
   }
   // Brand: "Top Barz" is two words; the slogan is JUMP IN THE BOOTH; never "spit your bars".

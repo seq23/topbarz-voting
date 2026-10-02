@@ -74,7 +74,7 @@ Production commands; add `-preview --env preview` to the database name for previ
 - **New table or column:** add `migrations/000N_name.sql`; Deploy applies it to preview, then production.
 
 ## Work on it locally
-- `npm ci`, then `npm run dev:seed` (local database + the 4 test tracks + the 4 test photos), then `npm run dev` → http://localhost:8788.
+- `npm ci`, then `npm run dev:seed` (local database + the 4 test tracks + the 4 test photos + the 4 stand-in beats), then `npm run dev` → http://localhost:8788 (the select page: http://localhost:8788/select).
 - `npm run check` runs every test (about 30 seconds).
 
 ## The page (front end)
@@ -84,9 +84,10 @@ Static files in `public/`, no framework and no build step: what is in the folder
 |---|---|
 | `public/index.html` | The page and every word on it, including the gate popup. |
 | `public/privacy.html` | The privacy note, at `/privacy`. |
+| `public/select.html`, `public/js/select.js`, `pick.js`, `select-copy.js` | The select page, at `/select`: the page, its script, the pick's rules (unit-tested), and its copy. See "The select page". |
 | `public/css/site.css` | All styling. The brand colours are the variables at the top. |
 | `public/js/logic.js` | The rules with no screen in them (share text, sms link, countdown, like state). Unit-tested. |
-| `public/js/app.js`, `player.js`, `comments.js`, `gate.js`, `gallery.js`, `api.js`, `dom.js` | The page itself: polling and cards, audio, comments and GIFs, the gate, the photo slider, requests and the remembered voter, small helpers. |
+| `public/js/app.js`, `player.js`, `comments.js`, `gate.js`, `gallery.js`, `api.js`, `dom.js` | The page itself: polling and cards, audio (the player and its controls, shared with the select page), comments and GIFs, the gate, the photo slider, requests and the remembered voter, small helpers. |
 | `public/_headers` | Security headers for the static files. The page may load only its own files and GIFs from Giphy. |
 
 - **The look is topbarz.xyz's**, read from the live site's computed styles on 2 Oct 2026 and written as tokens at the top of `public/css/site.css` (nothing below the tokens names a colour or a typeface; a test fails if it does). Buttons are the site's ellipse (`border-radius: 100%`, a 4px line, 59px tall, capitals in Epilogue 400, never bold). The slogan is Dela Gothic One, slanted, 34px on a phone to 51px on a desktop, line-height 1.09, letter-spacing -0.02em. Body text is Epilogue 400 at 16px. Photos and fields are square-cornered. Sections alternate as the site's do: black, then a peach closing section with dark text (orange on peach is 2.1:1 and is never used). Track rows are divided by hairlines, not boxed.
@@ -106,6 +107,26 @@ Static files in `public/`, no framework and no build step: what is in the folder
 - **Only a real phone can prove:** that Messages opens with the text filled in from SHARE (iPhone `sms:&body=`, Android `sms:?body=`, and inside Instagram's own browser); that the iPhone keyboard offers the code from the email (Android has no such offer for email: the voter pastes or types it); audio with the ring switch off and on the lock screen; Back on an Android phone closing the popup; VoiceOver and TalkBack reading the cards.
 - **Check it in a browser** (there is no browser suite in CI): on staging, like a track (the gate appears once and emails a code: sign up with an address you can read and `+tbztest` in it, such as `you+tbztest@yourdomain`; an `@example.com` address cannot receive mail and is refused), enter the code, refresh (the heart stays), comment, share, open `/#<slug>`, then close and reopen the window (next section). Afterwards remove the test voter: `npx wrangler d1 execute topbarz-voting-preview --remote --env preview --command "DELETE FROM comments WHERE voter_id IN (SELECT id FROM voters WHERE email LIKE '%+tbztest@%'); DELETE FROM like_events WHERE voter_id IN (SELECT id FROM voters WHERE email LIKE '%+tbztest@%'); DELETE FROM email_codes WHERE voter_id IN (SELECT id FROM voters WHERE email LIKE '%+tbztest@%'); DELETE FROM email_sends WHERE voter_id IN (SELECT id FROM voters WHERE email LIKE '%+tbztest@%'); DELETE FROM voters WHERE email LIKE '%+tbztest@%'"`
 
+## The select page
+`https://voting.topbarz.xyz/select` is where people hear the beats and pick one: listen, choose, done. Top Barz points the Waitwhile redirect at it, so it is the page people land on after the booth. It looks like the voting page (the same stylesheet, the same player code) but its data is its own: a beat is never a track.
+
+- **Address.** `/select` (`public/select.html`). `/select/` and `/select.html` redirect to it. The voting page does not link to it.
+- **Beats are their own data.** Table `beats` (`migrations/0003_beats.sql`), audio in R2 under `beats/`, read by `GET /api/beats`. A beat is never in `/api/state`, the tally or `npm run export`, and cannot be liked or commented on; `tests/beats.test.mjs` fails if that changes.
+- **Load the real beats:** put the audio files in a folder named `Beats` in the Drive package, run `npm run sync-drive`, then `npm run load-beats -- --env preview` (look at them on staging) and `npm run load-beats -- --env production` (publish). Another folder: `--folder <dir>`. See what it would do first: `--dry-run`.
+- **What it does:** each file becomes a beat named for the file (`02 - Midnight Run.wav` → "Midnight Run"; a leading number only sets the order). Audio is re-encoded exactly as tracks are, uploaded to R2 and recorded in D1. Safe to run again: a file already loaded is skipped, a beat's slug and name never change once given, nothing is deleted.
+- **It stops, and says why, rather than do nothing:** no `Beats` folder (the case until Top Barz sends the beats), a folder with no audio, or no active beat after loading. Each exits non-zero.
+- **Stand-in beats, staging only:** `npm run load-beats -- --env preview --folder ~/topbarz-source/drive/"Test tracks"` loads the 4 test tracks as "Placeholder beat 1" to "Placeholder beat 4". A stand-in (any file from a "Test …" folder, or named "Test …") never shows the file's own name. For production it is refused exactly as test tracks are, production's `/api/beats` never returns a stand-in row whatever its table holds, and the deploy's live check fails if one shows there. When real beats are loaded, the loader switches that environment's stand-ins off.
+- **Production has no beats until the real ones are loaded.** Until then `/select` there says "The beats land here soon".
+- **Rename a beat:** `npx wrangler d1 execute topbarz-voting --remote --command "UPDATE beats SET name = 'New Name' WHERE slug = 'midnight-run'"` (the slug stays: it is what a visitor's browser remembers).
+- **Credit a beat** (shown under its name; both optional, the link must be https): `npx wrangler d1 execute topbarz-voting --remote --command "UPDATE beats SET credit_label = 'Kay Beats', credit_url = 'https://www.instagram.com/kaybeats' WHERE slug = 'midnight-run'"`. With only `credit_label` it shows as words; with neither, nothing shows.
+- **Take a beat off the page:** `npx wrangler d1 execute topbarz-voting --remote --command "UPDATE beats SET active = 0 WHERE slug = 'midnight-run'"` (`active = 1` puts it back). **Order:** the `sort` column, lowest first. For staging use `topbarz-voting-preview --remote --env preview`.
+- **Where the copy lives:** `public/js/select-copy.js`, one object: the headline, the intro line, the list heading, the two button labels, "You picked {name}", the line under it, and the producer and engineer links (`url` must be https; while it is `""` the entry shows as plain words, not a dead link). Everything in it today is a PLACEHOLDER. When Top Barz sends the real copy, edit that object and nothing else; the page's elements are empty in `select.html` and filled from it.
+- **Take noindex off when the real copy lands:** delete the line `<meta name="robots" content="noindex">` from `public/select.html`, and in the same change turn the assertion that pins it in `tests/select.test.mjs` ("noindex until the real copy lands") into one that fails if it comes back.
+- **The pick stays on the device.** Choosing a beat stores its slug in the browser (localStorage `tbz.pick`) and shows "You picked <name>". Nothing is sent to the server: no sign-up, no email, no record of who picked what. It survives a refresh and a return visit, and shows in a second tab at once. "Change my pick" (or the picked beat's own button) takes it back; another beat's button changes it. If the stored beat is no longer offered, the page shows the unpicked state. A browser that refuses storage (private mode) still shows the pick for that visit and says it will not be remembered.
+- **It does not depend on the vote.** The page and `GET /api/beats` never read the voting end time, so `/select` works the same after voting closes.
+- **Waiting, done, failed.** "Loading the beats…" (and a slower-connection line after 5 s); a failed load says why and offers "Try again"; no beats shows the empty panel; audio that fails says so on its row and play tries again. One beat plays at a time, and choosing does not stop it. A page left open asks for the beats again when it is shown after a minute.
+- **Check it in a browser:** open `https://staging.topbarz-voting.pages.dev/select`, play a beat, start another (the first stops), choose one (the page moves to "You picked …"), refresh (still picked), open a second tab (picked there too), "Change my pick".
+
 ## The API a front end calls
 Same origin, JSON in and out. Every error is `{ "error": "<code>", "message": "<plain words to show>" }` with a 4xx/5xx status.
 
@@ -120,7 +141,8 @@ Same origin, JSON in and out. Every error is `{ "error": "<code>", "message": "<
 | `POST /api/comments` | Add a comment (text, a GIF, or both). |
 | `GET /api/giphy/trending` | GIFs to show before a search. |
 | `GET /api/giphy/search` | GIF search. |
-| `GET /media/tracks/…`, `/media/photos/…` | Audio and photos (use the URLs from state as they are). |
+| `GET /api/beats` | The beats the select page (`/select`) plays. Not part of the vote. |
+| `GET /media/tracks/…`, `/media/photos/…`, `/media/beats/…` | Audio and photos (use the URLs from state and beats as they are). |
 
 **`GET /api/state`**
 ```json
@@ -139,6 +161,8 @@ Same origin, JSON in and out. Every error is `{ "error": "<code>", "message": "<
 - **`closed: true`**: show "Voting closed", disable like / comment / share-to-vote, keep audio playable. The server refuses likes and comments regardless of the browser's clock. Count down to `voting_ends_at` against `now` (the server's clock), not the device's.
 - **`photos: []`**: hide the slider. Use `thumb_url` in the strip and `url` full-size; lazy-load.
 - **`giphy.available: false`**: hide the GIF picker. **`gate.available: false`**: voting is not switched on (the signing secret is missing); show the tracks only. **`verification.available`**: `true` = the gate emails a code and the popup shows the code step; `false` (`reason`: `switched_off` or `no_key`) = the gate returns the token at once. The page does not need to branch on it: it follows the answer `POST /api/voters` gives.
+
+**`GET /api/beats`** → `{ "beats": [{ "slug": "midnight-run", "name": "Midnight Run", "audio_url": "/media/beats/midnight-run-3290fefeb1.mp3", "duration_ms": 92000, "credit_label": "Kay Beats" | null, "credit_url": "https://…" | null }] }`, in display order. Read-only (any other method is a 405), cached 5 s, never per-visitor, and the same before and after voting closes. `beats: []` means none are loaded: show the empty state. `credit_url` is only ever https, and only present with a `credit_label`. The pick is not an API call: the page keeps the chosen `slug` on the device.
 
 **`POST /api/voters`** body `{ "name", "email", "city", "marketing_opt_in": false, "website": "" }`
 - All three text fields are required. `marketing_opt_in` is `true` only if the box was ticked (default off). `website` is the honeypot: render it hidden from people (off-screen, `tabindex="-1"`, `autocomplete="off"`) and send whatever is in it.

@@ -5,7 +5,9 @@
 // (the signing secret is set), and an unknown /api path is a JSON 404 (the Functions are live,
 // not just the static page), and email codes are in the state wrangler.toml asks for: with the
 // switch "on" a missing mail key (verification.available = false) fails the deploy here, rather
-// than voting running unverified with nobody told. Retries for about a minute while a new
+// than voting running unverified with nobody told. And the select page: /select is served and
+// /api/beats answers with a list (an empty one is fine: the page shows its empty state), and an
+// address that is not staging shows no stand-in beat. Retries for about a minute while a new
 // deployment settles.
 import fs from "node:fs";
 import path from "node:path";
@@ -19,6 +21,8 @@ if (switches.length !== 2 || switches[0] !== switches[1] || !["on", "off"].inclu
 const codesWanted = switches[0] === "on";
 const base = (process.argv[2] ?? "").replace(/\/$/, "");
 if (!/^https?:\/\//.test(base)) { console.error("STOPPED: give the address to check, e.g. https://staging.topbarz-voting.pages.dev"); process.exit(2); }
+// Stand-in beats (test files) are for staging and a local run only.
+const staging = /^https?:\/\/(staging\.|localhost\b|127\.0\.0\.1\b)/.test(base);
 let last = "no attempt";
 for (let attempt = 1; attempt <= 12; attempt++) {
   try {
@@ -34,8 +38,14 @@ for (let attempt = 1; attempt <= 12; attempt++) {
     if (codesWanted && v?.available !== true) problems.push(`email codes are switched on but not working (${v?.reason ?? "no verification state"}): set RESEND_API_KEY — RUNBOOK.md, Email verification`);
     if (!codesWanted && (v?.available !== false || v?.reason !== "switched_off")) problems.push(`email codes are switched off in wrangler.toml but the site says ${JSON.stringify(v ?? null)}`);
     if (nf.status !== 404 || !(nf.headers.get("content-type") ?? "").includes("json")) problems.push("unknown /api paths are not answered by the Functions");
+    const select = await fetch(`${base}/select?smoke=${Date.now()}`);
+    if (select.status !== 200 || !(await select.text()).includes('id="tbz-beats-list"')) problems.push(`/select is not serving the select page (${select.status})`);
+    const beatsRes = await fetch(`${base}/api/beats?smoke=${Date.now()}`, { headers: { accept: "application/json" } });
+    const beats = (await beatsRes.json().catch(() => null))?.beats;
+    if (beatsRes.status !== 200 || !Array.isArray(beats)) problems.push(`/api/beats answered ${beatsRes.status} with no list of beats`);
+    else if (!staging && beats.some((b) => /^placeholder-beat-/.test(b.slug) || /placeholder/i.test(b.name))) problems.push("a stand-in beat is showing on an address that is not staging");
     if (problems.length === 0) {
-      console.log(`ok   ${base}: ${body.tracks.length} track(s), ${body.photos?.length ?? 0} photo(s), closes ${body.voting_ends_at}, closed=${body.closed}, giphy ${body.giphy?.available ? "on" : `off (${body.giphy?.reason})`}, email codes ${v.available ? "on" : `off (${v.reason})`}`);
+      console.log(`ok   ${base}: ${body.tracks.length} track(s), ${beats.length} beat(s) on /select, ${body.photos?.length ?? 0} photo(s), closes ${body.voting_ends_at}, closed=${body.closed}, giphy ${body.giphy?.available ? "on" : `off (${body.giphy?.reason})`}, email codes ${v.available ? "on" : `off (${v.reason})`}`);
       process.exit(0);
     }
     last = problems.join("; ");

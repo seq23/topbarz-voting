@@ -50,6 +50,11 @@ try {
   wr(["d1", "execute", "topbarz-voting", "--local", "--yes", "--command",
     "INSERT INTO tracks (slug, label, source_name, audio_key, duration_ms, sort, active, created_at, updated_at) VALUES ('smoke', 'Smoke', 'Smoke Test', 'tracks/smoke-0000000000.mp3', 1000, 10, 1, '2026-10-02T00:00:00.000Z', '2026-10-02T00:00:00.000Z')"]);
 
+  // One beat for the select page, in its own table and its own folder of the bucket.
+  wr(["r2", "object", "put", "topbarz-voting-media/beats/smoke-beat-0000000000.mp3", "--file", audio, "--content-type", "audio/mpeg", "--local"]);
+  wr(["d1", "execute", "topbarz-voting", "--local", "--yes", "--command",
+    "INSERT INTO beats (slug, name, source_name, audio_key, duration_ms, sort, active, stand_in, credit_label, credit_url, created_at, updated_at) VALUES ('smoke-beat', 'Smoke Beat', 'Smoke Beat File', 'beats/smoke-beat-0000000000.mp3', 2000, 10, 1, 0, 'Smoke Producer', 'https://example.com/producer', '2026-10-02T00:00:00.000Z', '2026-10-02T00:00:00.000Z')"]);
+
   const port = await freePort();
   const base = `http://127.0.0.1:${port}`;
   await new Promise((resolve) => stub.listen(0, "127.0.0.1", resolve));
@@ -80,8 +85,29 @@ try {
   const privacy = await fetch(base + "/privacy");
   ok(privacy.status === 200 && (await privacy.text()).includes("Privacy note"), "GET /privacy serves the privacy note");
 
+  // The select page (/select) and its beats.
+  const select = await fetch(base + "/select", { redirect: "manual" });
+  const selectText = await select.text();
+  ok(select.status === 200 && selectText.includes('id="tbz-beats-list"') && selectText.includes('<meta name="robots" content="noindex">'), "GET /select serves the select page, marked noindex");
+  ok((select.headers.get("content-security-policy") ?? "").startsWith("default-src 'self'; script-src 'self'; style-src 'self'"), "/select is served with the same content security policy");
+  for (const alias of ["/select/", "/select.html"]) {
+    const hop = await fetch(base + alias, { redirect: "manual" });
+    const landed = await fetch(base + alias);
+    ok([301, 308].includes(hop.status) && new URL(hop.headers.get("location"), base).pathname === "/select" && landed.status === 200 && new URL(landed.url).pathname === "/select", `GET ${alias} ends up at /select`);
+  }
+  const selectAssets = [...new Set([...selectText.matchAll(/(?:src|href)="(\/(?:js|css|img|fonts)\/[^"]+)"/g)].map((m) => m[1]))];
+  const selectServed = await Promise.all(selectAssets.map(async (a) => { const r = await fetch(base + a); await r.arrayBuffer(); return r.status === 200 ? null : `${a} → ${r.status}`; }));
+  ok(selectAssets.length >= 10 && selectServed.every((x) => x === null), `every file /select names is served (${selectAssets.length} files${selectServed.filter(Boolean).length ? `; missing: ${selectServed.filter(Boolean).join(", ")}` : ""})`);
+  ok(!/href="\/select|select\.js/.test(pageText), "the voting page does not link to /select");
+  const beats = await j("/api/beats");
+  ok(beats.status === 200 && JSON.stringify(beats.body) === JSON.stringify({ beats: [{ slug: "smoke-beat", name: "Smoke Beat", audio_url: "/media/beats/smoke-beat-0000000000.mp3", duration_ms: 2000, credit_label: "Smoke Producer", credit_url: "https://example.com/producer" }] }), "GET /api/beats lists the beat, with its credit");
+  ok((await post("/api/beats", { pick: "smoke-beat" })).status === 405, "POST /api/beats is a 405: a pick is never sent to the server");
+  const beatRange = await fetch(base + beats.body.beats[0].audio_url, { headers: { range: "bytes=0-1" } });
+  ok(beatRange.status === 206 && beatRange.headers.get("content-range") === "bytes 0-1/4096" && beatRange.headers.get("content-type") === "audio/mpeg", "a beat's audio answers Range with 206, as a track's does");
+
   const s1 = await j("/api/state");
   ok(s1.status === 200 && s1.body.tracks.length === 1 && s1.body.tracks[0].slug === "smoke" && s1.body.tracks[0].likes === 0, "GET /api/state lists the track with 0 likes");
+  ok(!/beat/i.test(JSON.stringify(s1.body)) && Object.keys(s1.body).sort().join() === "closed,gate,giphy,now,photos,tracks,verification,voting_ends_at", "the beat is not in /api/state, whose shape has not changed");
   ok(s1.body.closed === false && s1.body.voting_ends_at === "2026-10-12T06:59:00.000Z", "state carries the end time and closed=false");
   ok(s1.body.giphy.available === false && s1.body.giphy.reason === "no_key" && s1.body.gate.available === true, "state names the GIF picker as off (no key) and the gate as on");
   ok(Array.isArray(s1.body.photos) && s1.body.photos.length === 0, "no photos = empty manifest");
@@ -137,7 +163,7 @@ try {
   ok(whole.status === 200 && whole.headers.get("accept-ranges") === "bytes" && /immutable/.test(whole.headers.get("cache-control")) && whole.headers.get("content-type") === "audio/mpeg", "media is served whole with a long cache");
   ok((await fetch(base + "/media/manifest/photos.json")).status === 404, "the manifest is not reachable under /media");
 
-  if (passed < 30) throw new Error(`only ${passed} checks ran`);
+  if (passed < 40) throw new Error(`only ${passed} checks ran`);
   console.log(`smoke: ${passed} checks passed`);
 } catch (err) {
   console.error(String(err.message ?? err));

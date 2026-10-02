@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#000000">
+<meta name="color-scheme" content="dark">
+<title>Top Barz | JUMP IN THE BOOTH</title>
+<meta name="description" content="Hear the beats from the Top Barz booth and pick one.">
+<link rel="icon" type="image/png" href="/img/favicon.png">
+<link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
+<link rel="preload" href="/fonts/dela-gothic-one-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/epilogue-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/css/site.css">
+<link rel="modulepreload" href="/js/logic.js">
+<link rel="modulepreload" href="/js/api.js">
+<link rel="modulepreload" href="/js/dom.js">
+<link rel="modulepreload" href="/js/player.js">
+<link rel="modulepreload" href="/js/pick.js">
+<link rel="modulepreload" href="/js/select-copy.js">
+<script type="module" src="/js/select.js"></script>
+</head>
+<body>
+<a class="skip" href="#tbz-beats">Skip to the beats</a>
+
+<header class="top">
+  <a class="logo" href="https://www.topbarz.xyz/"><img src="/img/logo.png" width="212" height="186" alt="Top Barz"></a>
+  <h1 class="slogan">JUMP IN THE BOOTH</h1>
+</header>
+
+<main>
+  <section class="intro">
+    <h2 id="tbz-select-headline" class="page-title"></h2>
+    <p id="tbz-select-intro" class="lede"></p>
+  </section>
+
+  <section id="tbz-picked" class="picked" aria-labelledby="tbz-picked-title" hidden>
+    <svg class="ico picked-mark" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+    <h2 id="tbz-picked-title" tabindex="-1"></h2>
+    <p id="tbz-picked-line"></p>
+    <p id="tbz-picked-note" class="picked-note" hidden>This browser will not remember your pick once you close the page.</p>
+    <button type="button" id="tbz-pick-change" class="btn btn-small btn-ghost"></button>
+  </section>
+  <p id="tbz-pick-say" class="sr-only" role="status"></p>
+
+  <section id="tbz-beats" class="tracks" aria-labelledby="tbz-beats-title">
+    <h2 id="tbz-beats-title" tabindex="-1"></h2>
+    <p id="tbz-beats-loading" class="list-note" role="status">Loading the beats…</p>
+    <div id="tbz-beats-error" class="list-note" role="alert" hidden>
+      <p id="tbz-beats-error-text">The beats did not load.</p>
+      <button type="button" id="tbz-beats-retry" class="btn btn-small">Try again</button>
+    </div>
+    <div id="tbz-beats-empty" class="empty" hidden>
+      <p class="empty-title">The beats land here soon</p>
+      <p>The beats are on their way into the booth. Come back to listen and pick yours.</p>
+      <p>Until then, follow <a class="tap-inline" href="https://www.instagram.com/topbarz.xyz" rel="noopener">@topbarz.xyz</a> on Instagram.</p>
+    </div>
+    <div id="tbz-beats-list" class="list" aria-busy="true"></div>
+    <noscript><p class="list-note">This page needs JavaScript to play the beats and keep your pick. Turn it on and reload.</p></noscript>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="foot-inner">
+    <section id="tbz-links" class="foot-block" aria-labelledby="tbz-links-title" hidden>
+      <h2 id="tbz-links-title"></h2>
+      <ul id="tbz-links-list" class="credits"></ul>
+    </section>
+    <section class="foot-block" aria-labelledby="tbz-contact-title">
+      <h2 id="tbz-contact-title">Contact</h2>
+      <p>Questions? Message Top Barz on Instagram.</p>
+      <p class="foot-links">
+        <a href="https://www.instagram.com/topbarz.xyz" rel="noopener">@topbarz.xyz on Instagram</a>
+        <a href="https://www.topbarz.xyz/">topbarz.xyz</a>
+      </p>
+    </section>
+    <p class="foot-mark">Top Barz</p>
+  </div>
+</footer>
+</body>
+</html>

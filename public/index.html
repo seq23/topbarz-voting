@@ -50,7 +50,7 @@
     <button type="button" id="tbz-strip-prev" class="arrow arrow-prev" aria-label="Earlier photos" hidden>
       <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
     </button>
-    <ul id="tbz-strip" class="strip" tabindex="0" aria-label="Photos from CultureCon. Swipe, or use the arrow keys."></ul>
+    <ul id="tbz-strip" class="strip" aria-label="Photos from CultureCon. Swipe, or use the arrow keys."></ul>
     <button type="button" id="tbz-strip-next" class="arrow arrow-next" aria-label="More photos" hidden>
       <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
     </button>
@@ -81,7 +81,7 @@
     <div id="tbz-empty" class="empty" hidden>
       <p class="empty-title">The tracks land here soon</p>
       <p>The CultureCon tracks are on their way into the booth. Come back to listen, vote, and send your favorite to your people.</p>
-      <p>Until then, follow <a href="https://www.instagram.com/topbarz.xyz" rel="noopener">@topbarz.xyz</a> on Instagram.</p>
+      <p>Until then, follow <a class="tap-inline" href="https://www.instagram.com/topbarz.xyz" rel="noopener">@topbarz.xyz</a> on Instagram.</p>
     </div>
     <div id="tbz-list" class="list" aria-busy="true"></div>
     <noscript><p class="list-note">This page needs JavaScript to play the tracks and count your vote. Turn it on and reload.</p></noscript>
@@ -89,26 +89,32 @@
 </main>
 
 <footer class="foot">
-  <section class="foot-block" aria-labelledby="tbz-prize-title">
-    <h2 id="tbz-prize-title">The prize</h2>
-    <p>The winner gets a free studio session for them and their friends at Studio404 in Brooklyn. Travel is not included, so winners outside New York need to come to New York.</p>
-  </section>
-  <section class="foot-block" aria-labelledby="tbz-rules-title">
-    <h2 id="tbz-rules-title">The rules</h2>
-    <ul>
-      <li>One like is one vote. Like as many tracks as you want.</li>
-      <li>One like per track for each email. Tap the heart again to take it back.</li>
-      <li>The track with the most likes when voting closes wins.</li>
-      <li>Voting ends Sunday, October 11 at 11:59 PM PDT.</li>
-    </ul>
-  </section>
-  <section class="foot-block" aria-labelledby="tbz-contact-title">
-    <h2 id="tbz-contact-title">Contact</h2>
-    <p>Questions? Message <a href="https://www.instagram.com/topbarz.xyz" rel="noopener">@topbarz.xyz</a> on Instagram, or visit <a href="https://www.topbarz.xyz/">topbarz.xyz</a>.</p>
-    <p><a href="/privacy">Privacy note</a>: what we collect and why.</p>
-    <p id="tbz-who" class="who" hidden>Voting as <strong id="tbz-who-name"></strong>. <button type="button" id="tbz-who-forget" class="link-btn">Not you?</button></p>
-  </section>
-  <p class="foot-mark">Top Barz at CultureCon</p>
+  <div class="foot-inner">
+    <section class="foot-block" aria-labelledby="tbz-prize-title">
+      <h2 id="tbz-prize-title">The prize</h2>
+      <p>The winner gets a free studio session for them and their friends at Studio404 in Brooklyn. Travel is not included, so winners outside New York need to come to New York.</p>
+    </section>
+    <section class="foot-block" aria-labelledby="tbz-rules-title">
+      <h2 id="tbz-rules-title">The rules</h2>
+      <ul>
+        <li>One like is one vote. Like as many tracks as you want.</li>
+        <li>One like per track for each email. Tap the heart again to take it back.</li>
+        <li>The track with the most likes when voting closes wins.</li>
+        <li id="tbz-rule-ends">Voting ends Sunday, October 11 at 11:59 PM PDT.</li>
+      </ul>
+    </section>
+    <section class="foot-block" aria-labelledby="tbz-contact-title">
+      <h2 id="tbz-contact-title">Contact</h2>
+      <p>Questions? Message Top Barz on Instagram.</p>
+      <p class="foot-links">
+        <a href="https://www.instagram.com/topbarz.xyz" rel="noopener">@topbarz.xyz on Instagram</a>
+        <a href="https://www.topbarz.xyz/">topbarz.xyz</a>
+        <a href="/privacy">Privacy note</a>
+      </p>
+      <p id="tbz-who" class="who" hidden>Voting as <strong id="tbz-who-name"></strong>. <button type="button" id="tbz-who-forget" class="link-btn">Not you?</button></p>
+    </section>
+    <p class="foot-mark">Top Barz at CultureCon</p>
+  </div>
 </footer>
 
 <div id="tbz-status" class="status" role="status" aria-live="polite" hidden></div>
@@ -170,7 +176,7 @@
       <button type="button" id="tbz-gate-resend" class="link-btn" disabled>Send a new code</button>
       <button type="button" id="tbz-gate-change" class="link-btn">Change email</button>
     </div>
-    <p class="gate-fine">We use your email to count your vote and to send contest results. Top Barz updates only if you tick the box. <a href="/privacy" target="_blank" rel="noopener">Privacy note</a></p>
+    <p class="gate-fine">We use your email to count your vote and to send contest results. Top Barz updates only if you tick the box. <a class="tap-inline" href="/privacy" target="_blank" rel="noopener">Privacy note</a></p>
   </form>
 </dialog>
 

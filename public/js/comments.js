@@ -1,7 +1,7 @@
 // A track's comments: the thread that opens under its card, the box to write one, and the GIF
 // picker. Only a first name, the text, a GIF and a time are ever shown.
 import { h, icon } from "./dom.js";
-import { holdFrom, relativeTime, safeGifUrl } from "./logic.js";
+import { holdFrom, isLongComment, relativeTime, safeGifUrl } from "./logic.js";
 
 const FIRST_PAGE = 5;
 const MORE_PAGE = 10;
@@ -18,7 +18,7 @@ let threadSeq = 0;
 //        onCount(slug, count, holdUntil), onClosed(), onAuthLost() }
 export function createThread(slug, label, ctx) {
   const uid = `tbz-thread-${++threadSeq}`;
-  const state = { open: false, loaded: false, loading: false, reloadAfter: false, comments: [], total: 0, hasMore: false, posting: false, gif: null, closed: false, askedFor: null };
+  const state = { open: false, loaded: false, loading: false, reloadAfter: false, comments: [], total: 0, hasMore: false, posting: false, gif: null, closed: false, askedFor: null, unfolded: new Set() };
 
   // ── Elements ───────────────────────────────────────────────────────────────────────────────
   const moreBtn = h("button", { type: "button", class: "link-btn thread-more", hidden: true, text: "Show earlier comments" });
@@ -58,7 +58,23 @@ export function createThread(slug, label, ctx) {
     const time = h("time", { class: "c-time", datetime: c.created_at, text: relativeTime(created, ctx.now() ?? created) });
     const li = h("li", { class: "comment" },
       h("p", { class: "c-head" }, h("span", { class: "c-name", text: c.first_name || "Someone" }), " ", time));
-    if (c.text) li.append(h("p", { class: "c-text", text: c.text }));
+    if (c.text) {
+      const body = h("p", { class: "c-text", text: c.text });
+      li.append(body);
+      // A very long comment shows its first lines; the reader opens the rest.
+      if (isLongComment(c.text)) {
+        const open = state.unfolded.has(c.id);
+        body.classList.toggle("is-clamped", !open);
+        const more = h("button", { type: "button", class: "link-btn c-more", "aria-expanded": String(open), text: open ? "Show less" : "Show all" });
+        more.addEventListener("click", () => {
+          const now = body.classList.toggle("is-clamped");
+          if (now) state.unfolded.delete(c.id); else state.unfolded.add(c.id);
+          more.setAttribute("aria-expanded", String(!now));
+          more.textContent = now ? "Show all" : "Show less";
+        });
+        li.append(more);
+      }
+    }
     const gif = safeGifUrl(c.gif?.url);
     if (gif) li.append(h("img", { class: "c-gif", src: gif, alt: `GIF from ${c.first_name || "a voter"}`, loading: "lazy", decoding: "async" }));
     return li;

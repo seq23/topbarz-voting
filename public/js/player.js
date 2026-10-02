@@ -68,6 +68,12 @@ export function createPlayer(onChange) {
     }
     current = { slug: track.slug, url: track.url, hint: track.hint };
     audio.src = track.url;
+    // What a phone's lock screen and notification shade show while it plays.
+    try {
+      if (typeof MediaMetadata === "function" && navigator.mediaSession) {
+        navigator.mediaSession.metadata = new MediaMetadata({ title: track.title || "CultureCon track", artist: "Top Barz at CultureCon" });
+      }
+    } catch {}
     set("loading");
     play();
   }

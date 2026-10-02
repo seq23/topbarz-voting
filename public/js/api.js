@@ -1,5 +1,5 @@
 // The page's one way to the server, and the one place a voter is remembered.
-import { isVoterToken, readPending } from "./logic.js";
+import { isVoterToken, pruneOwn, readOwn, readPending, rememberOwn } from "./logic.js";
 
 export class ApiError extends Error {
   constructor(code, message, status = 0, extra = null) {
@@ -115,4 +115,30 @@ export function savePending(rec, now = Date.now()) {
 
 export function forgetPending() {
   try { localStorage.removeItem(PENDING_KEY); } catch {}
+}
+
+// ── What this device itself just changed (logic.js, rememberOwn): counts only, for a minute ───
+export const OWN_KEY = "tbz.own";
+
+export function loadOwn(now = Date.now()) {
+  try { return pruneOwn(JSON.parse(localStorage.getItem(OWN_KEY) || "null"), now); } catch {}
+  return {};
+}
+
+export function saveOwn(own, now = Date.now()) {
+  const clean = pruneOwn(own, now);
+  try {
+    if (Object.keys(clean).length) localStorage.setItem(OWN_KEY, JSON.stringify(clean));
+    else localStorage.removeItem(OWN_KEY);
+  } catch {}
+}
+
+// Keep the server's answer to this voter's own like or comment (`until`: logic.js, holdFrom).
+export function keepOwn(slug, patch, until, now = Date.now()) {
+  saveOwn(rememberOwn(loadOwn(now), slug, patch, until, now), now);
+}
+
+// The remembered counts for a track while a state built at `generatedAt` is older than they are.
+export function ownCounts(stored, slug, generatedAt, now = Date.now()) {
+  return readOwn(stored, slug, generatedAt, now);
 }

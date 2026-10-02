@@ -1,14 +1,14 @@
 // The voting page. Reads /api/state every few seconds, draws the tracks, and sends likes,
 // comments and shares. The API it calls is described in RUNBOOK.md.
-import { api, forgetVoter, loadVoter, saveVoter, VOTER_KEY } from "./api.js";
+import { api, forgetVoter, keepOwn, loadOwn, loadVoter, OWN_KEY, ownCounts, saveVoter, VOTER_KEY } from "./api.js";
 import { createThread } from "./comments.js";
 import { $, h, icon, reducedMotion } from "./dom.js";
 import { createGallery } from "./gallery.js";
 import { createGate } from "./gate.js";
 import {
   countdownSpoken, detectPlatform, formatClock, formatCountdown, formatCount, formatEndsLine, holdFrom,
-  likeInitial, likeReduce, likeRequest, likeView, nextPollDelay, plural, safeMediaUrl, serverNow,
-  serverTimeOf, shareMessage, slugFromHash, smsHref, syncClock, trackLink, voterRecord,
+  LIKE_WAIT_MS, likeInitial, likeReduce, likeRequest, likeView, nextPollDelay, plural,
+  rulesEndLine, safeMediaUrl, serverNow, serverTimeOf, shareMessage, slugFromHash, smsHref, syncClock, trackLink, voterRecord,
 } from "./logic.js";
 import { createPlayer } from "./player.js";
 
@@ -21,6 +21,7 @@ const els = {
   countdown: $("tbz-countdown"),
   countdownSpoken: $("tbz-countdown-spoken"),
   closedHero: $("tbz-closed-hero"),
+  ruleEnds: $("tbz-rule-ends"),
   tracks: $("tbz-tracks"),
   tracksTitle: $("tbz-tracks-title"),
   list: $("tbz-list"),
@@ -71,11 +72,13 @@ function setStatus(kind) {
     slow: "Connection is slow. Counts may be behind. Trying again…",
     back: "Back online.",
     out: "Signed out on this device. Your votes still count.",
+    late: "Voting closed before that went through, so it was not counted.",
   }[kind] || "";
   els.status.textContent = text;
   els.status.dataset.kind = kind || "";
   els.status.hidden = !text;
   if (kind === "back" || kind === "out") statusTimer = setTimeout(() => setStatus(null), 3000);
+  if (kind === "late") statusTimer = setTimeout(() => setStatus(null), 7000);
 }
 
 // ── The player ───────────────────────────────────────────────────────────────────────────────
@@ -145,6 +148,18 @@ function onVoter(response) {
   renderWho();
 }
 
+// ── What this device just changed ────────────────────────────────────────────────────────────
+// The server's own answer to this voter's like or comment is kept for a minute (api.js, keepOwn;
+// logic.js, rememberOwn), so a refresh or a second tab inside the server's few seconds of cache
+// shows the count the voter just saw, never the one from before it.
+// A card takes the remembered counts while the state it was drawn from is older than they are.
+function applyOwn(card, generatedAt, stored = loadOwn()) {
+  const own = ownCounts(stored, card.slug, generatedAt);
+  if (!own) return;
+  if (own.likes !== null && !card.like.inflight) card.like = { ...card.like, serverCount: own.likes, holdUntil: Math.max(card.like.holdUntil, own.until) };
+  if (own.comments !== null) { card.commentCount = own.comments; card.commentsHold = Math.max(card.commentsHold, own.until); }
+}
+
 // ── Likes ────────────────────────────────────────────────────────────────────────────────────
 // One request per track at a time. Taps while it is on the wire only change what is wanted; when
 // the answer lands, a newer wish goes out. So rapid taps cannot double-vote or stick the button.
@@ -164,6 +179,7 @@ async function pumpLike(card) {
     const liked = data.liked === true;
     card.like = likeReduce(card.like, { type: "confirmed", liked, likes: data.likes, holdUntil: holdFrom(date, now()) });
     if (liked) app.liked.add(card.slug); else app.liked.delete(card.slug);
+    keepOwn(card.slug, { likes: card.like.serverCount }, card.like.holdUntil);
     card.renderLike();
     return pumpLike(card);
   } catch (err) {
@@ -263,6 +279,10 @@ function tapShare(card) {
 const gate = createGate({
   onVoter,
   codesOn: () => app.codesOn,
+  openerFor(action) {
+    const card = app.cards.get(action?.slug);
+    return action?.type === "share" ? card?.shareBtn : card?.likeBtn;
+  },
   heldLine(action) {
     const label = app.cards.get(action?.slug)?.track.label;
     if (!label) return "Then your likes and comments are one tap.";
@@ -272,9 +292,9 @@ const gate = createGate({
   },
   async runHeld(action) {
     const card = app.cards.get(action.slug);
-    if (!card) return { ok: true, done: "You're in" };
+    if (!card) return { ok: true, done: "You’re in" };
+    if (app.closed) { setStatus("late"); return { ok: false }; } // nothing is dropped in silence
     if (action.type === "like") {
-      if (app.closed) return { ok: false };
       card.say("");
       card.like = likeReduce(card.like, { type: "want", liked: action.liked !== false });
       card.renderLike();
@@ -285,7 +305,7 @@ const gate = createGate({
       const result = await card.thread.post(action.payload);
       return result.ok ? { ok: true, done: "Comment posted" } : { ok: false };
     }
-    return { ok: true, done: "You're in", after: () => openShare(card) };
+    return { ok: true, done: "You’re in", after: () => openShare(card) };
   },
 });
 
@@ -301,6 +321,7 @@ const threadContext = {
     if (!card) return;
     card.commentCount = count;
     card.commentsHold = Math.max(card.commentsHold, holdUntil);
+    keepOwn(slug, { comments: count }, holdUntil);
     card.renderCounts();
   },
   onClosed: () => votingClosedByServer(),
@@ -329,7 +350,7 @@ function createCard(track) {
   const audioNote = h("p", { class: "audio-note", role: "status" });
 
   const likeCount = h("span", { class: "n" });
-  const likeBtn = h("button", { type: "button", class: "chip like", "aria-pressed": "false" }, icon("heart"), likeCount);
+  const likeBtn = h("button", { type: "button", class: "chip like", "aria-pressed": "false" }, icon("heart"), h("span", { class: "spinner", "aria-hidden": "true" }), likeCount);
   const talkCount = h("span", { class: "n" });
   const talkBtn = h("button", { type: "button", class: "chip talk", "aria-expanded": "false" }, icon("comment"), talkCount);
   const shareBtn = h("button", { type: "button", class: "chip share", "aria-expanded": "false" }, icon("share"), h("span", { text: "SHARE" }));
@@ -358,7 +379,7 @@ function createCard(track) {
   Object.assign(card, { el, likeBtn, shareBtn, sharePanel, shareNote, shareLink, smsBtn, copyBtn, copyText, thread, tag });
 
   // Audio
-  const audioTrack = () => ({ slug, url: safeMediaUrl(card.track.audio_url), hint: card.audio.duration });
+  const audioTrack = () => ({ slug, url: safeMediaUrl(card.track.audio_url), hint: card.audio.duration, title: card.track.label });
   const togglePlay = () => {
     const t = audioTrack();
     if (!t.url) { audioNote.textContent = "This track has no audio yet."; return; }
@@ -411,14 +432,23 @@ function createCard(track) {
     if (text) msgTimer = setTimeout(() => { msg.textContent = ""; }, 9000);
   };
 
+  // Waiting is shown, not hidden: a like still on the wire after LIKE_WAIT_MS turns its heart
+  // into a spinner (and says so to a screen reader) until the server has answered.
+  let waitTimer = null;
+  const showWaiting = (on) => {
+    likeBtn.classList.toggle("is-waiting", on);
+    if (on) likeBtn.setAttribute("aria-busy", "true"); else likeBtn.removeAttribute("aria-busy");
+  };
   card.renderLike = () => {
     const view = likeView(card.like);
     const off = app.closed || !app.gateOn;
     likeBtn.setAttribute("aria-pressed", String(view.liked));
     likeBtn.classList.toggle("is-busy", card.like.inflight);
+    if (card.like.inflight && waitTimer === null) waitTimer = setTimeout(() => showWaiting(card.like.inflight), LIKE_WAIT_MS);
+    if (!card.like.inflight) { clearTimeout(waitTimer); waitTimer = null; showWaiting(false); }
     likeBtn.disabled = off;
     likeCount.textContent = formatCount(view.count);
-    likeBtn.setAttribute("aria-label", `${app.closed ? "Voting closed. " : ""}Like ${by()}. ${plural(view.count, "like")}${view.liked ? ". You like it" : ""}`);
+    likeBtn.setAttribute("aria-label", `${app.closed ? "Voting closed. " : ""}Like ${by()}. ${plural(view.count, "like")}${view.liked ? ". You like it" : ""}${card.like.inflight ? ". Saving" : ""}`);
   };
 
   card.renderCounts = () => {
@@ -443,10 +473,11 @@ function createCard(track) {
   });
 
   // New numbers from /api/state. `generatedAt` is the server time that answer was built.
-  card.update = (next, generatedAt) => {
+  card.update = (next, generatedAt, stored) => {
     card.track = next;
     if (title.textContent !== next.label) title.textContent = next.label;
     if (!player.isCurrent(slug)) card.audio.duration = (Number(next.duration_ms) || 0) / 1000;
+    applyOwn(card, generatedAt, stored);
     card.like = likeReduce(card.like, { type: "poll", likes: next.likes, generatedAt });
     const fresh = generatedAt >= card.commentsHold;
     if (fresh) card.commentCount = Number(next.comments) || 0;
@@ -464,12 +495,13 @@ function createCard(track) {
 
 function renderTracks(tracks, generatedAt) {
   const seen = new Set();
+  const stored = loadOwn(); // read once per state, not once per card
   tracks.forEach((track, i) => {
     if (typeof track?.slug !== "string" || seen.has(track.slug)) return;
     seen.add(track.slug);
     let card = app.cards.get(track.slug);
     if (!card) { card = createCard(track); app.cards.set(track.slug, card); }
-    card.update(track, generatedAt);
+    card.update(track, generatedAt, stored);
     if (els.list.children[i] !== card.el) els.list.insertBefore(card.el, els.list.children[i] || null);
   });
   for (const [slug, card] of app.cards) {
@@ -510,11 +542,17 @@ function setClosed(closed) {
   els.closedHero.hidden = !closed;
   els.closedNote.hidden = !closed;
   els.vote.textContent = closed ? "LISTEN" : "VOTE";
+  renderRuleEnds();
   for (const card of app.cards.values()) {
     card.renderLike();
     card.renderCounts();
     card.thread.sync(NaN, closed);
   }
+}
+
+// The rules' last line follows the window: it never promises an end that has passed.
+function renderRuleEnds() {
+  if (Number.isFinite(app.endMs)) els.ruleEnds.textContent = rulesEndLine(app.closed, formatEndsLine(app.endMs));
 }
 
 let spokenMinute = null;
@@ -552,6 +590,7 @@ function applyState(state, generatedAt) {
   app.giphyOn = state.giphy?.available === true;
   app.codesOn = state.verification?.available === true;
   if (Number.isFinite(app.endMs)) els.ends.textContent = formatEndsLine(app.endMs);
+  renderRuleEnds();
   els.offNote.hidden = app.gateOn;
   gallery.update(state.photos);
   renderTracks(Array.isArray(state.tracks) ? state.tracks : [], generatedAt);
@@ -620,6 +659,12 @@ window.addEventListener("online", () => poll());
 window.addEventListener("offline", () => setStatus("offline"));
 window.addEventListener("hashchange", () => { app.linkApplied = null; applyDeepLink(); });
 window.addEventListener("storage", (ev) => {
+  if (ev.key === OWN_KEY) {
+    // This voter liked or commented in another tab: show that count here too, at once.
+    const stored = loadOwn();
+    for (const card of app.cards.values()) { applyOwn(card, 0, stored); card.renderLike(); card.renderCounts(); }
+    return;
+  }
   if (ev.key !== VOTER_KEY && ev.key !== null) return;
   // Another tab signed in or out.
   const stored = loadVoter();

@@ -147,13 +147,30 @@ test("contacts CSV: one row per voter, quoted properly, formulas defused", () =>
   assert.equal(csvCell("+1 555"), "'+1 555");
 });
 
-test("voter data, secrets and loader work files cannot be committed", () => {
+// The only pictures in the repo are the page's four brand images, each at its fixed size.
+// Contest photos and tracks live in R2, never here.
+const BRAND_IMAGES = {
+  "public/img/apple-touch-icon.png": [180, 180],
+  "public/img/favicon.png": [64, 64],
+  "public/img/logo.png": [212, 186],
+  "public/img/og.png": [1200, 630],
+};
+
+test("voter data, secrets and loader work files cannot be committed; the only media in the repo are the four brand images", async () => {
   for (const p of ["exports/production-x/contacts.csv", "exports/tally.csv", ".dev.vars", ".work/preview/tracks/a.mp3"]) {
     const out = execFileSync("git", ["-C", ROOT, "check-ignore", p], { encoding: "utf8" }).trim();
     assert.equal(out, p);
   }
   const tracked = execFileSync("git", ["-C", ROOT, "ls-files"], { encoding: "utf8" }).split("\n");
-  assert.deepEqual(tracked.filter((f) => /\.(csv|mp3|wav|m4a|jpe?g|png)$/i.test(f) || f.startsWith("exports/")), []);
+  assert.ok(tracked.length > 20, "git lists the repo's files");
+  const media = /\.(csv|tsv|xlsx?|mp3|wav|m4a|aac|ogg|flac|mp4|mov|jpe?g|png|gif|webp|avif|heic|tiff?|bmp)$/i;
+  assert.deepEqual(tracked.filter((f) => media.test(f) || f.startsWith("exports/")).sort(), Object.keys(BRAND_IMAGES), "no voter file, track or photo is tracked: only the brand images, by name");
+  const sharp = (await import("sharp")).default;
+  for (const [file, [width, height]] of Object.entries(BRAND_IMAGES)) {
+    const info = await sharp(path.join(ROOT, file)).metadata();
+    assert.deepEqual([info.format, info.width, info.height], ["png", width, height], `${file} is the brand image at its fixed size, not something else under its name`);
+    assert.ok(fs.statSync(path.join(ROOT, file)).size < 60_000, `${file} is small`);
+  }
 });
 
 test("the docs name every API route, and the brand rules hold in what ships", () => {

@@ -1,7 +1,7 @@
-// GET /media/tracks/<file> and /media/photos/<file> — straight from the R2 bucket.
+// GET /media/tracks/<file>, /media/photos/<file> and /media/beats/<file> — straight from the R2 bucket.
 // Keys carry a content hash, so they are cached for a year and never change. Range requests are
 // answered with 206: iOS Safari will not play audio without them.
-const ALLOWED = /^(tracks|photos)\/[A-Za-z0-9][A-Za-z0-9._-]{0,200}$/;
+const ALLOWED = /^(tracks|photos|beats)\/[A-Za-z0-9][A-Za-z0-9._-]{0,200}$/;
 const CACHE = "public, max-age=31536000, immutable";
 
 function parseRange(header, size) {

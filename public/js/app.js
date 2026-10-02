@@ -6,11 +6,11 @@ import { $, h, icon, reducedMotion } from "./dom.js";
 import { createGallery } from "./gallery.js";
 import { createGate } from "./gate.js";
 import {
-  countdownSpoken, detectPlatform, formatClock, formatCountdown, formatCount, formatEndsLine, holdFrom,
+  countdownSpoken, detectPlatform, formatCountdown, formatCount, formatEndsLine, holdFrom,
   LIKE_WAIT_MS, likeInitial, likeReduce, likeRequest, likeView, nextPollDelay, plural,
   rulesEndLine, safeMediaUrl, serverNow, serverTimeOf, shareMessage, slugFromHash, smsHref, syncClock, trackLink, voterRecord,
 } from "./logic.js";
-import { createPlayer } from "./player.js";
+import { createControls, createPlayer } from "./player.js";
 
 const els = {
   status: $("tbz-status"),
@@ -341,13 +341,11 @@ function createCard(track) {
   };
   const by = () => `the track by ${card.track.label}`;
 
-  const playBtn = h("button", { type: "button", class: "play" }, icon("play"), icon("pause"), h("span", { class: "spinner", "aria-hidden": "true" }));
   const title = h("h3", { class: "track-label", text: track.label });
   const tag = h("span", { class: "linked-tag", hidden: true, text: "Shared with you" });
-  const seek = h("input", { type: "range", class: "scrub-input", min: 0, max: 1000, step: 1, value: 0, disabled: true });
-  const scrub = h("div", { class: "scrub" }, h("div", { class: "scrub-bars", "aria-hidden": "true" }), seek);
-  const time = h("span", { class: "time" });
-  const audioNote = h("p", { class: "audio-note", role: "status" });
+  // Play, the bar, the clock and the line under them (player.js, shared with the select page).
+  const audioTrack = () => ({ slug, url: safeMediaUrl(card.track.audio_url), hint: card.audio.duration, title: card.track.label });
+  const controls = createControls(player, { slug, what: by, source: audioTrack, words: { none: "This track has no audio yet.", failed: "This track did not load. Tap play to try again." } });
 
   const likeCount = h("span", { class: "n" });
   const likeBtn = h("button", { type: "button", class: "chip like", "aria-pressed": "false" }, icon("heart"), h("span", { class: "spinner", "aria-hidden": "true" }), likeCount);
@@ -368,60 +366,17 @@ function createCard(track) {
   talkBtn.setAttribute("aria-controls", thread.id);
 
   const el = h("article", { class: "track", id: `tbz-track-${slug}`, "data-audio": "idle" },
-    h("div", { class: "track-top" }, playBtn,
+    h("div", { class: "track-top" }, controls.playBtn,
       h("div", { class: "track-main" },
         h("div", { class: "track-title" }, title, tag),
-        h("div", { class: "scrub-row" }, scrub, time),
-        audioNote)),
+        controls.scrubRow,
+        controls.note)),
     h("div", { class: "actions" }, likeBtn, talkBtn, shareBtn),
     msg, sharePanel, thread.el);
 
   Object.assign(card, { el, likeBtn, shareBtn, sharePanel, shareNote, shareLink, smsBtn, copyBtn, copyText, thread, tag });
 
-  // Audio
-  const audioTrack = () => ({ slug, url: safeMediaUrl(card.track.audio_url), hint: card.audio.duration, title: card.track.label });
-  const togglePlay = () => {
-    const t = audioTrack();
-    if (!t.url) { audioNote.textContent = "This track has no audio yet."; return; }
-    player.toggle(t);
-  };
-  playBtn.addEventListener("click", togglePlay);
-  let dragging = false;
-  const fractionAt = (ev) => {
-    const box = scrub.getBoundingClientRect();
-    return box.width ? Math.min(1, Math.max(0, (ev.clientX - box.left) / box.width)) : 0;
-  };
-  scrub.addEventListener("pointerdown", (ev) => {
-    if (ev.button > 0) return;
-    if (!player.isCurrent(slug)) { togglePlay(); return; } // a tap on the bar of a resting track plays it
-    dragging = true;
-    try { scrub.setPointerCapture(ev.pointerId); } catch {}
-    player.seek(slug, fractionAt(ev));
-  });
-  scrub.addEventListener("pointermove", (ev) => { if (dragging) player.seek(slug, fractionAt(ev)); });
-  const endDrag = () => { dragging = false; };
-  scrub.addEventListener("pointerup", endDrag);
-  scrub.addEventListener("pointercancel", endDrag);
-  seek.addEventListener("input", () => player.seek(slug, Number(seek.value) / 1000));
-
-  card.renderAudio = () => {
-    const a = card.audio;
-    const live = a.status === "playing" || a.status === "loading" || a.status === "buffering";
-    el.dataset.audio = a.status;
-    playBtn.setAttribute("aria-label", `${live ? "Pause" : "Play"} ${by()}`);
-    const fraction = a.duration ? Math.min(1, a.time / a.duration) : 0;
-    scrub.style.setProperty("--p", `${(fraction * 100).toFixed(2)}%`);
-    if (!dragging) seek.value = String(Math.round(fraction * 1000));
-    seek.disabled = !player.isCurrent(slug);
-    seek.setAttribute("aria-label", `Position in ${by()}`);
-    seek.setAttribute("aria-valuetext", `${formatClock(a.time)} of ${formatClock(a.duration)}`);
-    time.textContent = `${formatClock(a.time)} / ${formatClock(a.duration)}`;
-    audioNote.textContent =
-      a.status === "error" ? "This track did not load. Tap play to try again."
-      : a.status === "loading" ? (a.slow ? "Still loading. Your connection is slow." : "Loading…")
-      : a.status === "buffering" ? (a.slow ? "Still buffering. Your connection is slow." : "Buffering…")
-      : "";
-  };
+  card.renderAudio = () => controls.render(el, card.audio);
 
   // Like, comments, share
   let msgTimer = null;

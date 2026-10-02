@@ -333,7 +333,7 @@ test("gate markup: three required fields, email first and largest, opt-in untick
   assert.ok(gate.includes('<label for="tbz-gate-code">6-digit code</label>'));
   assert.match(code, /aria-describedby="tbz-gate-code-sent tbz-gate-code-help tbz-gate-code-error"/, "a screen reader hears where the code went, how long it lasts, and what went wrong");
   assert.match(gate, /<p id="tbz-gate-code-sent" class="code-sent">We sent a code to <strong id="tbz-gate-code-to"><\/strong>\.<\/p>/);
-  assert.match(gate, /<p id="tbz-gate-code-help" class="code-help">It works for 10 minutes\./);
+  assert.match(gate, /<p id="tbz-gate-code-help" class="code-help">It works for 10 minutes\. <strong>Not in your inbox\? Look in your spam or junk folder\.<\/strong><\/p>/, "the code email can land in spam (it did on the first live test), so the step says where to look");
   assert.match(gate, /<p id="tbz-gate-code-error" class="field-error" role="alert" hidden><\/p>/);
   assert.match(gate, /<p id="tbz-gate-code-note" class="code-note" role="status" hidden><\/p>/);
   assert.match(gate, /<button type="button" id="tbz-gate-resend" class="link-btn" disabled>Send a new code<\/button>/, "resend is a real button, off until its wait is over");

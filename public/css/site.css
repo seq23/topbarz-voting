@@ -297,6 +297,7 @@ dialog::backdrop { background: rgb(0 0 0 / 0.78); }
   font-size: 1.7rem; font-weight: 700; text-align: center; letter-spacing: 0.3em; font-variant-numeric: tabular-nums;
 }
 .code-help { font-size: 0.86rem; color: var(--mute); }
+.code-help strong { color: var(--peach); font-weight: 600; }
 .code-note { font-size: 0.9rem; font-weight: 600; color: var(--peach); }
 .code-actions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 16px; }
 .code-actions .link-btn { min-height: 44px; margin: 0; }

@@ -64,6 +64,29 @@ Production commands; add `-preview --env preview` to the database name for previ
 - `npm ci`, then `npm run dev:seed` (local database + the 4 test tracks + the 4 test photos), then `npm run dev` → http://localhost:8788.
 - `npm run check` runs every test (about 30 seconds).
 
+## The page (front end)
+Static files in `public/`, no framework and no build step: what is in the folder is what ships.
+
+| File | What it is |
+|---|---|
+| `public/index.html` | The page and every word on it, including the gate popup. |
+| `public/privacy.html` | The privacy note, at `/privacy`. |
+| `public/css/site.css` | All styling. The brand colours are the variables at the top. |
+| `public/js/logic.js` | The rules with no screen in them (share text, sms link, countdown, like state). Unit-tested. |
+| `public/js/app.js`, `player.js`, `comments.js`, `gate.js`, `gallery.js`, `api.js`, `dom.js` | The page itself: polling and cards, audio, comments and GIFs, the gate, the photo slider, requests and the remembered voter, small helpers. |
+| `public/_headers` | Security headers for the static files. The page may load only its own files and GIFs from Giphy. |
+
+- **Brand assets.** Colours and typefaces are topbarz.xyz's own: orange `hsl(16.91 100% 56.86%)`, peach `hsl(31.65 90.1% 80.2%)`, off-white, black; headings in Dela Gothic One, text in Epilogue. The two font files in `public/fonts/` are the same files topbarz.xyz serves, hosted here so the page makes no outside request. `public/img/logo.png` is the Top Barz lockup taken from Scooter's mockup PDF (topbarz.xyz has no logo image: its header is the words in Dela Gothic One). `public/img/og.png` (1200×630) is the picture a text or Instagram shows for the link; `favicon.png` and `apple-touch-icon.png` are the logo on black. To change one, replace the file under the same name and size.
+- **Changing words.** Edit `public/index.html`. `npm test` proofreads it: "Top Barz" as two words, JUMP IN THE BOOTH, "for them and their friends", the locked prize wording, and the voting-ends line, which must match the end time in `functions/_lib/config.js` (the live page then rewrites that line from the server's end time).
+- **How the countdown gets its time.** From the server, never the phone. Every `/api/state` answer carries the server's clock (`now`, and the `Date` header); between answers the page adds elapsed time from a timer the phone's clock setting cannot move. At zero the page shows "Voting closed" by itself and asks the server; the server refuses late likes and comments whatever the page shows.
+- **Counts.** The page polls `/api/state` every 7 s, stops while the tab is hidden, and catches up when it is shown. After a voter's own like or comment, an older cached answer is ignored for that track, so the number never jumps back.
+- **The remembered voter.** After the gate the browser keeps a signed token and a first name (localStorage `tbz.voter`, cookie `tbz_voter`), never the email. "Not you?" in the footer forgets them on that device. A token the server no longer accepts is forgotten and the gate shows at the next like.
+- **Share links** use the address the page is open at (`https://voting.topbarz.xyz/#<slug>` in production), so a shared link always opens. iPhone gets `sms:&body=…`, Android `sms:?body=…`, a desktop copies the link.
+- **Link previews.** The Open Graph tags point at `https://voting.topbarz.xyz/img/og.png`, so the preview picture appears once the DNS record for voting.topbarz.xyz exists.
+- **GIF picker.** Hidden while `/api/state` says `giphy.available: false`; it appears by itself after the key is set (Secrets, above).
+- **No tracks or photos yet:** the page says the tracks land soon, hides the slider and the VOTE button, and keeps polling, so loaded tracks appear without a reload.
+- **Check it in a browser** (there is no browser suite in CI): on staging, like a track (the gate appears once), refresh (the heart stays), comment, share, open `/#<slug>`, then close and reopen the window (next section). Afterwards remove the test voter: `npx wrangler d1 execute topbarz-voting-preview --remote --env preview --command "DELETE FROM comments WHERE voter_id IN (SELECT id FROM voters WHERE email LIKE 'fe-test-%@example.com'); DELETE FROM like_events WHERE voter_id IN (SELECT id FROM voters WHERE email LIKE 'fe-test-%@example.com'); DELETE FROM voters WHERE email LIKE 'fe-test-%@example.com'"`
+
 ## The API a front end calls
 Same origin, JSON in and out. Every error is `{ "error": "<code>", "message": "<plain words to show>" }` with a 4xx/5xx status.
 
@@ -111,7 +134,7 @@ Same origin, JSON in and out. Every error is `{ "error": "<code>", "message": "<
 
 **`GET /api/giphy/trending`** and **`GET /api/giphy/search?q=fire`** → `{ "available": true, "results": [{ "id", "title", "url", "width", "height", "preview_url", "preview_width", "preview_height" }] }`, at most 12. Debounce the search box about 450 ms and ask for at least two letters. Show `preview_url` in the grid and send `{ id, url }` with the comment. `limited: true` means the hourly budget is spent: show what came back (maybe nothing) and a line saying GIFs are busy. Giphy's terms need a "Powered by GIPHY" mark on the picker.
 
-**Share text** (built in the page, from the track label): `<label> wants you to vote on their track from the Top Barz experience https://voting.topbarz.xyz/#<slug>`.
+**Share text** (built in the page, from the track label): `<label> wants you to vote on their track from the Top Barz experience https://voting.topbarz.xyz/#<slug>` (the link is on whatever address the page is open at; see "The page").
 
 ## Limits (functions/_lib/config.js)
 Per hour: 40 sign-ups per IP, 10 per email. Per minute: 60 likes per voter, 240 per IP. Comments: 10 per voter per 5 minutes, 120 per IP per hour. GIF searches: 30 per IP per minute. Over a limit is a 429 `rate_limited` with a `message` to show.

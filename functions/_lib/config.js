@@ -11,6 +11,7 @@ export const LIMITS = {
   commentsPerIp: { window: 3600, max: 120 },
   commentsPerVoter: { window: 300, max: 10 },
   giphyPerIp: { window: 60, max: 30 },
+  verifyPerIp: { window: 600, max: 40 },
 };
 export const COMMENT_MAX_CHARS = 500;
 export const NAME_MAX_CHARS = 80;
@@ -18,6 +19,24 @@ export const STATE_CACHE_SECONDS = 5;
 
 // Giphy beta key: 100 upstream calls per hour for the whole site. We stop at 90 in any rolling hour.
 export const GIPHY = { budgetPerHour: 90, searchTtl: 30 * 60, trendingTtl: 60 * 60, pageSize: 12, rating: "pg-13" };
+
+// Email verification (the 6-digit code; functions/_lib/verify.js). The mail account is shared with
+// another business and allows 100 emails a day, so voting sends AT MOST 50 code emails in any
+// rolling 24 hours. THE ONE PLACE that number is written. Times are seconds unless named ms.
+export const VERIFICATION = {
+  dailySendBudget: 50,
+  codeTtl: 10 * 60,
+  maxTries: 5,
+  resendCooldown: 60,
+  sendsPerEmailPerHour: 3,
+  from: "Top Barz Voting <voting@events.westpeek.live>",
+  resendEndpoint: "https://api.resend.com/emails",
+  dohEndpoint: "https://cloudflare-dns.com/dns-query",
+  domainOkTtl: 7 * 24 * 3600,
+  domainBadTtl: 3600,
+  sendTimeoutMs: 8000,
+  dnsTimeoutMs: 3000,
+};
 
 function parseTime(value) {
   if (typeof value !== "string" || !value.trim()) return null;
@@ -54,4 +73,11 @@ export function giphyStatus(env) {
 }
 export function gateStatus(env) {
   return env?.VOTER_TOKEN_SECRET ? { available: true } : { available: false, reason: "token_secret_missing" };
+}
+// The code step is on only when the switch says so AND there is a key to send mail with.
+// Otherwise the gate behaves exactly as it did before codes existed.
+export function verificationStatus(env) {
+  if (env?.EMAIL_VERIFICATION !== "on") return { available: false, reason: "switched_off" };
+  if (!env?.RESEND_API_KEY) return { available: false, reason: "no_key" };
+  return { available: true };
 }

@@ -23,7 +23,7 @@ const getState = (e = env, fresh = true) => { if (fresh) state._resetStateMemo()
 test("state lists active tracks in order with counts, the end time, closed, photos and named states", async () => {
   const res = await getState();
   assert.equal(res.status, 200);
-  assert.deepEqual(Object.keys(res.body).sort(), ["closed", "gate", "giphy", "now", "photos", "tracks", "voting_ends_at"]);
+  assert.deepEqual(Object.keys(res.body).sort(), ["closed", "gate", "giphy", "now", "photos", "tracks", "verification", "voting_ends_at"]);
   assert.deepEqual(res.body.tracks, [
     { slug: "brian", label: "Brian", audio_url: "/media/tracks/brian-abc123.mp3", duration_ms: 60000, likes: 0, comments: 0 },
     { slug: "caleb", label: "Caleb", audio_url: "/media/tracks/caleb-abc123.mp3", duration_ms: 60000, likes: 0, comments: 0 },
@@ -33,6 +33,7 @@ test("state lists active tracks in order with counts, the end time, closed, phot
   assert.equal(res.body.voting_ends_at, "2026-10-12T06:59:00.000Z");
   assert.deepEqual(res.body.photos, [], "no manifest = no photos = the slider hides");
   assert.deepEqual(res.body.gate, { available: true });
+  assert.deepEqual(res.body.verification, { available: false, reason: "switched_off" }, "email codes are named too (this env has no switch); tests/verify.test.mjs covers on");
 });
 
 test("a missing Giphy key or signing secret is a named state in /api/state, never silently off", async () => {

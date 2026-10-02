@@ -100,7 +100,7 @@ try {
   ok(asked.status === 200 && asked.body.verification === "code_sent" && asked.body.sent === true && asked.body.resend_in_seconds === 60 && asked.body.expires_in_seconds === 600 && !tokenIn(asked), "POST /api/voters emails a code and returns NO token");
   const mail = mailbox[0] ?? {};
   const code = /^([0-9]{6}) is your Top Barz voting code$/.exec(mail.subject ?? "")?.[1];
-  ok(mailbox.length === 1 && code && mail.to?.[0] === "smoke.tester@example.com" && mail.from === "Top Barz Voting <voting@joinwestpeek.com>" && mail.text.includes(code) && mail.html.includes(code) && mail.auth === "Bearer smoke-only-not-a-key", "one email went to the mail service: the code, from Top Barz Voting, to that address");
+  ok(mailbox.length === 1 && code && mail.to?.[0] === "smoke.tester@example.com" && mail.from === "Top Barz Voting <topbarz@joinwestpeek.com>" && mail.text.includes(code) && mail.html.includes(code) && mail.auth === "Bearer smoke-only-not-a-key", "one email went to the mail service: the code, from Top Barz Voting, to that address");
   const again = await post("/api/voters", { name: "Smoke Tester", email: "smoke.tester@example.com", city: "Brooklyn" });
   ok(again.status === 200 && again.body.sent === false && again.body.resend_in_seconds > 0 && mailbox.length === 1 && !tokenIn(again), "asking again inside the cooldown sends nothing and returns no token");
   const wrong = await post("/api/voters/verify", { email: "smoke.tester@example.com", code: code === "000000" ? "000001" : "000000" });

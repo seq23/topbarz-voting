@@ -30,6 +30,11 @@ const like = (token) => call(likes.onRequest, env, { method: "POST", path: "/api
 const nowS = () => Math.floor(Date.now() / 1000);
 // Moves a voter's sends (and so their cooldown and hourly window) into the past.
 const ageSends = async (email, seconds) => env.DB.prepare("UPDATE email_sends SET sent_at = sent_at - ?2 WHERE voter_id = (SELECT id FROM voters WHERE email_key = ?1)").bind(email, seconds).run();
+// Exact-second boundaries need the clock held still: wait for the start of a second, then set the
+// send's age absolutely, so the next call is judged in that same second (ageSends is relative and
+// drifts by one whenever a second ticks over mid-test).
+const startOfSecond = async () => { while (Date.now() % 1000 > 300) await new Promise((r) => setTimeout(r, 20)); };
+const setSendAge = async (email, seconds) => { await startOfSecond(); return env.DB.prepare("UPDATE email_sends SET sent_at = ?2 WHERE voter_id = (SELECT id FROM voters WHERE email_key = ?1)").bind(email, nowS() - seconds).run(); };
 const sendsCounted = async () => (await env.DB.prepare("SELECT COUNT(*) AS n FROM email_sends WHERE counted = 1 AND sent_at > ?1").bind(nowS() - 86400).first()).n;
 async function spendBudget(leave = 0) {
   await env.DB.prepare("INSERT OR IGNORE INTO voters (name, email, email_key, city, created_at) VALUES ('Filler', 'filler@example.com', 'filler@example.com', 'X', '2026-10-01T00:00:00.000Z')").run();
@@ -60,7 +65,7 @@ test("the numbers are the owner's: 50 emails a day, 10 minutes, 5 tries, 60 s, 3
   assert.equal(VERIFICATION.maxTries, 5);
   assert.equal(VERIFICATION.resendCooldown, 60);
   assert.equal(VERIFICATION.sendsPerEmailPerHour, 3);
-  assert.equal(VERIFICATION.from, "Top Barz Voting <voting@joinwestpeek.com>");
+  assert.equal(VERIFICATION.from, "Top Barz Voting <topbarz@joinwestpeek.com>");
   assert.equal(VERIFICATION.resendEndpoint, "https://api.resend.com/emails");
   assert.equal(VERIFICATION.dohEndpoint, "https://cloudflare-dns.com/dns-query");
   // The daily budget is written once: no other shipped file restates it next to "budget".
@@ -105,7 +110,7 @@ test("happy path: the gate emails a code and gives no token; the code gives the 
   const sent = mail.sent[0];
   assert.equal(sent.method, "POST");
   assert.equal(sent.headers.get("authorization"), `Bearer ${TEST_MAIL_KEY}`);
-  assert.equal(sent.body.from, "Top Barz Voting <voting@joinwestpeek.com>");
+  assert.equal(sent.body.from, "Top Barz Voting <topbarz@joinwestpeek.com>");
   assert.deepEqual(sent.body.to, ["happy.path@example.com"]);
   assert.match(sent.code, /^[0-9]{6}$/);
   assert.equal(sent.body.subject, `${sent.code} is your Top Barz voting code`);
@@ -229,9 +234,9 @@ test("resend cooldown: asking again inside 60 s sends nothing and shows the code
   assert.ok(again.body.expires_in_seconds > 590 && again.body.expires_in_seconds <= 600);
   assert.ok(!TOKEN_RE.test(again.text));
   assert.equal(mail.attempts.length, 1, "no second email inside the cooldown");
-  await ageSends("cooldown@example.com", 39);
+  await setSendAge("cooldown@example.com", 59);
   assert.equal((await gate("cooldown@example.com")).body.sent, false, "59 s is still inside");
-  await ageSends("cooldown@example.com", 2);
+  await setSendAge("cooldown@example.com", 60);
   const resend = await gate("cooldown@example.com");
   assert.deepEqual([resend.body.verification, resend.body.sent, resend.body.resend_in_seconds], ["code_sent", true, 60]);
   assert.equal(mail.sent.length, 2);

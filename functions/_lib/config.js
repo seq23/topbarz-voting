@@ -32,7 +32,7 @@ export const VERIFICATION = {
   sendsPerEmailPerHour: 3,
   // The sending domain decides inbox or spam (measured 2 Oct 2026, see RUNBOOK "Sender and spam").
   // The Resend key is tied to this one domain: change both together.
-  from: "Top Barz Voting <voting@joinwestpeek.com>",
+  from: "Top Barz Voting <topbarz@joinwestpeek.com>",
   resendEndpoint: "https://api.resend.com/emails",
   dohEndpoint: "https://cloudflare-dns.com/dns-query",
   domainOkTtl: 7 * 24 * 3600,

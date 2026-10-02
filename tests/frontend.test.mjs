@@ -11,6 +11,7 @@ import {
   countdownParts, countdownSpoken, detectPlatform, formatClock, formatCountdown, formatEndsLine, gatePayload, holdFrom,
   isVoterToken, likeInitial, likeReduce, likeRequest, likeView, nextPollDelay, POLL_MS, relativeTime, safeGifUrl,
   safeMediaUrl, serverNow, serverTimeOf, shareMessage, slugFromHash, smsHref, syncClock, trackLink, validateGate, voterRecord,
+  COMMENT_FOLD_CHARS, COMMENT_FOLD_LINES, LIKE_WAIT_MS, OWN_KEEP_MS, isLongComment, pruneOwn, readOwn, rememberOwn, rulesEndLine, stripTarget,
 } from "../public/js/logic.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -316,7 +317,7 @@ test("gate markup: three required fields, email first and largest, opt-in untick
   assert.equal([...gate.matchAll(/<button\b[^>]*type="submit"/g)].length, 1);
   assert.match(gate, />Count my vote</);
   assert.match(gate, /One quick step to count your vote/);
-  assert.match(gate, /We use your email to count your vote and to send contest results\.[^<]*<a href="\/privacy"/, "one line on what the email is for, and the privacy note");
+  assert.match(gate, /We use your email to count your vote and to send contest results\.[^<]*<a class="tap-inline" href="\/privacy"/, "one line on what the email is for, and the privacy note (a thumb-sized link)");
   assert.ok(fs.existsSync(path.join(PUBLIC, "privacy.html")));
 
   // The code step: one field a phone can fill from the email, hidden until a code is sent.
@@ -457,11 +458,13 @@ async function gateHarness(t, { answers, store = new Map() }) {
   t.after(() => { globalThis.fetch = realFetch; delete globalThis.document; delete globalThis.localStorage; });
   const { createGate } = await import("../public/js/gate.js");
   const seen = { voters: [], held: [] };
+  const opener = { id: "the-held-track's-button", isConnected: true, focus() { doc.activeElement = opener; } };
   const gate = createGate({
     onVoter: (data) => seen.voters.push(data),
     runHeld: async (action) => { seen.held.push(action); return { ok: true, done: "Vote counted" }; },
     heldLine: (action) => (action ? `held:${action.type}:${action.slug}` : "nothing held"),
     codesOn: () => true,
+    openerFor: (action) => (action ? opener : null),
   });
   const $ = (id) => { const el = doc.getElementById(`tbz-gate${id ? `-${id}` : ""}`); assert.ok(el, `#tbz-gate-${id} is in index.html`); return el; };
   function snapshot() {
@@ -470,7 +473,7 @@ async function gateHarness(t, { answers, store = new Map() }) {
   const fill = (email = "jane@example.com") => { $("email").value = email; $("name").value = "Jane Doe"; $("city").value = "Oakland"; };
   const type = async (digits) => { $("code").value = digits; await $("code").fire("input"); };
   const stored = () => (store.has("tbz.pending") ? JSON.parse(store.get("tbz.pending")) : null);
-  return { gate, $, calls, seen, store, stored, fill, type, snapshot, doc, tick: (ms) => t.mock.timers.tick(ms) };
+  return { gate, $, calls, seen, store, stored, fill, type, snapshot, doc, opener, tick: (ms) => t.mock.timers.tick(ms) };
 }
 const LIKE = { type: "like", slug: "brian", liked: true };
 const SENT = { verification: "code_sent", sent: true, email: "jane@example.com", resend_in_seconds: 60, expires_in_seconds: 600 };
@@ -553,6 +556,7 @@ test("code step: an expired or used-up code says so and offers a new one; the ho
   await h.type("222222");
   assert.deepEqual([h.$("code-error").hidden, h.$("code-error").textContent], [false, "Too many wrong tries. Send a new code."]);
   assert.equal(h.$("submit").disabled, true, "a dead code cannot be tried again");
+  assert.deepEqual([h.$("code").disabled, h.$("code").value], [true, ""], "and its field is off and empty: nothing on the step looks usable that does nothing");
   assert.deepEqual([h.$("resend").disabled, h.$("resend").textContent], [false, "Send a new code"]);
   assert.equal(h.doc.activeElement, h.$("resend"), "focus moves to the way forward");
   await h.type("333333");
@@ -572,13 +576,14 @@ test("code step: an expired or used-up code says so and offers a new one; the ho
   await h.$("resend").fire("click");
   assert.deepEqual([h.$("code-note").hidden, h.$("code-note").textContent], [false, "A new code is on its way."]);
   assert.deepEqual([h.$("code-error").hidden, h.$("submit").disabled, h.$("error").hidden], [true, false, true]);
+  assert.equal(h.$("code").disabled, false, "the new code's field takes typing again");
   assert.equal(h.doc.activeElement, h.$("code"));
   assert.equal(h.$("resend").textContent, "Send a new code in 60 s");
 
   // Expired, as the server says it…
   await h.type("444444");
   assert.equal(h.$("code-error").textContent, "That code has expired. Send a new one.");
-  assert.equal(h.$("submit").disabled, true);
+  assert.deepEqual([h.$("submit").disabled, h.$("code").disabled], [true, true]);
   // …the cap of three an hour…
   h.tick(60_000);
   await h.$("resend").fire("click");
@@ -600,8 +605,23 @@ test("code step: a code that runs out while the popup is open says so by itself"
   assert.equal(h.$("code-error").hidden, true);
   h.tick(1000);
   assert.deepEqual([h.$("code-error").hidden, h.$("code-error").textContent, h.$("submit").disabled], [false, "That code has expired. Send a new one.", true]);
+  assert.equal(h.$("code").disabled, true, "the field goes off with the code");
   assert.equal(h.doc.activeElement, h.$("resend"));
   assert.equal(h.calls.length, 1);
+});
+
+test("code step: a code that dies while the resend wait is still running puts the keyboard on Send a new code when the wait ends", async (t) => {
+  const h = await gateHarness(t, { answers: [[200, SENT], [410, { error: "code_exhausted", message: "Too many wrong tries. Send a new code." }]] });
+  h.gate.open(LIKE, null);
+  h.fill();
+  await h.$("form").fire("submit");
+  h.tick(10_000);
+  await h.type("222222");
+  assert.deepEqual([h.$("code").disabled, h.$("resend").disabled, h.$("resend").textContent], [true, true, "Send a new code in 50 s"], "dead, and the way forward says when it opens");
+  assert.notEqual(h.doc.activeElement, h.$("resend"));
+  h.tick(50_000);
+  assert.deepEqual([h.$("resend").disabled, h.$("resend").textContent], [false, "Send a new code"]);
+  assert.equal(h.doc.activeElement, h.$("resend"), "the one control that helps is in focus the moment it works");
 });
 
 test("skipped goes straight through with no code step; code_unavailable shows its message", async (t) => {
@@ -653,6 +673,10 @@ test("closing the popup or refreshing mid-step returns the voter to the code ste
   assert.deepEqual([again.$("").open, again.$("details").hidden, again.$("code-step").hidden, again.$("code-to").textContent], [true, true, false, "jane@example.com"]);
   assert.equal(again.$("held").textContent, "held:like:caleb");
   assert.match(again.$("resend").textContent, /^Send a new code in [0-9]+ s$/, "the countdown carries on from where it was");
+  // Closed after a reload, the keyboard goes back to the held track's own button, not to nowhere.
+  await again.$("close").fire("click");
+  assert.equal(again.doc.activeElement, again.opener, "focus returns to the button the held like belongs to");
+  again.gate.open(other, again.opener);
   await again.type("123456");
   assert.deepEqual(again.calls[0].body, { email: "jane@example.com", code: "123456" });
   assert.deepEqual(again.seen.held, [{ type: "like", slug: "caleb", liked: true }]);
@@ -679,6 +703,275 @@ test("closing the popup or refreshing mid-step returns the voter to the code ste
   stale.gate.open(LIKE, null);
   assert.deepEqual([stale.$("code-step").hidden, stale.$("code-error").textContent, stale.$("submit").disabled, stale.$("resend").disabled], [false, "That code has expired. Send a new one.", true, false]);
   assert.equal(stale.doc.activeElement, stale.$("resend"));
+});
+
+// ── The final pass (hostile review, 2 Oct 2026): each defect it fixed is pinned here ─────────
+const CSS = () => read("css/site.css");
+const cssRule = (selector) => {
+  const esc = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?:^|\\n)${esc} \\{([^}]*)\\}`).exec(CSS())?.[1] ?? "";
+};
+const token = (name) => new RegExp(`--${name}: ([^;]+);`).exec(CSS())?.[1]?.trim() ?? "";
+const px = (value) => { const m = /^(-?[0-9.]+)px$/.exec(value); return m ? Number(m[1]) : NaN; };
+// A colour token → [r, g, b]: #rgb / #rrggbb / hsl(h s% l%) as the stylesheet writes them.
+function rgbOf(value) {
+  let m = /^#([0-9a-f]{3})$/i.exec(value);
+  if (m) return [...m[1]].map((c) => parseInt(c + c, 16));
+  m = /^#([0-9a-f]{6})$/i.exec(value);
+  if (m) return [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16));
+  m = /^hsl\(([0-9.]+) ([0-9.]+)% ([0-9.]+)%\)$/.exec(value);
+  assert.ok(m, `a colour this test can read: ${value}`);
+  const [h, s, l] = [Number(m[1]), Number(m[2]) / 100, Number(m[3]) / 100];
+  const k = (n) => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  return [0, 8, 4].map((n) => Math.round(255 * (l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1))))));
+}
+function contrast(a, b) {
+  const lum = (rgb) => { const [r, g, bl] = rgb.map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * bl; };
+  const [x, y] = [lum(rgbOf(token(a))), lum(rgbOf(token(b)))].sort((p, q) => q - p);
+  return (x + 0.05) / (y + 0.05);
+}
+
+test("header: the slogan never touches the logo (air between them at every width)", () => {
+  const top = cssRule(".top");
+  const logo = cssRule(".logo");
+  assert.ok(!/\bgap:/.test(top), "the space is the logo's own margin, not a small gap");
+  const m = /margin-bottom: var\(--(space-[0-9]+)\)/.exec(logo);
+  assert.ok(m, ".logo sets the space under itself from the spacing scale");
+  assert.ok(px(token(m[1])) >= 28, `at least 28px under the logo on a phone (it was 6px): ${token(m[1])}`);
+  const wide = /@media \(min-width: 45rem\) \{[\s\S]*?\n\}/.exec(CSS())[0];
+  const w = /\.logo \{ margin-bottom: var\(--(space-[0-9]+)\); \}/.exec(wide);
+  assert.ok(w && px(token(w[1])) >= px(token(m[1])), "and no less on a desktop");
+});
+
+test("brand: the page is set the way topbarz.xyz is (its ellipse buttons, its type, its colours)", () => {
+  // Values read from https://www.topbarz.xyz/ on 2 Oct 2026 (RUNBOOK.md, "The page").
+  const btn = cssRule(".btn");
+  assert.match(btn, /border: var\(--line-btn\) solid var\(--color-accent\); border-radius: 100%;/, "buttons are the site's ellipse");
+  assert.equal(token("line-btn"), "4px", "with its 4px line");
+  assert.match(btn, /min-height: 59px;/, "at its height");
+  assert.match(btn, /font: 400 var\(--text-base\)\/1\.2 var\(--font-body\); text-transform: uppercase;/, "capitals in Epilogue 400, not bold");
+  assert.match(btn, /white-space: nowrap;/, "and a button's words never wrap");
+  assert.match(cssRule(".slogan"), /font: italic 400 var\(--text-display\)\/1\.09 var\(--font-display\); letter-spacing: var\(--tracking-display\);/, "the slogan is slanted and tight, as the site sets it");
+  assert.equal(token("tracking-display"), "-0.02em");
+  assert.match(token("text-display"), /^clamp\(2\.145rem, .+, 3\.208rem\)$/, "34px on a phone to 51px on a desktop");
+  assert.equal(token("color-accent"), "hsl(16.91 100% 56.86%)");
+  assert.equal(token("color-warm"), "hsl(31.65 90.1% 80.2%)");
+  assert.equal(token("color-ink"), "hsl(60 9.09% 97.84%)");
+  assert.equal(token("color-accent-ink"), "hsl(210 7.41% 10.59%)");
+  assert.match(cssRule(".foot"), /background: var\(--color-warm\); color: var\(--color-warm-ink\);/, "the closing section is the site's peach, with dark text");
+  assert.ok(!/border-radius: (?!0\b|50%|100%|99px|999px)/.test(CSS()), "no rounded rectangles: square, a circle, a pill or the ellipse");
+  assert.ok(!/font-weight: 700/.test(CSS().replace(/\.field-code input \{[^}]*\}/, "")), "nothing is bold but the code's digits");
+});
+
+test("tokens: every colour and typeface on the page is a named token, and motion is named per property", () => {
+  const css = CSS();
+  assert.match(css, /^\/\* Hallmark · macrostructure: [^\n]+\n(?:[^\n]*\n){1,5}?[^\n]*pre-emit critique: P[1-5] H[1-5] E[1-5] S[1-5] R[1-5] V[1-5]/, "the stylesheet opens with its stamp");
+  const root = /:root \{([\s\S]*?)\n\}/.exec(css)[1];
+  const rest = css.replace(root, "").replace(/@font-face \{[\s\S]*?\}/g, "");
+  const literals = [...rest.matchAll(/#[0-9a-fA-F]{3,8}\b|\b(?:rgb|rgba|hsl|hsla|oklch)\([^)]*\)/g)].map((m) => m[0]).filter((v) => v !== "#000");
+  assert.deepEqual(literals, [], "a colour written outside :root");
+  assert.equal([...rest.matchAll(/#000/g)].length, 2, "the only #000 outside :root is the scrub bar's mask (a mask, not a colour)");
+  assert.ok(!/font-family:/.test(rest), "typefaces come from --font-display and --font-body");
+  assert.ok(!/transition: all|transition:[^;]*\ball\b/.test(css), "never transition: all");
+  assert.ok(!/z-index: [0-9]/.test(css), "layers are named");
+  for (const el of ["html", "body"]) assert.match(css, new RegExp(`\\n${el} \\{[^}]*overflow-x: clip;`), `${el} cannot scroll sideways`);
+  assert.match(cssRule(".gif-grid"), /repeat\(3, minmax\(0, 1fr\)\)/, "a grid of images cannot push the page wider");
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\s*\*, \*::before, \*::after \{ animation: none !important; transition: none !important;/);
+});
+
+test("contrast: text, field edges and focus rings pass on every surface they sit on", () => {
+  for (const paper of ["color-paper", "color-paper-2", "color-paper-3"]) {
+    assert.ok(contrast("color-accent", paper) >= 4.5, `orange text on ${paper}: ${contrast("color-accent", paper).toFixed(2)}`);
+    assert.ok(contrast("color-ink-2", paper) >= 4.5, `quiet text on ${paper}`);
+    assert.ok(contrast("color-error", paper) >= 4.5, `error text on ${paper}`);
+    assert.ok(contrast("color-field-line", paper) >= 3, `a field's edge on ${paper} (it was 2.1:1): ${contrast("color-field-line", paper).toFixed(2)}`);
+    assert.ok(contrast("color-off", paper) >= 3, `an unplayed bar / a switched-off chip on ${paper}`);
+  }
+  assert.ok(contrast("color-accent-ink", "color-accent") >= 4.5, "text on an orange button");
+  assert.ok(contrast("color-warm-ink", "color-warm") >= 7, "text on peach");
+  assert.ok(contrast("color-accent", "color-warm") < 3, "orange on peach does NOT pass…");
+  const foot = [...CSS().matchAll(/\n(\.foot[^{]*) \{([^}]*)\}/g)];
+  assert.ok(foot.length >= 8);
+  for (const [, selector, body] of foot) assert.ok(!/color: var\(--color-accent\)/.test(body), `…so nothing in the peach section is orange: ${selector}`);
+  assert.match(cssRule(".foot"), /--color-focus: var\(--color-warm-ink\);/, "and its focus ring is dark, not peach on peach");
+  const fields = /\.compose-input, \.gif-search, \.field input, \.share-link \{([^}]*)\}/.exec(CSS())[1];
+  assert.match(fields, /border: 2px solid var\(--color-field-line\);/);
+  assert.match(fields, /outline: 2px solid transparent; outline-offset: 1px;/, "the focus ring's place is kept, so focus moves nothing");
+  const states = [...CSS().matchAll(/\n([^{}\n]*(?:input|compose-input|gif-search|share-link)[^{}\n]*(?::focus|:disabled|:hover|\[aria-invalid)[^{}\n]*) \{([^}]*)\}/g)];
+  assert.ok(states.length >= 3, "the fields' focus, invalid and disabled rules were read");
+  for (const [, selector, body] of states) assert.ok(!/border(?:-width)?:/.test(body), `no field changes its line weight between states: ${selector}`);
+});
+
+test("touch: every control is a thumb-sized target, and has a pressed and an off state", () => {
+  assert.equal(token("tap"), "44px");
+  assert.match(cssRule(".foot-links a"), /min-height: var\(--tap\);/, "footer links (they were 15px tall)");
+  assert.match(cssRule(".tap-inline"), /padding-block: 13px; margin-block: -13px;/, "a link inside a sentence");
+  const index = read("index.html");
+  assert.equal([...index.matchAll(/<a class="tap-inline"/g)].length, 2);
+  assert.match(/<p class="foot-links">[\s\S]*?<\/p>/.exec(index)[0], /@topbarz\.xyz on Instagram<\/a>\s*<a href="https:\/\/www\.topbarz\.xyz\/">topbarz\.xyz<\/a>\s*<a href="\/privacy">Privacy note<\/a>/);
+  assert.match(cssRule(".chip"), /min-height: var\(--tap\);/);
+  for (const sel of [".btn:active", ".chip:active:not(:disabled)", ".play:active", ".arrow:active:not(:disabled)", ".link-btn:active", ".panel-close:active", ".shot:active img"]) assert.ok(cssRule(sel), `${sel} is styled`);
+  for (const sel of [".btn:disabled", ".chip:disabled", ".arrow:disabled", ".link-btn:disabled", ".field input:disabled"]) assert.ok(cssRule(sel), `${sel} is styled`);
+});
+
+test("like: a like still on its way shows that it is waiting, without flashing on a fast one", () => {
+  assert.ok(LIKE_WAIT_MS >= 150 && LIKE_WAIT_MS <= 600, "long enough not to flash, short enough to be seen");
+  const app = read("js/app.js");
+  assert.match(app, /icon\("heart"\), h\("span", \{ class: "spinner", "aria-hidden": "true" \}\), likeCount\)/, "the like button carries a spinner");
+  assert.match(app, /if \(card\.like\.inflight && waitTimer === null\) waitTimer = setTimeout\(\(\) => showWaiting\(card\.like\.inflight\), LIKE_WAIT_MS\);/);
+  assert.match(app, /if \(!card\.like\.inflight\) \{ clearTimeout\(waitTimer\); waitTimer = null; showWaiting\(false\); \}/, "and stops the moment the server answers");
+  assert.match(app, /likeBtn\.setAttribute\("aria-busy", "true"\)/, "a screen reader is told too");
+  assert.match(cssRule(".like.is-waiting .spinner"), /display: block;/);
+  assert.match(cssRule(".like.is-waiting .ico-heart"), /display: none;/, "the spinner takes the heart's place, so nothing moves");
+});
+
+test("counts: a refresh or a second tab right after a voter's own like or comment shows the new count", async () => {
+  const now = 1_800_000_000_000;
+  const until = now + 1000; // server time before which a cached state cannot contain the like
+  let own = rememberOwn({}, "brian", { likes: 13 }, until, now);
+  assert.deepEqual(own, { brian: { likes: 13, until, saved_at: now } });
+  assert.deepEqual(readOwn(own, "brian", until - 4000, now + 500), { likes: 13, comments: null, until }, "a state built before the like: the remembered count wins");
+  assert.equal(readOwn(own, "brian", until, now + 500), null, "a state built after it: the server's count wins");
+  assert.equal(readOwn(own, "caleb", 0, now), null);
+  own = rememberOwn(own, "brian", { comments: 4 }, until + 3000, now + 2000);
+  assert.deepEqual(own.brian, { likes: 13, comments: 4, until: until + 3000, saved_at: now + 2000 }, "a comment on the same track is kept beside the like");
+  assert.deepEqual(rememberOwn(own, "brian", { likes: 12 }, until - 500, now + 3000).brian.until, until + 3000, "the hold only moves forward");
+  assert.equal(readOwn(own, "brian", 0, now + 2000 + OWN_KEEP_MS + 1), null, "forgotten after a minute");
+  assert.equal(OWN_KEEP_MS, 60_000);
+  assert.deepEqual(rememberOwn({}, "brian", { likes: 1 }, NaN, now), {}, "no hold, nothing kept");
+  assert.deepEqual(pruneOwn({ "../x": { until, saved_at: now }, brian: "13", caleb: { likes: -1, until, saved_at: now, email: "x" } }, now), { caleb: { until, saved_at: now } }, "only well-formed counts are read back, nothing else that was stored");
+  assert.deepEqual(pruneOwn(null, now), {});
+
+  const store = new Map();
+  globalThis.localStorage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
+  try {
+    const { OWN_KEY, loadOwn, saveOwn } = await import("../public/js/api.js");
+    assert.equal(OWN_KEY, "tbz.own");
+    saveOwn(own, now + 2000);
+    assert.deepEqual(loadOwn(now + 2500), own);
+    assert.ok(!/@|token|v1\./.test(store.get(OWN_KEY)), "counts only: no email, no token");
+    assert.deepEqual(loadOwn(now + 2000 + OWN_KEEP_MS + 1), {});
+    saveOwn({}, now);
+    assert.equal(store.size, 0, "an empty record is removed, not stored");
+    store.set(OWN_KEY, "{not json");
+    assert.deepEqual(loadOwn(now), {});
+  } finally { delete globalThis.localStorage; }
+
+  const app = read("js/app.js");
+  const { keepOwn, ownCounts, loadOwn: load2 } = await import("../public/js/api.js");
+  globalThis.localStorage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
+  try {
+    store.clear();
+    keepOwn("brian", { likes: 13 }, until, now);
+    keepOwn("brian", { comments: 4 }, until + 3000, now + 2000);
+    assert.deepEqual(ownCounts(load2(now + 2100), "brian", until - 4000, now + 2100), { likes: 13, comments: 4, until: until + 3000 }, "what a refreshed page reads back");
+  } finally { delete globalThis.localStorage; }
+  assert.match(app, /keepOwn\(card\.slug, \{ likes: card\.like\.serverCount \}, card\.like\.holdUntil\);/, "kept when the server confirms a like");
+  assert.match(app, /keepOwn\(slug, \{ comments: count \}, holdUntil\);/, "and a comment");
+  assert.match(app, /applyOwn\(card, generatedAt, stored\);\n    card\.like = likeReduce\(card\.like, \{ type: "poll"/, "applied before a polled count is believed");
+  assert.match(app, /if \(ev\.key === OWN_KEY\) \{/, "and a tab that is already open follows at once");
+});
+
+test("comments: a very long comment shows its start and a way to read the rest", () => {
+  assert.equal(isLongComment("nice"), false);
+  assert.equal(isLongComment("a".repeat(COMMENT_FOLD_CHARS)), false);
+  assert.equal(isLongComment("a".repeat(COMMENT_FOLD_CHARS + 1)), true);
+  assert.equal(isLongComment(Array.from({ length: COMMENT_FOLD_LINES }, () => "x").join("\n")), false);
+  assert.equal(isLongComment(Array.from({ length: COMMENT_FOLD_LINES + 1 }, () => "x").join("\n")), true, "250 one-letter lines must not take over the page");
+  assert.equal(isLongComment(null), false);
+  assert.match(cssRule(".c-text.is-clamped"), new RegExp(`-webkit-line-clamp: ${COMMENT_FOLD_LINES}; line-clamp: ${COMMENT_FOLD_LINES}; overflow: hidden;`));
+  const js = read("js/comments.js");
+  assert.match(js, /if \(isLongComment\(c\.text\)\) \{/);
+  assert.match(js, /"aria-expanded": String\(open\), text: open \? "Show less" : "Show all"/, "the control says what it does and its state");
+  assert.match(js, /state\.unfolded\.add\(c\.id\)/, "an opened comment stays open when the list is redrawn");
+});
+
+test("closed: nothing on the page still promises a future end, and a like that arrives late is not dropped in silence", () => {
+  const ends = formatEndsLine(Date.parse(VOTING_ENDS_AT));
+  assert.equal(rulesEndLine(false, ends), `Voting ends ${ends}.`);
+  assert.equal(rulesEndLine(true, ends), `Voting ended ${ends}.`);
+  assert.ok(read("index.html").includes(`<li id="tbz-rule-ends">${rulesEndLine(false, ends)}</li>`), "the rules line as shipped is the open one, from the same function");
+  const app = read("js/app.js");
+  assert.match(app, /els\.ruleEnds\.textContent = rulesEndLine\(app\.closed, formatEndsLine\(app\.endMs\)\)/);
+  assert.match(/function setClosed\(closed\) \{[\s\S]*?\n\}/.exec(app)[0], /renderRuleEnds\(\);/, "rewritten the moment the window closes or reopens");
+  assert.match(app, /if \(app\.closed\) \{ setStatus\("late"\); return \{ ok: false \}; \}/, "the gate finished after the close: the page says the action was not counted");
+  assert.match(app, /late: "Voting closed before that went through, so it was not counted\."/);
+});
+
+test("photo strip: one Tab stop however many photos; arrow keys move between them", () => {
+  assert.equal(stripTarget(0, "ArrowRight", 200), 1);
+  assert.equal(stripTarget(199, "ArrowRight", 200), 199, "stops at the last photo");
+  assert.equal(stripTarget(0, "ArrowLeft", 200), 0);
+  assert.equal(stripTarget(57, "ArrowLeft", 200), 56);
+  assert.equal(stripTarget(57, "Home", 200), 0);
+  assert.equal(stripTarget(57, "End", 200), 199);
+  assert.equal(stripTarget(57, "Tab", 200), null, "Tab is not the strip's: it leaves it");
+  assert.equal(stripTarget(0, "ArrowRight", 0), null);
+  assert.equal(stripTarget(900, "ArrowLeft", 4), 2, "an index past the end is pulled back in");
+  const strip = /<ul id="tbz-strip"[^>]*>/.exec(read("index.html"))[0];
+  assert.ok(!/tabindex/.test(strip), "the list itself is not a stop");
+  const js = read("js/gallery.js");
+  assert.match(js, /all\.forEach\(\(btn, n\) => \{ btn\.tabIndex = n === current \? 0 : -1; \}\);/, "exactly one photo is in the Tab order (200 photos were 200 presses before VOTE)");
+  assert.match(js, /const next = stripTarget\(current, ev\.key, photos\.length\);/);
+  assert.match(js, /setCurrent\(0\);\n      requestAnimationFrame\(arrows\);/, "set each time the strip is rebuilt");
+});
+
+test("Back: with a popup open, the phone's Back button closes the popup instead of leaving the page", async () => {
+  const listeners = {};
+  const calls = [];
+  const stack = [null];
+  globalThis.window = { addEventListener: (type, fn) => { (listeners[type] ??= []).push(fn); } };
+  globalThis.history = {
+    get state() { return stack.at(-1); },
+    pushState(state) { stack.push(state); calls.push("push"); },
+    back() { calls.push("back"); stack.pop(); },
+  };
+  globalThis.document = { documentElement: { classList: { add() {}, remove() {} } }, querySelector: () => null };
+  try {
+    const { showModal, closeModal } = await import("../public/js/dom.js?back-button");
+    const dialog = { open: false, showModal() { this.open = true; }, close() { this.open = false; } };
+    const pop = () => listeners.popstate.forEach((fn) => fn({}));
+    let dismissed = 0;
+    const onBack = () => { dismissed += 1; closeModal(dialog); };
+
+    // Back while it is open: the popup's own entry is what Back leaves, and the popup closes.
+    showModal(dialog, onBack);
+    assert.deepEqual([dialog.open, calls.join(), stack.length], [true, "push", 2], "opening adds one history entry");
+    stack.pop(); pop(); // the browser goes back one entry
+    assert.deepEqual([dismissed, dialog.open, calls.join(), stack.length], [1, false, "push", 1], "closed by Back, and the page did not step back a second time");
+
+    // Closed by its own button: the popup's entry is taken back out, and that step closes nothing.
+    showModal(dialog, onBack);
+    closeModal(dialog);
+    assert.deepEqual([dialog.open, calls.join(), stack.length], [false, "push,push,back", 1]);
+    const other = { open: false, showModal() { this.open = true; }, close() { this.open = false; } };
+    let otherDismissed = 0;
+    showModal(other, () => { otherDismissed += 1; closeModal(other); });
+    pop(); // the popstate from the page's own back(), arriving late
+    assert.deepEqual([otherDismissed, other.open], [0, true], "the page's own step back never closes a popup that opened meanwhile");
+    stack.pop(); pop();
+    assert.deepEqual([otherDismissed, other.open], [1, false], "a real Back still does");
+
+    // A dialog opened with no onBack (nothing asked for) touches no history.
+    const plain = { open: false, showModal() { this.open = true; }, close() { this.open = false; } };
+    const before = calls.length;
+    showModal(plain); closeModal(plain);
+    assert.equal(calls.length, before);
+  } finally { delete globalThis.window; delete globalThis.history; delete globalThis.document; }
+  assert.match(read("js/gate.js"), /showModal\(dialog, dismiss\);/, "the gate: Back drops the held action, the code stays good");
+  assert.match(read("js/gallery.js"), /showModal\(box, close\);/, "the full-size photo too");
+  assert.match(read("js/gate.js"), /if \(after\) setTimeout\(after, AFTER_CLOSE_MS\);/, "a held share hands over to Messages only after the popup's entry is gone");
+});
+
+test("phones: the lock screen names the track, and Android and iPhone each get their own text link", () => {
+  assert.match(read("js/player.js"), /navigator\.mediaSession\.metadata = new MediaMetadata\(\{ title: track\.title \|\| "CultureCon track", artist: "Top Barz at CultureCon" \}\)/);
+  assert.match(read("js/app.js"), /hint: card\.audio\.duration, title: card\.track\.label \}\)/);
+  assert.ok(smsHref("android", "a & b").startsWith("sms:?body=a%20%26%20b"), "Android: sms:?body=, with & escaped so the text is not cut");
+  assert.ok(smsHref("ios", "a & b").startsWith("sms:&body=a%20%26%20b"), "iPhone: sms:&body=");
+  const code = /<input id="tbz-gate-code"[^>]*>/.exec(read("index.html"))[0];
+  assert.match(code, /inputmode="numeric"/, "both show the number pad");
+  assert.match(code, /autocomplete="one-time-code"/, "an iPhone offers the code from the email; Android offers it from the clipboard");
 });
 
 // ── Small formatters and guards ──────────────────────────────────────────────────────────────

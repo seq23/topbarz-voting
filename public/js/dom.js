@@ -41,16 +41,44 @@ export function icon(name, extraClass = "") {
 
 export const reducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
 
+// Back (Android's button, a swipe on an iPhone, the browser's arrow) closes an open popup instead
+// of leaving the page: opening one adds a history entry, and going back from it runs `onBack`.
+// Not every phone's browser closes a <dialog> on Back by itself, so the page does not rely on it.
+const backs = new Map(); // open dialog → { onBack, pushed }
+let ownPops = 0; // steps back the page asked for itself (closeModal): they close nothing
+const hist = () => (typeof history === "object" && history ? history : null);
+if (typeof window === "object" && window?.addEventListener) {
+  window.addEventListener("popstate", () => {
+    if (ownPops > 0) { ownPops -= 1; return; }
+    for (const [dialog, entry] of [...backs]) {
+      backs.delete(dialog);
+      if (dialog.open) entry.onBack();
+    }
+  });
+}
+
 // Opens a <dialog> as a modal (focus stays inside it, Escape closes it, the page behind is inert).
-export function showModal(dialog) {
+// onBack: what the Back button does while it is open (close it).
+export function showModal(dialog, onBack = null) {
   if (dialog.open) return;
   if (typeof dialog.showModal === "function") dialog.showModal();
   else dialog.setAttribute("open", "");
   document.documentElement.classList.add("modal-open");
+  if (!onBack || !hist()) return;
+  let pushed = false;
+  try { hist().pushState({ tbzModal: true }, ""); pushed = true; } catch {}
+  backs.set(dialog, { onBack, pushed });
 }
 
 export function closeModal(dialog) {
   if (typeof dialog.close === "function") { if (dialog.open) dialog.close(); }
   else dialog.removeAttribute("open");
   if (!document.querySelector("dialog[open]")) document.documentElement.classList.remove("modal-open");
+  // Closed some other way (its button, Escape, a finished gate): take the popup's own entry back
+  // out, so the next Back leaves the page as it would have. Only an entry this page added.
+  const entry = backs.get(dialog);
+  if (!backs.delete(dialog) || !entry.pushed || !hist()) return;
+  ownPops += 1;
+  setTimeout(() => { ownPops = 0; }, 1000);
+  try { hist().back(); } catch { ownPops = 0; }
 }

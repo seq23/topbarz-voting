@@ -181,6 +181,79 @@ export function holdFrom(dateHeader, fallbackServerNow) {
   return Number.isFinite(fallbackServerNow) ? fallbackServerNow + 6000 : 0;
 }
 
+// A like that has been on the wire this long shows that it is waiting (a spinner in the heart's
+// place). Shorter than this and the answer is already back: a spinner would only flash.
+export const LIKE_WAIT_MS = 400;
+
+// ── What this device itself just changed ─────────────────────────────────────────────────────
+// /api/state is cached for a few seconds, so straight after a voter's own like or comment a
+// refresh (or a second tab) can be handed a count from before it. The page keeps the server's
+// own answer to that like or comment, with the server time before which a cached state cannot
+// contain it (holdFrom), and shows that number until a newer state arrives. Counts only.
+export const OWN_KEEP_MS = 60_000;
+
+// own: { [slug]: { likes?, comments?, until, saved_at } } → the same, with this change added.
+export function rememberOwn(own, slug, patch, until, now) {
+  const next = pruneOwn(own, now);
+  if (typeof slug !== "string" || !Number.isFinite(until) || until <= 0) return next;
+  const entry = { ...(next[slug] ?? {}), until: Math.max(next[slug]?.until ?? 0, until), saved_at: now };
+  for (const key of ["likes", "comments"]) {
+    if (Number.isFinite(Number(patch?.[key])) && patch[key] !== null && patch[key] !== undefined) entry[key] = Math.max(0, Math.floor(Number(patch[key])));
+  }
+  return { ...next, [slug]: entry };
+}
+
+// The remembered counts for a track, or null once a state built at `generatedAt` is new enough
+// to contain them (or nothing is remembered).
+export function readOwn(own, slug, generatedAt, now) {
+  const entry = pruneOwn(own, now)[slug];
+  if (!entry || !(Number(generatedAt) < entry.until)) return null;
+  return { likes: entry.likes ?? null, comments: entry.comments ?? null, until: entry.until };
+}
+
+// Only well-formed entries younger than a minute survive; anything else stored is ignored.
+export function pruneOwn(own, now) {
+  const out = {};
+  if (!own || typeof own !== "object") return out;
+  for (const [slug, e] of Object.entries(own)) {
+    if (!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug) || !e || typeof e !== "object") continue;
+    if (!Number.isFinite(e.until) || !Number.isFinite(e.saved_at) || now - e.saved_at > OWN_KEEP_MS || e.saved_at > now + 60_000) continue;
+    const entry = { until: e.until, saved_at: e.saved_at };
+    if (Number.isFinite(e.likes) && e.likes >= 0) entry.likes = Math.floor(e.likes);
+    if (Number.isFinite(e.comments) && e.comments >= 0) entry.comments = Math.floor(e.comments);
+    out[slug] = entry;
+  }
+  return out;
+}
+
+// ── The rules line about the end of voting ───────────────────────────────────────────────────
+// "Voting ends …" while it is open; once it has closed the page must not promise a future end.
+export function rulesEndLine(closed, endsLine) {
+  return `${closed ? "Voting ended" : "Voting ends"} ${endsLine}.`;
+}
+
+// ── A very long comment ──────────────────────────────────────────────────────────────────────
+// More than 8 lines, or more than 320 characters: the page shows the start and a "Show all".
+export const COMMENT_FOLD_LINES = 8;
+export const COMMENT_FOLD_CHARS = 320;
+export function isLongComment(text) {
+  const t = String(text ?? "");
+  return t.length > COMMENT_FOLD_CHARS || t.split("\n").length > COMMENT_FOLD_LINES;
+}
+
+// ── The photo strip from a keyboard ──────────────────────────────────────────────────────────
+// The strip is ONE Tab stop however many photos it holds: arrow keys move between photos.
+// → the photo to focus next, or null when the key is not one of the strip's.
+export function stripTarget(index, key, count) {
+  if (!(count > 0)) return null;
+  const i = Math.min(Math.max(0, Number(index) || 0), count - 1);
+  if (key === "ArrowRight") return Math.min(count - 1, i + 1);
+  if (key === "ArrowLeft") return Math.max(0, i - 1);
+  if (key === "Home") return 0;
+  if (key === "End") return count - 1;
+  return null;
+}
+
 // ── Polling ──────────────────────────────────────────────────────────────────────────────────
 export const POLL_MS = 7000;
 // After a failed poll: try again soon, then ease off. Never slower than 15 s.

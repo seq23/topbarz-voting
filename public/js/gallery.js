@@ -1,7 +1,7 @@
 // The photo slider: a strip that swipes on a phone, with arrows and arrow keys on a desktop.
 // Thumbnails load lazily; a tap opens the full-size photo. With no photos the section is hidden.
 import { $, closeModal, h, reducedMotion, showModal } from "./dom.js";
-import { safeMediaUrl } from "./logic.js";
+import { safeMediaUrl, stripTarget } from "./logic.js";
 
 export function createGallery() {
   const section = $("tbz-gallery");
@@ -37,11 +37,30 @@ export function createGallery() {
   window.addEventListener("resize", arrows, { passive: true });
   prev.addEventListener("click", () => page(-1));
   next.addEventListener("click", () => page(1));
+  // From a keyboard the strip is one Tab stop, however many photos it holds (200 photos must
+  // not be 200 presses of Tab before the VOTE button): the arrow keys, Home and End move between
+  // photos, and Tab leaves the strip.
+  let current = 0; // the photo that is the strip's Tab stop
+  const shots = () => [...strip.querySelectorAll(".shot")];
+  function setCurrent(i, focus = false) {
+    const all = shots();
+    if (!all.length) return;
+    current = Math.min(Math.max(0, i), all.length - 1);
+    all.forEach((btn, n) => { btn.tabIndex = n === current ? 0 : -1; });
+    if (focus) {
+      all[current].focus({ preventScroll: true });
+      all[current].scrollIntoView({ behavior: behavior(), block: "nearest", inline: "nearest" });
+    }
+  }
   strip.addEventListener("keydown", (ev) => {
-    if (ev.key === "ArrowRight") { ev.preventDefault(); page(1); }
-    else if (ev.key === "ArrowLeft") { ev.preventDefault(); page(-1); }
-    else if (ev.key === "Home") { ev.preventDefault(); strip.scrollTo({ left: 0, behavior: behavior() }); }
-    else if (ev.key === "End") { ev.preventDefault(); strip.scrollTo({ left: strip.scrollWidth, behavior: behavior() }); }
+    const next = stripTarget(current, ev.key, photos.length);
+    if (next === null) return;
+    ev.preventDefault();
+    setCurrent(next, true);
+  });
+  strip.addEventListener("focusin", (ev) => {
+    const i = shots().indexOf(ev.target.closest?.(".shot"));
+    if (i >= 0 && i !== current) setCurrent(i);
   });
 
   // ── Full-size view ─────────────────────────────────────────────────────────────────────────
@@ -61,7 +80,7 @@ export function createGallery() {
 
   function open(i, from) {
     opener = from;
-    showModal(box);
+    showModal(box, close);
     show(i);
   }
 
@@ -114,6 +133,7 @@ export function createGallery() {
         return h("li", {}, btn);
       }));
       strip.scrollLeft = 0;
+      setCurrent(0);
       requestAnimationFrame(arrows);
     },
   };

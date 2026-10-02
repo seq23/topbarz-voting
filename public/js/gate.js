@@ -14,11 +14,13 @@ import { codeDigits, gatePayload, heldToKeep, pendingRecord, resendLabel, second
 
 const FIELDS = ["email", "name", "city"];
 const DONE_SHOWN_MS = 900;
+const AFTER_CLOSE_MS = 350;
 const TITLE = { details: "One quick step to count your vote", code: "Enter the code we emailed you" };
 const IDLE = { details: "Count my vote", code: "Check my code" };
 
 // hooks: { onVoter(response), runHeld(action) → Promise<{ ok, done?, after? }>, heldLine(action) → string,
-//          codesOn() → boolean (the server says it emails codes) }
+//          codesOn() → boolean (the server says it emails codes),
+//          openerFor(action) → the button a held action belongs to (focus returns there) }
 export function createGate(hooks) {
   const dialog = $("tbz-gate");
   const form = $("tbz-gate-form");
@@ -94,8 +96,11 @@ export function createGate(hooks) {
     if (step !== "code" || !pending) return;
     const now = Date.now();
     const wait = secondsUntil(pending.resend_at, now);
+    const wasOff = resend.disabled;
     resend.disabled = wait > 0 || busy;
     resend.textContent = resendLabel(wait);
+    // A dead code leaves one way forward: when its wait ends, the keyboard is put on it.
+    if (codeDead && wasOff && !resend.disabled) resend.focus();
     if (!codeDead && !busy && now >= pending.expires_at) endCode("That code has expired. Send a new one.");
   }
 
@@ -103,6 +108,7 @@ export function createGate(hooks) {
   function endCode(message) {
     codeDead = true;
     codeInput.value = "";
+    codeInput.disabled = true; // a dead code's field takes no typing: only a new code helps
     showCodeNote("");
     showCodeError(message);
     setButton("idle", IDLE.code);
@@ -123,6 +129,7 @@ export function createGate(hooks) {
     showCodeError("");
     showCodeNote("");
     codeInput.value = "";
+    codeInput.disabled = false;
     setButton("idle", IDLE[next]);
     if (next !== "code") return;
     codeTo.textContent = pending.email;
@@ -156,7 +163,9 @@ export function createGate(hooks) {
     afterDone = null;
     busy = false;
     close();
-    after?.();
+    // Closing takes the popup's entry out of the history (dom.js); what follows (a held share
+    // hands over to the phone's Messages) waits for that, so the two never cross.
+    if (after) setTimeout(after, AFTER_CLOSE_MS);
   }
 
   // Close button, Escape, or a tap outside: the held action is dropped. A code already sent
@@ -180,10 +189,10 @@ export function createGate(hooks) {
     form.reset(); // the email is not left in the page for the next person at this screen
     const heldAction = action;
     action = null;
-    const result = heldAction ? await hooks.runHeld(heldAction) : { ok: true, done: "You're in" };
+    const result = heldAction ? await hooks.runHeld(heldAction) : { ok: true, done: "You’re in" };
     if (mine.signal.aborted) return;
     if (!result.ok) { busy = false; close(); return; } // the card itself says what went wrong
-    setButton("done", result.done || "You're in");
+    setButton("done", result.done || "You’re in");
     afterDone = result.after || null;
     closeTimer = setTimeout(finish, DONE_SHOWN_MS);
   }
@@ -338,7 +347,7 @@ export function createGate(hooks) {
     if (pending) { pending = { ...pending, held: heldToKeep(heldAction), dismissed: false }; savePending(pending); }
     showStep(pending ? "code" : "details");
     showAlert(note);
-    showModal(dialog);
+    showModal(dialog, dismiss);
     if (pending && codeDead && !resend.disabled) resend.focus();
     else (pending ? codeInput : input.email).focus();
   }
@@ -353,7 +362,7 @@ export function createGate(hooks) {
       if (dialog.open) return false;
       const waiting = loadPending();
       if (!waiting || waiting.dismissed || Date.now() >= waiting.expires_at) return false;
-      open(waiting.held, null);
+      open(waiting.held, hooks.openerFor?.(waiting.held) || null);
       return true;
     },
     isOpen: () => dialog.open,

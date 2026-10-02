@@ -3,10 +3,10 @@
 //   · mail goes out through Resend (env RESEND_API_KEY; the key never reaches a browser or a log);
 //   · before any send, the domain must be able to receive mail (one DNS-over-HTTPS lookup, cached
 //     per domain in D1), which keeps bounces off the shared mail account;
-//   · every send is a row in email_sends, so the daily budget, the per-email hourly cap and the
+//   · every send is a row in email_sends, so the daily budget (config.js, sendBudget), the per-email hourly cap and the
 //     resend cooldown are counted over true rolling windows.
 // The rules about who gets a token are in functions/api/voters.js and functions/api/voters/verify.js.
-import { VERIFICATION } from "./config.js";
+import { VERIFICATION, sendBudget } from "./config.js";
 
 const enc = new TextEncoder();
 const toHex = (bytes) => [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -120,8 +120,9 @@ export async function domainReceivesMail(env, domain, nowS) {
 
 // Reads the send counters and takes one send from the budget in ONE transaction, so two requests
 // racing can never both send, and a refusal always knows its true reason.
-export async function takeSendSlot(db, voterId, nowS) {
+export async function takeSendSlot(env, voterId, nowS) {
   const V = VERIFICATION;
+  const db = env.DB;
   const [statsRes, codeRes, slotRes] = await db.batch([
     db.prepare(
       `SELECT
@@ -137,7 +138,7 @@ export async function takeSendSlot(db, voterId, nowS) {
         AND (SELECT COUNT(*) FROM email_sends WHERE counted = 1 AND voter_id = ?1 AND sent_at > ?5) < ?6
         AND NOT EXISTS (SELECT 1 FROM email_sends WHERE counted = 1 AND voter_id = ?1 AND sent_at > ?7)
        RETURNING id`,
-    ).bind(voterId, nowS, nowS - 86400, V.dailySendBudget, nowS - 3600, V.sendsPerEmailPerHour, nowS - V.resendCooldown),
+    ).bind(voterId, nowS, nowS - 86400, sendBudget(env), nowS - 3600, V.sendsPerEmailPerHour, nowS - V.resendCooldown),
   ]);
   const stats = statsRes.results[0];
   const code = codeRes.results[0] ?? null;

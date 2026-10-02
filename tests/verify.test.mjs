@@ -11,7 +11,7 @@ import * as me from "../functions/api/me.js";
 import * as state from "../functions/api/state.js";
 import * as voters from "../functions/api/voters.js";
 import * as verify from "../functions/api/voters/verify.js";
-import { LIMITS, VERIFICATION } from "../functions/_lib/config.js";
+import { LIMITS, VERIFICATION, sendBudget } from "../functions/_lib/config.js";
 import { signVoterToken, verifyVoterToken } from "../functions/_lib/token.js";
 import { codeEmail, codeHmac, newCode } from "../functions/_lib/verify.js";
 import { ROOT, SECRET, addTrack, call, freshIp, makeEnv } from "./helpers.mjs";
@@ -34,7 +34,7 @@ const sendsCounted = async () => (await env.DB.prepare("SELECT COUNT(*) AS n FRO
 async function spendBudget(leave = 0) {
   await env.DB.prepare("INSERT OR IGNORE INTO voters (name, email, email_key, city, created_at) VALUES ('Filler', 'filler@example.com', 'filler@example.com', 'X', '2026-10-01T00:00:00.000Z')").run();
   const id = (await row("filler@example.com")).id;
-  for (let i = await sendsCounted(); i < VERIFICATION.dailySendBudget - leave; i++) await env.DB.prepare("INSERT INTO email_sends (voter_id, sent_at) VALUES (?1, ?2)").bind(id, nowS() - 3 * 3600).run();
+  for (let i = await sendsCounted(); i < sendBudget(env) - leave; i++) await env.DB.prepare("INSERT INTO email_sends (voter_id, sent_at) VALUES (?1, ?2)").bind(id, nowS() - 3 * 3600).run();
 }
 // A voter who has entered a code: { token, code }.
 async function verified(mail, email, extra = {}) {
@@ -50,6 +50,12 @@ async function verified(mail, email, extra = {}) {
 
 test("the numbers are the owner's: 50 emails a day, 10 minutes, 5 tries, 60 s, 3 an hour", () => {
   assert.equal(VERIFICATION.dailySendBudget, 50);
+  // Production and staging count in separate databases: their shares add up to the 50, never more.
+  const production = sendBudget({ APP_ENV: "production" }), preview = sendBudget({ APP_ENV: "preview" });
+  assert.deepEqual([production, preview], [45, 5]);
+  assert.equal(production + preview, VERIFICATION.dailySendBudget);
+  assert.equal(sendBudget({}), production, "anything that is not preview gets production's share, never more");
+  assert.equal(sendBudget(env), production);
   assert.equal(VERIFICATION.codeTtl, 600);
   assert.equal(VERIFICATION.maxTries, 5);
   assert.equal(VERIFICATION.resendCooldown, 60);
@@ -261,12 +267,13 @@ test("at most 3 codes per email per hour, however the address is written", async
   assert.equal((await gate("hourly@example.com")).body.sent, true, "an hour on, codes flow again");
 });
 
-test("the 50-a-day budget: the 50th email goes out, then a NEW email is let in at once as skipped", async (t) => {
+test("the 50-a-day budget: the last email of the share goes out, then a NEW email is let in at once as skipped", async (t) => {
   const mail = stubMail(t);
+  const share = sendBudget(env);
   await spendBudget(1);
-  assert.equal(await sendsCounted(), 49);
+  assert.equal(await sendsCounted(), share - 1);
   assert.equal((await gate("budget.last@example.com")).body.verification, "code_sent");
-  assert.equal(await sendsCounted(), 50);
+  assert.equal(await sendsCounted(), share);
 
   const res = await gate("budget.over@example.com");
   assert.equal(res.status, 200);
@@ -277,7 +284,7 @@ test("the 50-a-day budget: the 50th email goes out, then a NEW email is let in a
   assert.equal(await verifyVoterToken(env, res.body.token), r.id);
   assert.equal((await like(res.body.token)).status, 200, "the vote is not lost");
   assert.equal(mail.attempts.length, 1, "nothing is sent past the budget");
-  assert.equal(await sendsCounted(), 50, "never more than 50 in 24 hours");
+  assert.equal(await sendsCounted(), share, "never more than its share of the 50 in 24 hours");
 
   // A voter still waiting on a code is let in the same way, and can still verify with it later.
   const waiting = await gate("budget.last@example.com");
@@ -292,6 +299,14 @@ test("the 50-a-day budget: the 50th email goes out, then a NEW email is let in a
   await env.DB.prepare("UPDATE email_sends SET sent_at = sent_at - 86400").run();
   assert.equal((await gate("budget.nextday@example.com")).body.verification, "code_sent");
   assert.equal(mail.attempts.length, 2);
+
+  // Staging has its own, small share: 5 emails, then skipped.
+  await env.DB.prepare("DELETE FROM email_sends").run();
+  const staging = { ...env, APP_ENV: "preview" };
+  const answers = [];
+  for (let i = 0; i < 7; i++) answers.push((await gate(`staging.share${i}@example.com`, {}, staging)).body.verification);
+  assert.deepEqual(answers, ["code_sent", "code_sent", "code_sent", "code_sent", "code_sent", "skipped", "skipped"]);
+  assert.equal(mail.attempts.length, 2 + VERIFICATION.previewSendShare);
 });
 
 test("mail service down (429, 5xx, network error): a NEW email is let in at once as skipped", async (t) => {

@@ -111,7 +111,7 @@ export const onRequest = route({
     const codeSent = (sent, resendIn, expiresIn) =>
       json({ verification: "code_sent", sent, email: parsed.email, resend_in_seconds: resendIn, expires_in_seconds: expiresIn });
 
-    const take = await takeSendSlot(db, voter.id, nowS);
+    const take = await takeSendSlot(env, voter.id, nowS);
     if (take.refused === "cooldown") {
       // The code already sent is still good: show the code step again, send nothing.
       if (take.liveFor > 0) return codeSent(false, take.wait, take.liveFor);

@@ -5,8 +5,9 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { VOTING_ENDS_AT } from "../functions/_lib/config.js";
+import { VERIFICATION, VOTING_ENDS_AT } from "../functions/_lib/config.js";
 import {
+  PENDING_KEEP_MS, codeDigits, heldToKeep, pendingRecord, readPending, resendLabel, secondsUntil,
   countdownParts, countdownSpoken, detectPlatform, formatClock, formatCountdown, formatEndsLine, gatePayload, holdFrom,
   isVoterToken, likeInitial, likeReduce, likeRequest, likeView, nextPollDelay, POLL_MS, relativeTime, safeGifUrl,
   safeMediaUrl, serverNow, serverTimeOf, shareMessage, slugFromHash, smsHref, syncClock, trackLink, validateGate, voterRecord,
@@ -286,13 +287,14 @@ test("gate: the browser remembers a token and a first name, never the email", as
   assert.ok(!/localStorage|document\.cookie|sessionStorage/.test(read("js/gate.js")), "the gate stores nothing itself");
 });
 
-test("gate markup: three required fields, email first and largest, opt-in unticked, a hidden honeypot, one button", () => {
+test("gate markup: three required fields, email first and largest, opt-in unticked, a hidden honeypot, one button, and the code step", () => {
   const html = read("index.html");
   const gate = /<dialog id="tbz-gate"[\s\S]*?<\/dialog>/.exec(html)?.[0] ?? "";
   assert.ok(gate, "the gate is a <dialog> in index.html");
   const inputs = [...gate.matchAll(/<input\b[^>]*>/g)].map((m) => m[0]);
   const byId = (id) => inputs.find((i) => i.includes(`id="${id}"`)) ?? "";
-  assert.equal(inputs.length, 5, "email, name, city, the honeypot, the opt-in box");
+  assert.equal(inputs.length, 6, "email, name, city, the honeypot, the opt-in box, and the emailed code");
+  assert.deepEqual(inputs.map((i) => /id="([^"]+)"/.exec(i)[1]), ["tbz-gate-email", "tbz-gate-name", "tbz-gate-city", "tbz-gate-hp", "tbz-gate-optin", "tbz-gate-code"]);
   for (const id of ["tbz-gate-email", "tbz-gate-name", "tbz-gate-city"]) {
     assert.match(byId(id), /\brequired\b/, `${id} is required`);
     assert.ok(gate.includes(`<label for="${id}">`), `${id} has a label`);
@@ -316,6 +318,367 @@ test("gate markup: three required fields, email first and largest, opt-in untick
   assert.match(gate, /One quick step to count your vote/);
   assert.match(gate, /We use your email to count your vote and to send contest results\.[^<]*<a href="\/privacy"/, "one line on what the email is for, and the privacy note");
   assert.ok(fs.existsSync(path.join(PUBLIC, "privacy.html")));
+
+  // The code step: one field a phone can fill from the email, hidden until a code is sent.
+  const details = /<div id="tbz-gate-details" class="gate-step">[\s\S]*?<div id="tbz-gate-code-step"/.exec(gate)?.[0] ?? "";
+  for (const id of ["tbz-gate-email", "tbz-gate-name", "tbz-gate-city", "tbz-gate-hp", "tbz-gate-optin"]) assert.ok(details.includes(`id="${id}"`), `${id} is in the details step`);
+  assert.ok(!details.includes('id="tbz-gate-code"'));
+  assert.match(gate, /<div id="tbz-gate-code-step" class="gate-step" hidden>/, "the code step starts hidden");
+  assert.match(gate, /<div id="tbz-gate-code-actions" class="code-actions" hidden>/);
+  const code = byId("tbz-gate-code");
+  assert.match(code, /type="text"/);
+  assert.match(code, /inputmode="numeric"/);
+  assert.match(code, /autocomplete="one-time-code"/);
+  assert.ok(!/maxlength|readonly|disabled/.test(code), "nothing that would cut a pasted code short");
+  assert.ok(gate.includes('<label for="tbz-gate-code">6-digit code</label>'));
+  assert.match(code, /aria-describedby="tbz-gate-code-sent tbz-gate-code-help tbz-gate-code-error"/, "a screen reader hears where the code went, how long it lasts, and what went wrong");
+  assert.match(gate, /<p id="tbz-gate-code-sent" class="code-sent">We sent a code to <strong id="tbz-gate-code-to"><\/strong>\.<\/p>/);
+  assert.match(gate, /<p id="tbz-gate-code-help" class="code-help">It works for 10 minutes\./);
+  assert.match(gate, /<p id="tbz-gate-code-error" class="field-error" role="alert" hidden><\/p>/);
+  assert.match(gate, /<p id="tbz-gate-code-note" class="code-note" role="status" hidden><\/p>/);
+  assert.match(gate, /<button type="button" id="tbz-gate-resend" class="link-btn" disabled>Send a new code<\/button>/, "resend is a real button, off until its wait is over");
+  assert.match(gate, /<button type="button" id="tbz-gate-change" class="link-btn">Change email<\/button>/);
+  assert.match(read("css/site.css"), /\.field-code input \{[^}]*min-height: 60px;[^}]*font-size: 1\.7rem/, "the code field is big enough for a thumb");
+  assert.match(read("css/site.css"), /\.code-actions \.link-btn \{ min-height: 44px;/, "resend and change-email are full-size touch targets");
+  assert.match(read("css/site.css"), /\.gate \{\s*width: min\(440px, calc\(100vw - 20px\)\);/, "the popup fits a phone");
+  assert.equal(VERIFICATION.codeTtl, 600, "the 10 minutes on the page is the server's");
+});
+
+// ── The gate's code step ─────────────────────────────────────────────────────────────────────
+test("code step: the field takes digits only (paste works), and what is kept on the device is never the code", async () => {
+  assert.equal(codeDigits("123 456"), "123456");
+  assert.equal(codeDigits(" 12-34-56 "), "123456");
+  assert.equal(codeDigits("code: 004217."), "004217");
+  assert.equal(codeDigits("1234567890"), "123456");
+  assert.equal(codeDigits("abc"), "");
+  assert.equal(codeDigits(null), "");
+  assert.equal(secondsUntil(10_500, 10_000), 1);
+  assert.equal(secondsUntil(70_000, 10_000), 60);
+  assert.equal(secondsUntil(10_000, 10_000), 0);
+  assert.equal(secondsUntil(5, 10_000), 0);
+  assert.equal(resendLabel(42), "Send a new code in 42 s");
+  assert.equal(resendLabel(0), "Send a new code");
+
+  const payload = gatePayload({ name: " Jane  Doe ", email: " Jane@Example.com ", city: "Oakland", optIn: true, website: "" });
+  const answer = { verification: "code_sent", sent: true, email: "jane@example.com", resend_in_seconds: 60, expires_in_seconds: 600, code: "123456" };
+  const now = 1_000_000;
+  const rec = pendingRecord(payload, answer, now, { type: "like", slug: "brian", liked: true, token: "x" });
+  assert.deepEqual(rec, {
+    email: "jane@example.com", name: "Jane Doe", city: "Oakland", marketing_opt_in: true,
+    resend_at: now + 60_000, expires_at: now + 600_000, saved_at: now, held: { type: "like", slug: "brian", liked: true }, dismissed: false,
+  });
+  assert.equal(pendingRecord(payload, { token: TOKEN, verification: "skipped" }, now), null, "only a code_sent answer starts the code step");
+  assert.equal(pendingRecord(payload, { token: TOKEN }, now), null);
+  assert.deepEqual(heldToKeep({ type: "share", slug: "caleb", extra: 1 }), { type: "share", slug: "caleb" });
+  assert.equal(heldToKeep({ type: "comment", slug: "brian", payload: { text: "private words" } }), null, "a comment's words are not kept");
+  assert.equal(heldToKeep({ type: "like", slug: "../x" }), null);
+  assert.equal(heldToKeep(null), null);
+
+  assert.deepEqual(readPending({ ...rec, code: "123456", token: TOKEN }, now + 5000), rec, "only the known keys are read back");
+  assert.equal(readPending(rec, now + PENDING_KEEP_MS + 1), null, "forgotten after an hour");
+  assert.equal(PENDING_KEEP_MS, 3_600_000);
+  assert.equal(readPending({ ...rec, email: "" }, now), null);
+  assert.equal(readPending({ ...rec, expires_at: "soon" }, now), null);
+  assert.equal(readPending("jane@example.com", now), null);
+  assert.equal(readPending(null, now), null);
+
+  // The real storage code against a stand-in browser.
+  const store = new Map();
+  const cookies = [];
+  globalThis.localStorage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
+  globalThis.document = { get cookie() { return cookies.join("; "); }, set cookie(v) { cookies.push(v); } };
+  try {
+    const { PENDING_KEY, VOTER_KEY, forgetPending, loadPending, savePending } = await import("../public/js/api.js");
+    assert.equal(PENDING_KEY, "tbz.pending");
+    assert.notEqual(PENDING_KEY, VOTER_KEY);
+    assert.equal(loadPending(now), null);
+    savePending({ ...rec, code: "123456" }, now);
+    assert.deepEqual([...store.keys()], [PENDING_KEY]);
+    assert.ok(store.get(PENDING_KEY).includes("jane@example.com"), "the email is kept so a refresh returns to the code step");
+    assert.ok(!store.get(PENDING_KEY).includes("123456"), "the code is never written to the browser");
+    assert.equal(cookies.length, 0, "and nothing of it goes in a cookie (a cookie travels with every request)");
+    assert.deepEqual(loadPending(now + 1000), rec);
+    assert.equal(loadPending(now + PENDING_KEEP_MS + 1), null);
+    assert.equal(store.size, 0, "an old record is removed, not just ignored");
+    savePending(rec, now);
+    forgetPending();
+    assert.equal(store.size, 0);
+    savePending({ email: "x" }, now);
+    assert.equal(store.size, 0, "a damaged record is not stored");
+    store.set(PENDING_KEY, "{not json");
+    assert.equal(loadPending(now), null);
+  } finally {
+    delete globalThis.localStorage; delete globalThis.document;
+  }
+  assert.ok(!/localStorage|document\.cookie|sessionStorage/.test(read("js/gate.js")), "the gate stores nothing itself: api.js does");
+  assert.ok(!/\bcode\b[^;\n]*savePending|savePending\([^)]*code/i.test(read("js/gate.js").replace(/codeDead|codeStep|codeTo|codeInput|codeError|codeNote|codeActions|codeDigits/g, "")), "the gate never hands the code to storage");
+  assert.match(read("privacy.html"), /while you are entering your code, what you typed in the form stays on your device[^<]*removed when you finish, and after an hour at most/, "the privacy note says so");
+  assert.match(read("privacy.html"), /The code email is sent by Resend/);
+});
+
+// The gate's own script, run against a stand-in page: every element it looks up, as index.html
+// has it (hidden or not), with fetch, storage and the clock under the test's control.
+const clocked = new WeakSet();
+async function gateHarness(t, { answers, store = new Map() }) {
+  const html = read("index.html");
+  const els = {};
+  const doc = { activeElement: null, documentElement: { classList: { add() {}, remove() {} } }, querySelector: () => null };
+  const make = (id) => {
+    const tag = new RegExp(`<[a-z0-9]+\\b[^>]*\\bid="${id}"[^>]*>`).exec(html)?.[0];
+    if (!tag) return null;
+    const listeners = {};
+    const attrs = new Map();
+    const el = {
+      id, textContent: "", value: "", checked: false, open: false, isConnected: true, dataset: {},
+      hidden: /\shidden(\s|>)/.test(tag), disabled: /\sdisabled(\s|>)/.test(tag),
+      addEventListener: (type, fn) => { (listeners[type] ??= []).push(fn); },
+      fire: (type, ev = {}) => Promise.all((listeners[type] ?? []).map((fn) => fn({ preventDefault() {}, target: null, ...ev }))),
+      setAttribute: (k, v) => attrs.set(k, String(v)), removeAttribute: (k) => attrs.delete(k), hasAttribute: (k) => attrs.has(k),
+      focus() { doc.activeElement = el; }, select() {},
+      showModal() { el.open = true; }, close() { el.open = false; },
+      reset() { for (const other of Object.values(els)) { if (other && /^tbz-gate-(email|name|city|hp|code)$/.test(other.id)) other.value = ""; if (other?.id === "tbz-gate-optin") other.checked = false; } },
+    };
+    return el;
+  };
+  doc.getElementById = (id) => (els[id] ??= make(id));
+  const calls = [];
+  globalThis.document = doc;
+  globalThis.localStorage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const call = { path: String(url), body: JSON.parse(init.body), button: { ...snapshot() } };
+    calls.push(call);
+    const next = answers.shift();
+    assert.ok(next, `an unexpected request: ${call.path}`);
+    const [status, body] = next;
+    return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  };
+  if (!clocked.has(t)) { clocked.add(t); t.mock.timers.enable({ apis: ["Date", "setInterval", "setTimeout"], now: 1_800_000_000_000 }); }
+  t.after(() => { globalThis.fetch = realFetch; delete globalThis.document; delete globalThis.localStorage; });
+  const { createGate } = await import("../public/js/gate.js");
+  const seen = { voters: [], held: [] };
+  const gate = createGate({
+    onVoter: (data) => seen.voters.push(data),
+    runHeld: async (action) => { seen.held.push(action); return { ok: true, done: "Vote counted" }; },
+    heldLine: (action) => (action ? `held:${action.type}:${action.slug}` : "nothing held"),
+    codesOn: () => true,
+  });
+  const $ = (id) => { const el = doc.getElementById(`tbz-gate${id ? `-${id}` : ""}`); assert.ok(el, `#tbz-gate-${id} is in index.html`); return el; };
+  function snapshot() {
+    return { state: $("submit").dataset.state, disabled: $("submit").disabled, text: $("submit-text").textContent };
+  }
+  const fill = (email = "jane@example.com") => { $("email").value = email; $("name").value = "Jane Doe"; $("city").value = "Oakland"; };
+  const type = async (digits) => { $("code").value = digits; await $("code").fire("input"); };
+  const stored = () => (store.has("tbz.pending") ? JSON.parse(store.get("tbz.pending")) : null);
+  return { gate, $, calls, seen, store, stored, fill, type, snapshot, doc, tick: (ms) => t.mock.timers.tick(ms) };
+}
+const LIKE = { type: "like", slug: "brian", liked: true };
+const SENT = { verification: "code_sent", sent: true, email: "jane@example.com", resend_in_seconds: 60, expires_in_seconds: 600 };
+const IN = { token: TOKEN, voter: { first_name: "Jane" }, liked: [], returning: false };
+
+test("code step, start to finish: sending, sent, the resend countdown, a wrong code, then verified and the held like goes out", async (t) => {
+  const h = await gateHarness(t, { answers: [[200, SENT], [400, { error: "wrong_code", message: "That code is not right. 4 tries left.", tries_left: 4 }], [200, { ...IN, verification: "verified" }]] });
+  h.gate.open(LIKE, null);
+  assert.deepEqual([h.$("details").hidden, h.$("code-step").hidden, h.$("code-actions").hidden], [false, true, true], "the details step first");
+  assert.equal(h.$("held").textContent, "held:like:brian");
+  assert.equal(h.doc.activeElement, h.$("email"));
+  h.fill();
+  await h.$("form").fire("submit");
+
+  // Sending the code: waiting, button off.
+  assert.equal(h.calls[0].path, "/api/voters");
+  assert.deepEqual(h.calls[0].button, { state: "working", disabled: true, text: "Sending your code…" });
+  // Sent: the code step, naming the email, with a way to change it and the resend counting down.
+  assert.deepEqual([h.$("details").hidden, h.$("code-step").hidden, h.$("code-actions").hidden], [true, false, false]);
+  assert.equal(h.$("title").textContent, "Enter the code we emailed you");
+  assert.equal(h.$("code-to").textContent, "jane@example.com");
+  assert.deepEqual(h.snapshot(), { state: "idle", disabled: false, text: "Check my code" });
+  assert.equal(h.doc.activeElement, h.$("code"), "the cursor is in the code field");
+  assert.equal(h.$("email").value, "", "the email is not left in the form");
+  assert.deepEqual([h.$("resend").disabled, h.$("resend").textContent], [true, "Send a new code in 60 s"]);
+  assert.equal(h.$("change").disabled, false);
+  assert.deepEqual([h.seen.voters.length, h.seen.held.length], [0, 0], "nothing is counted before the code");
+  assert.equal(h.stored().email, "jane@example.com");
+  h.tick(59_000);
+  assert.deepEqual([h.$("resend").disabled, h.$("resend").textContent], [true, "Send a new code in 1 s"]);
+  h.tick(1000);
+  assert.deepEqual([h.$("resend").disabled, h.$("resend").textContent], [false, "Send a new code"]);
+
+  // Too few digits: said under the field, nothing sent.
+  h.$("code").value = "123";
+  await h.$("form").fire("submit");
+  assert.equal(h.calls.length, 1);
+  assert.deepEqual([h.$("code-error").hidden, h.$("code-error").textContent], [false, "Enter the 6-digit code from the email."]);
+
+  // A wrong code, sent by itself at the sixth digit: the tries left, and the field ready to retype.
+  await h.type("111111");
+  assert.deepEqual([h.calls[1].path, h.calls[1].body], ["/api/voters/verify", { email: "jane@example.com", code: "111111" }]);
+  assert.deepEqual(h.calls[1].button, { state: "working", disabled: true, text: "Checking…" });
+  assert.deepEqual([h.$("code-error").hidden, h.$("code-error").textContent], [false, "That code is not right. 4 tries left."]);
+  assert.equal(h.$("code").hasAttribute("aria-invalid"), true);
+  assert.deepEqual(h.snapshot(), { state: "idle", disabled: false, text: "Check my code" });
+  await h.type("111111");
+  assert.equal(h.calls.length, 2, "the same wrong digits are not sent again by themselves");
+
+  // The right code, pasted with a space: verified, and the held like completes on its own.
+  await h.type("123 456");
+  assert.equal(h.$("code").value, "", "the form is cleared once the voter is in");
+  assert.deepEqual(h.calls[2].body, { email: "jane@example.com", code: "123456" });
+  assert.equal(h.seen.voters[0].token, TOKEN);
+  assert.deepEqual(h.seen.held, [LIKE]);
+  assert.deepEqual(h.snapshot(), { state: "done", disabled: true, text: "Vote counted" });
+  assert.equal(h.stored(), null, "nothing is kept once the voter is in");
+  assert.ok(![...h.store.values()].join().match(/111111|123456/), "no code was ever stored");
+  assert.equal(h.$("").open, true);
+  h.tick(900);
+  assert.equal(h.$("").open, false, "and the popup closes by itself");
+});
+
+test("code step: an expired or used-up code says so and offers a new one; the hourly cap and a failed resend say why", async (t) => {
+  const h = await gateHarness(t, { answers: [
+    [200, SENT],
+    [410, { error: "code_exhausted", message: "Too many wrong tries. Send a new code." }],
+    [429, { error: "resend_cooldown", message: "You can ask for a new code in 45 seconds.", retry_after_seconds: 45 }],
+    [200, { ...SENT, resend_in_seconds: 60 }],
+    [410, { error: "code_expired", message: "That code has expired. Send a new one." }],
+    [429, { error: "code_limit", message: "We have sent 3 codes to this email in the last hour. Use the newest one, or try again in 20 minutes.", retry_after_seconds: 1200 }],
+    [503, { error: "code_unavailable", message: "We could not send your code right now. Try again in a little while." }],
+  ] });
+  h.gate.open(LIKE, null);
+  h.fill();
+  await h.$("form").fire("submit");
+  h.tick(61_000);
+
+  // Out of tries: the message, the submit button off, and the next step in focus.
+  await h.type("222222");
+  assert.deepEqual([h.$("code-error").hidden, h.$("code-error").textContent], [false, "Too many wrong tries. Send a new code."]);
+  assert.equal(h.$("submit").disabled, true, "a dead code cannot be tried again");
+  assert.deepEqual([h.$("resend").disabled, h.$("resend").textContent], [false, "Send a new code"]);
+  assert.equal(h.doc.activeElement, h.$("resend"), "focus moves to the way forward");
+  await h.type("333333");
+  assert.equal(h.calls.length, 2, "typing into a dead code sends nothing");
+
+  // Asked too soon: the server's wait is shown on the control.
+  await h.$("resend").fire("click");
+  assert.deepEqual(h.calls[2].body, { name: "Jane Doe", email: "jane@example.com", city: "Oakland", marketing_opt_in: false, website: "" }, "a resend is the same gate call, with what was typed");
+  assert.deepEqual(h.calls[2].button, { state: "working", disabled: true, text: "Sending a new code…" });
+  assert.deepEqual([h.$("error").hidden, h.$("error").textContent], [false, "You can ask for a new code in 45 seconds."]);
+  assert.deepEqual([h.$("resend").disabled, h.$("resend").textContent], [true, "Send a new code in 45 s"]);
+  await h.$("resend").fire("click");
+  assert.equal(h.calls.length, 3, "a resend during the wait does nothing");
+  h.tick(45_000);
+
+  // A new code: said out loud, the field live again.
+  await h.$("resend").fire("click");
+  assert.deepEqual([h.$("code-note").hidden, h.$("code-note").textContent], [false, "A new code is on its way."]);
+  assert.deepEqual([h.$("code-error").hidden, h.$("submit").disabled, h.$("error").hidden], [true, false, true]);
+  assert.equal(h.doc.activeElement, h.$("code"));
+  assert.equal(h.$("resend").textContent, "Send a new code in 60 s");
+
+  // Expired, as the server says it…
+  await h.type("444444");
+  assert.equal(h.$("code-error").textContent, "That code has expired. Send a new one.");
+  assert.equal(h.$("submit").disabled, true);
+  // …the cap of three an hour…
+  h.tick(60_000);
+  await h.$("resend").fire("click");
+  assert.match(h.$("error").textContent, /^We have sent 3 codes to this email in the last hour\./);
+  assert.equal(h.$("resend").textContent, "Send a new code in 1200 s");
+  // …and mail down for an email that is already verified.
+  h.tick(1_200_000);
+  await h.$("resend").fire("click");
+  assert.equal(h.$("error").textContent, "We could not send your code right now. Try again in a little while.");
+  assert.deepEqual([h.seen.voters.length, h.seen.held.length], [0, 0]);
+});
+
+test("code step: a code that runs out while the popup is open says so by itself", async (t) => {
+  const h = await gateHarness(t, { answers: [[200, SENT]] });
+  h.gate.open(LIKE, null);
+  h.fill();
+  await h.$("form").fire("submit");
+  h.tick(599_000);
+  assert.equal(h.$("code-error").hidden, true);
+  h.tick(1000);
+  assert.deepEqual([h.$("code-error").hidden, h.$("code-error").textContent, h.$("submit").disabled], [false, "That code has expired. Send a new one.", true]);
+  assert.equal(h.doc.activeElement, h.$("resend"));
+  assert.equal(h.calls.length, 1);
+});
+
+test("skipped goes straight through with no code step; code_unavailable shows its message", async (t) => {
+  const h = await gateHarness(t, { answers: [
+    [503, { error: "code_unavailable", message: "We could not send your code right now. Try again in a little while." }],
+    [200, { ...IN, verification: "skipped", reason: "mail_budget" }],
+  ] });
+  h.gate.open(LIKE, null);
+  h.fill();
+  await h.$("form").fire("submit");
+  assert.deepEqual([h.$("error").hidden, h.$("error").textContent], [false, "We could not send your code right now. Try again in a little while."]);
+  assert.deepEqual(h.snapshot(), { state: "retry", disabled: false, text: "Try again" });
+  assert.deepEqual([h.$("details").hidden, h.$("code-step").hidden], [false, true], "still on the details step");
+  assert.equal(h.stored(), null);
+  assert.equal(h.seen.voters.length, 0);
+
+  await h.$("form").fire("submit");
+  assert.equal(h.$("code-step").hidden, true, "no code step");
+  assert.equal(h.seen.voters[0].verification, "skipped");
+  assert.deepEqual(h.seen.held, [LIKE], "the like goes out at once");
+  assert.deepEqual(h.snapshot(), { state: "done", disabled: true, text: "Vote counted" });
+  assert.equal(h.stored(), null);
+});
+
+test("closing the popup or refreshing mid-step returns the voter to the code step; change email goes back", async (t) => {
+  const store = new Map();
+  const h = await gateHarness(t, { store, answers: [[200, SENT], [200, { ...IN, verification: "verified" }]] });
+  h.gate.open(LIKE, null);
+  h.fill();
+  await h.$("form").fire("submit");
+  assert.deepEqual(h.stored().held, LIKE);
+  // Closed with the X: the held like is dropped, the code stays good.
+  await h.$("close").fire("click");
+  assert.equal(h.$("").open, false);
+  assert.deepEqual([h.stored().email, h.stored().held, h.stored().dismissed], ["jane@example.com", null, true]);
+  assert.equal(h.gate.resume(), false, "a popup the voter closed does not reopen by itself");
+  // The next like opens the code step, not the form.
+  const other = { type: "like", slug: "caleb", liked: true };
+  h.gate.open(other, null);
+  assert.deepEqual([h.$("details").hidden, h.$("code-step").hidden, h.$("code-to").textContent], [true, false, "jane@example.com"]);
+  assert.equal(h.$("held").textContent, "held:like:caleb");
+  assert.equal(h.doc.activeElement, h.$("code"));
+  assert.equal(h.calls.length, 1, "no new email is sent to show it");
+  assert.deepEqual(h.stored().held, other);
+
+  // A refresh (a new page, the same browser storage): straight back to the code step, with the like.
+  const again = await gateHarness(t, { store, answers: [[200, { ...IN, verification: "verified" }]] });
+  assert.equal(again.gate.resume(), true);
+  assert.deepEqual([again.$("").open, again.$("details").hidden, again.$("code-step").hidden, again.$("code-to").textContent], [true, true, false, "jane@example.com"]);
+  assert.equal(again.$("held").textContent, "held:like:caleb");
+  assert.match(again.$("resend").textContent, /^Send a new code in [0-9]+ s$/, "the countdown carries on from where it was");
+  await again.type("123456");
+  assert.deepEqual(again.calls[0].body, { email: "jane@example.com", code: "123456" });
+  assert.deepEqual(again.seen.held, [{ type: "like", slug: "caleb", liked: true }]);
+  assert.equal(again.stored(), null);
+
+  // Change email: back to the details, filled in, and the old address forgotten.
+  const third = await gateHarness(t, { store, answers: [[200, SENT]] });
+  assert.equal(third.gate.resume(), false, "nothing to resume once the voter is in");
+  third.gate.open(LIKE, null);
+  third.fill("jnae@example.com");
+  third.$("optin").checked = true;
+  await third.$("form").fire("submit");
+  await third.$("change").fire("click");
+  assert.deepEqual([third.$("details").hidden, third.$("code-step").hidden, third.$("code-actions").hidden], [false, true, true]);
+  assert.deepEqual([third.$("email").value, third.$("name").value, third.$("city").value, third.$("optin").checked], ["jnae@example.com", "Jane Doe", "Oakland", true]);
+  assert.equal(third.doc.activeElement, third.$("email"));
+  assert.equal(third.$("title").textContent, "One quick step to count your vote");
+  assert.deepEqual(third.snapshot(), { state: "idle", disabled: false, text: "Count my vote" });
+  assert.equal(third.stored(), null);
+
+  // A code that has run out is not resumed on a reload; the next like still offers a new one.
+  const stale = await gateHarness(t, { store: new Map([["tbz.pending", JSON.stringify({ ...pendingRecord(gatePayload({ name: "J", email: "j@example.com", city: "O" }), SENT, 1_800_000_000_000 - 700_000, LIKE) })]]), answers: [] });
+  assert.equal(stale.gate.resume(), false);
+  stale.gate.open(LIKE, null);
+  assert.deepEqual([stale.$("code-step").hidden, stale.$("code-error").textContent, stale.$("submit").disabled, stale.$("resend").disabled], [false, "That code has expired. Send a new one.", true, false]);
+  assert.equal(stale.doc.activeElement, stale.$("resend"));
 });
 
 // ── Small formatters and guards ──────────────────────────────────────────────────────────────

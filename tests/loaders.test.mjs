@@ -205,7 +205,7 @@ test("the docs name every API route, and the brand rules hold in what ships", ()
   assert.ok(routes.length >= 7, `found ${routes.length} routes`);
   for (const r of routes) assert.ok(runbook.includes(r), `RUNBOOK.md does not describe ${r}`);
   assert.ok(runbook.includes("/media/"));
-  for (const step of ["sync-drive", "load-tracks", "load-photos", "GIPHY_BETA_KEY", "hidden = 1", "flagged = 1", "npm run export", "voting_ends_at"]) {
+  for (const step of ["sync-drive", "load-tracks", "load-photos", "GIPHY_BETA_KEY", "hidden = 1", "flagged = 1", "npm run export", "voting_ends_at", "## Email verification", "EMAIL_VERIFICATION = \"off\"", "RESEND_API_KEY", "50 code emails in any rolling 24 hours", "likes_verified", "mail_budget", "code_unavailable", "tbz.pending"]) {
     assert.ok(runbook.includes(step), `RUNBOOK.md does not cover: ${step}`);
   }
   // Brand: "Top Barz" is two words; the slogan is JUMP IN THE BOOTH; never "spit your bars".

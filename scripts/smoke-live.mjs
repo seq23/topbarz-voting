@@ -3,7 +3,20 @@
 //   node scripts/smoke-live.mjs https://staging.topbarz-voting.pages.dev
 // Fails (exit 1) unless /api/state is JSON with tracks, an end time, and gate.available = true
 // (the signing secret is set), and an unknown /api path is a JSON 404 (the Functions are live,
-// not just the static page). Retries for about a minute while a new deployment settles.
+// not just the static page), and email codes are in the state wrangler.toml asks for: with the
+// switch "on" a missing mail key (verification.available = false) fails the deploy here, rather
+// than voting running unverified with nobody told. Retries for about a minute while a new
+// deployment settles.
+import fs from "node:fs";
+import path from "node:path";
+
+const toml = fs.readFileSync(path.resolve(import.meta.dirname, "..", "wrangler.toml"), "utf8");
+const switches = [...toml.matchAll(/^EMAIL_VERIFICATION = "([^"]*)"/gm)].map((m) => m[1]);
+if (switches.length !== 2 || switches[0] !== switches[1] || !["on", "off"].includes(switches[0])) {
+  console.error(`STOPPED: wrangler.toml must set EMAIL_VERIFICATION to "on" or "off", the same in both environments (found: ${switches.join(", ") || "nothing"}).`);
+  process.exit(2);
+}
+const codesWanted = switches[0] === "on";
 const base = (process.argv[2] ?? "").replace(/\/$/, "");
 if (!/^https?:\/\//.test(base)) { console.error("STOPPED: give the address to check, e.g. https://staging.topbarz-voting.pages.dev"); process.exit(2); }
 let last = "no attempt";
@@ -17,9 +30,12 @@ for (let attempt = 1; attempt <= 12; attempt++) {
     if (!Array.isArray(body.tracks)) problems.push("no tracks array");
     if (!body.voting_ends_at || typeof body.closed !== "boolean") problems.push("no voting window");
     if (body.gate?.available !== true) problems.push(`the gate is off (${body.gate?.reason ?? "unknown"}): set VOTER_TOKEN_SECRET — RUNBOOK.md, Secrets`);
+    const v = body.verification;
+    if (codesWanted && v?.available !== true) problems.push(`email codes are switched on but not working (${v?.reason ?? "no verification state"}): set RESEND_API_KEY — RUNBOOK.md, Email verification`);
+    if (!codesWanted && (v?.available !== false || v?.reason !== "switched_off")) problems.push(`email codes are switched off in wrangler.toml but the site says ${JSON.stringify(v ?? null)}`);
     if (nf.status !== 404 || !(nf.headers.get("content-type") ?? "").includes("json")) problems.push("unknown /api paths are not answered by the Functions");
     if (problems.length === 0) {
-      console.log(`ok   ${base}: ${body.tracks.length} track(s), ${body.photos?.length ?? 0} photo(s), closes ${body.voting_ends_at}, closed=${body.closed}, giphy ${body.giphy?.available ? "on" : `off (${body.giphy?.reason})`}`);
+      console.log(`ok   ${base}: ${body.tracks.length} track(s), ${body.photos?.length ?? 0} photo(s), closes ${body.voting_ends_at}, closed=${body.closed}, giphy ${body.giphy?.available ? "on" : `off (${body.giphy?.reason})`}, email codes ${v.available ? "on" : `off (${v.reason})`}`);
       process.exit(0);
     }
     last = problems.join("; ");

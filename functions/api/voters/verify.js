@@ -15,8 +15,8 @@ import { parseEmail } from "../../_lib/validate.js";
 import { codeMatches } from "../../_lib/verify.js";
 import { openSession } from "../voters.js";
 
-const expired = () => new HttpError(410, "code_expired", "That code has expired. Ask for a new one.");
-const exhausted = () => new HttpError(410, "code_exhausted", "Too many wrong tries. Ask for a new code.");
+const expired = () => new HttpError(410, "code_expired", "That code has expired. Send a new one.");
+const exhausted = () => new HttpError(410, "code_exhausted", "Too many wrong tries. Send a new code.");
 
 export const onRequest = route({
   async POST(context) {

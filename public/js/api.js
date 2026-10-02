@@ -1,5 +1,5 @@
 // The page's one way to the server, and the one place a voter is remembered.
-import { isVoterToken } from "./logic.js";
+import { isVoterToken, readPending } from "./logic.js";
 
 export class ApiError extends Error {
   constructor(code, message, status = 0, extra = null) {
@@ -88,4 +88,31 @@ export function saveVoter(rec) {
 export function forgetVoter() {
   try { localStorage.removeItem(VOTER_KEY); } catch {}
   try { writeCookie("", 0); } catch {}
+}
+
+// ── A voter part-way through the email code ───────────────────────────────────────────────────
+// What they typed at the gate and the code's timings (logic.js, pendingRecord), in localStorage
+// only, so a refresh or a closed popup returns them to the code step. Never the code. Forgotten
+// the moment they are let in or change the email, and after an hour whatever happens.
+export const PENDING_KEY = "tbz.pending";
+
+export function loadPending(now = Date.now()) {
+  try {
+    const raw = localStorage.getItem(PENDING_KEY);
+    if (!raw) return null;
+    const rec = readPending(JSON.parse(raw), now);
+    if (!rec) localStorage.removeItem(PENDING_KEY);
+    return rec;
+  } catch {}
+  return null;
+}
+
+export function savePending(rec, now = Date.now()) {
+  const clean = readPending(rec, now);
+  if (!clean) return;
+  try { localStorage.setItem(PENDING_KEY, JSON.stringify(clean)); } catch {}
+}
+
+export function forgetPending() {
+  try { localStorage.removeItem(PENDING_KEY); } catch {}
 }

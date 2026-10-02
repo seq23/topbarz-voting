@@ -25,6 +25,7 @@ export const GIPHY = { budgetPerHour: 90, searchTtl: 30 * 60, trendingTtl: 60 * 
 // rolling 24 hours. THE ONE PLACE that number is written. Times are seconds unless named ms.
 export const VERIFICATION = {
   dailySendBudget: 50,
+  previewSendShare: 5, // of the 50: what staging / preview may send. Production gets the rest.
   codeTtl: 10 * 60,
   maxTries: 5,
   resendCooldown: 60,
@@ -74,6 +75,13 @@ export function giphyStatus(env) {
 export function gateStatus(env) {
   return env?.VOTER_TOKEN_SECRET ? { available: true } : { available: false, reason: "token_secret_missing" };
 }
+// Production and preview count their sends in their own databases, so the daily budget is split
+// between them: whatever happens on staging, the two together can never pass it.
+export function sendBudget(env) {
+  const { dailySendBudget, previewSendShare } = VERIFICATION;
+  return env?.APP_ENV === "preview" ? previewSendShare : dailySendBudget - previewSendShare;
+}
+
 // The code step is on only when the switch says so AND there is a key to send mail with.
 // Otherwise the gate behaves exactly as it did before codes existed.
 export function verificationStatus(env) {

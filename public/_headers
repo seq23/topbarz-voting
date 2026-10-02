@@ -1,0 +1,9 @@
+# Headers for the static files (the API sets its own). The page loads only its own files, plus
+# GIFs from Giphy; nothing inline runs.
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https://*.giphy.com; media-src 'self'; connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'
+
+/fonts/*
+  Cache-Control: public, max-age=31536000, immutable

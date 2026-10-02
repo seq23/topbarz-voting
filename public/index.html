@@ -2,14 +2,177 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex">
+<meta name="theme-color" content="#000000">
+<meta name="color-scheme" content="dark">
 <title>Top Barz | JUMP IN THE BOOTH</title>
+<meta name="description" content="Vote for your favorite track recorded in the Top Barz booth at CultureCon. Voting ends Sunday, October 11 at 11:59 PM PDT.">
+<link rel="canonical" href="https://voting.topbarz.xyz/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Top Barz">
+<meta property="og:title" content="Vote for your favorite CultureCon track | Top Barz">
+<meta property="og:description" content="Tracks recorded in the Top Barz booth at CultureCon. Listen, like your favorite, and send it to your people. Voting ends Sunday, October 11 at 11:59 PM PDT.">
+<meta property="og:url" content="https://voting.topbarz.xyz/">
+<meta property="og:image" content="https://voting.topbarz.xyz/img/og.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Top Barz. JUMP IN THE BOOTH. Vote for your favorite CultureCon track.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Vote for your favorite CultureCon track | Top Barz">
+<meta name="twitter:description" content="Tracks recorded in the Top Barz booth at CultureCon. Listen, like your favorite, and send it to your people.">
+<meta name="twitter:image" content="https://voting.topbarz.xyz/img/og.png">
+<link rel="icon" type="image/png" href="/img/favicon.png">
+<link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
+<link rel="preload" href="/fonts/dela-gothic-one-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/epilogue-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/css/site.css">
+<link rel="modulepreload" href="/js/logic.js">
+<link rel="modulepreload" href="/js/api.js">
+<link rel="modulepreload" href="/js/dom.js">
+<link rel="modulepreload" href="/js/player.js">
+<link rel="modulepreload" href="/js/gallery.js">
+<link rel="modulepreload" href="/js/gate.js">
+<link rel="modulepreload" href="/js/comments.js">
+<script type="module" src="/js/app.js"></script>
 </head>
 <body>
-<!-- Placeholder. The front end replaces this file; the API it calls is described in RUNBOOK.md. -->
-<h1>Top Barz</h1>
-<p>JUMP IN THE BOOTH</p>
-<p>Voting opens soon.</p>
+<a class="skip" href="#tbz-tracks">Skip to the tracks</a>
+
+<header class="top">
+  <a class="logo" href="https://www.topbarz.xyz/"><img src="/img/logo.png" width="212" height="186" alt="Top Barz"></a>
+  <h1 class="slogan">JUMP IN THE BOOTH</h1>
+</header>
+
+<main>
+  <section id="tbz-gallery" class="gallery" aria-label="Photos from CultureCon" hidden>
+    <button type="button" id="tbz-strip-prev" class="arrow arrow-prev" aria-label="Earlier photos" hidden>
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+    </button>
+    <ul id="tbz-strip" class="strip" tabindex="0" aria-label="Photos from CultureCon. Swipe, or use the arrow keys."></ul>
+    <button type="button" id="tbz-strip-next" class="arrow arrow-next" aria-label="More photos" hidden>
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+    </button>
+  </section>
+
+  <section class="intro">
+    <p class="lede">At this year’s CultureCon, hundreds of creatives showcased their creativity and jumped in the booth. Now you can vote for your favorite track, and the winner wins a free studio session for them and their friends.</p>
+    <a id="tbz-vote" class="btn btn-vote" href="#tbz-tracks">VOTE</a>
+    <p class="window"><span id="tbz-window-word">Voting ends</span> <strong id="tbz-ends">Sunday, October 11 at 11:59 PM PDT</strong></p>
+    <p id="tbz-countdown-row" class="countdown-row">
+      <span class="countdown-label">Time left</span>
+      <span id="tbz-countdown" class="countdown" aria-hidden="true">counting…</span>
+      <span id="tbz-countdown-spoken" class="sr-only" role="timer"></span>
+    </p>
+    <p id="tbz-closed-hero" class="closed-hero" hidden>Voting closed</p>
+  </section>
+
+  <section id="tbz-tracks" class="tracks" aria-labelledby="tbz-tracks-title">
+    <h2 id="tbz-tracks-title" tabindex="-1">TRACKS FROM CULTURECON:</h2>
+    <p id="tbz-closed-note" class="notice" role="status" hidden>Voting closed. Thank you for voting. Every track is still here to play.</p>
+    <p id="tbz-off-note" class="notice" role="status" hidden>Voting is not switched on yet. You can listen now; likes open shortly.</p>
+    <p id="tbz-link-note" class="notice" role="status" hidden>That link’s track is not in the vote. Here is every track that is.</p>
+    <p id="tbz-loading" class="list-note" role="status">Loading the tracks…</p>
+    <div id="tbz-load-error" class="list-note" role="alert" hidden>
+      <p id="tbz-load-error-text">The tracks did not load.</p>
+      <button type="button" id="tbz-load-retry" class="btn btn-small">Try again</button>
+    </div>
+    <div id="tbz-empty" class="empty" hidden>
+      <p class="empty-title">The tracks land here soon</p>
+      <p>The CultureCon tracks are on their way into the booth. Come back to listen, vote, and send your favorite to your people.</p>
+      <p>Until then, follow <a href="https://www.instagram.com/topbarz.xyz" rel="noopener">@topbarz.xyz</a> on Instagram.</p>
+    </div>
+    <div id="tbz-list" class="list" aria-busy="true"></div>
+    <noscript><p class="list-note">This page needs JavaScript to play the tracks and count your vote. Turn it on and reload.</p></noscript>
+  </section>
+</main>
+
+<footer class="foot">
+  <section class="foot-block" aria-labelledby="tbz-prize-title">
+    <h2 id="tbz-prize-title">The prize</h2>
+    <p>The winner gets a free studio session for them and their friends at Studio404 in Brooklyn. Travel is not included, so winners outside New York need to come to New York.</p>
+  </section>
+  <section class="foot-block" aria-labelledby="tbz-rules-title">
+    <h2 id="tbz-rules-title">The rules</h2>
+    <ul>
+      <li>One like is one vote. Like as many tracks as you want.</li>
+      <li>One like per track for each email. Tap the heart again to take it back.</li>
+      <li>The track with the most likes when voting closes wins.</li>
+      <li>Voting ends Sunday, October 11 at 11:59 PM PDT.</li>
+    </ul>
+  </section>
+  <section class="foot-block" aria-labelledby="tbz-contact-title">
+    <h2 id="tbz-contact-title">Contact</h2>
+    <p>Questions? Message <a href="https://www.instagram.com/topbarz.xyz" rel="noopener">@topbarz.xyz</a> on Instagram, or visit <a href="https://www.topbarz.xyz/">topbarz.xyz</a>.</p>
+    <p><a href="/privacy">Privacy note</a>: what we collect and why.</p>
+    <p id="tbz-who" class="who" hidden>Voting as <strong id="tbz-who-name"></strong>. <button type="button" id="tbz-who-forget" class="link-btn">Not you?</button></p>
+  </section>
+  <p class="foot-mark">Top Barz at CultureCon</p>
+</footer>
+
+<div id="tbz-status" class="status" role="status" aria-live="polite" hidden></div>
+
+<dialog id="tbz-gate" class="gate" aria-labelledby="tbz-gate-title" aria-describedby="tbz-gate-held">
+  <form id="tbz-gate-form" class="gate-form" novalidate>
+    <button type="button" id="tbz-gate-close" class="panel-close" aria-label="Close without voting">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+    </button>
+    <h2 id="tbz-gate-title">One quick step to count your vote</h2>
+    <p id="tbz-gate-held" class="gate-held">Then your likes and comments are one tap.</p>
+
+    <div class="field field-email">
+      <label for="tbz-gate-email">Email</label>
+      <input id="tbz-gate-email" name="email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false" placeholder="you@example.com" required aria-describedby="tbz-gate-email-error">
+      <p id="tbz-gate-email-error" class="field-error" role="alert" hidden></p>
+    </div>
+    <div class="field-pair">
+      <div class="field">
+        <label for="tbz-gate-name">Name</label>
+        <input id="tbz-gate-name" name="name" type="text" autocomplete="name" maxlength="80" required aria-describedby="tbz-gate-name-error">
+        <p id="tbz-gate-name-error" class="field-error" role="alert" hidden></p>
+      </div>
+      <div class="field">
+        <label for="tbz-gate-city">City</label>
+        <input id="tbz-gate-city" name="city" type="text" autocomplete="address-level2" maxlength="80" required aria-describedby="tbz-gate-city-error">
+        <p id="tbz-gate-city-error" class="field-error" role="alert" hidden></p>
+      </div>
+    </div>
+    <div class="hp" aria-hidden="true">
+      <label for="tbz-gate-hp">Leave this empty</label>
+      <input id="tbz-gate-hp" type="text" tabindex="-1" autocomplete="off">
+    </div>
+    <label class="check" for="tbz-gate-optin">
+      <input id="tbz-gate-optin" name="marketing_opt_in" type="checkbox">
+      <span>Send me Top Barz updates</span>
+    </label>
+
+    <p id="tbz-gate-error" class="gate-error" role="alert" hidden></p>
+    <button type="submit" id="tbz-gate-submit" class="btn btn-gate" data-state="idle">
+      <span class="spinner" aria-hidden="true"></span>
+      <svg class="ico ico-check" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+      <span id="tbz-gate-submit-text" aria-live="polite">Count my vote</span>
+    </button>
+    <p class="gate-fine">We use your email to count your vote and to send contest results. Top Barz updates only if you tick the box. <a href="/privacy" target="_blank" rel="noopener">Privacy note</a></p>
+  </form>
+</dialog>
+
+<dialog id="tbz-lightbox" class="lightbox" aria-label="Photo from CultureCon">
+  <button type="button" id="tbz-lb-close" class="panel-close" aria-label="Close photo">
+    <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+  </button>
+  <figure>
+    <img id="tbz-lb-img" alt="">
+    <figcaption id="tbz-lb-cap" role="status"></figcaption>
+  </figure>
+  <div id="tbz-lb-nav" class="lb-nav">
+    <button type="button" id="tbz-lb-prev" class="arrow" aria-label="Previous photo">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+    </button>
+    <button type="button" id="tbz-lb-next" class="arrow" aria-label="Next photo">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+    </button>
+  </div>
+</dialog>
 </body>
 </html>

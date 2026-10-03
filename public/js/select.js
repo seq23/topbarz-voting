@@ -5,7 +5,7 @@
 import { api } from "./api.js";
 import { $, h, icon, reducedMotion } from "./dom.js";
 import { safeMediaUrl } from "./logic.js";
-import { BEATS_STALE_MS, PICK_KEY, cleanBeats, cleanLinks, loadPick, pickedBeat, pickedTitle, savePick, togglePick } from "./pick.js";
+import { BEATS_STALE_MS, PICK_KEY, cleanBeats, cleanLinks, introParts, loadPick, pickedBeat, pickedTitle, savePick, togglePick } from "./pick.js";
 import { createControls, createPlayer } from "./player.js";
 import { COPY } from "./select-copy.js";
 
@@ -46,7 +46,7 @@ const scrollBehavior = () => (reducedMotion() ? "auto" : "smooth");
 // ── The words (select-copy.js) ───────────────────────────────────────────────────────────────
 document.title = `${COPY.headline} | Top Barz`;
 els.headline.textContent = COPY.headline;
-els.intro.textContent = COPY.intro;
+els.intro.replaceChildren(...introParts(COPY.intro).map((p) => (p.url ? h("a", { href: p.url, rel: "noopener", text: p.text }) : p.text)));
 els.beatsTitle.textContent = COPY.listTitle;
 els.pickedLine.textContent = COPY.done;
 els.change.textContent = COPY.change;

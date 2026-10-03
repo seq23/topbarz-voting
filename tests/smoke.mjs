@@ -88,7 +88,7 @@ try {
   // The select page (/select) and its beats.
   const select = await fetch(base + "/select", { redirect: "manual" });
   const selectText = await select.text();
-  ok(select.status === 200 && selectText.includes('id="tbz-beats-list"') && selectText.includes('<meta name="robots" content="noindex">'), "GET /select serves the select page, marked noindex");
+  ok(select.status === 200 && selectText.includes('id="tbz-beats-list"') && !selectText.includes('name="robots"'), "GET /select serves the select page, open to search (noindex came off with the real copy, 3 Oct 2026)");
   ok((select.headers.get("content-security-policy") ?? "").startsWith("default-src 'self'; script-src 'self'; style-src 'self'"), "/select is served with the same content security policy");
   for (const alias of ["/select/", "/select.html"]) {
     const hop = await fetch(base + alias, { redirect: "manual" });

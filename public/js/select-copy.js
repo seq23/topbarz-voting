@@ -1,21 +1,30 @@
-// Every word of copy on the select page (/select), in ONE place. These are PLACEHOLDERS: when
-// Top Barz sends the real copy and the producer and engineer links, edit this object and nothing
-// else (then take the page's noindex off: RUNBOOK.md, "The select page").
+// Every word of copy on the select page (/select), in ONE place: edit this object and nothing else.
+// The intro and the three links are Top Barz's own copy (3 Oct 2026); the rest is ours.
+//   intro: parts in order: a plain string, or { text, url } for a linked name (https only, else it
+//          shows as plain words). Scooter may swap the two engineer names later: change them here.
 //   {name} in pickedTitle becomes the name of the beat that was picked.
-//   links: one entry per person. `url` must start with https:// ; while it is "" the entry shows
-//   as plain words, not as a link. An empty list hides the whole section.
+//   links: the credits under the beats. `url` https only; "" shows the entry as plain words.
 export const COPY = {
   headline: "Pick your beat",
-  intro: "Placeholder intro: listen to each beat, then choose the one you want. The real copy goes here.",
+  intro: [
+    "These are beats from professional engineers, ",
+    { text: "Ayake", url: "https://instagram.com/ayake.io" },
+    " and ",
+    { text: "4stro", url: "https://instagram.com/4stro.naut" },
+    ", who have engineered hundreds of sessions with some of your favorite notable artists. This is made possible by our partnership with ",
+    { text: "Studio404", url: "https://studio404.nyc/" },
+    " located in Brooklyn, NY.",
+  ],
   listTitle: "THE BEATS:",
   choose: "Choose this beat",
   chosen: "Your pick",
   pickedTitle: "You picked {name}",
-  done: "Placeholder line: what happens next goes here.",
+  done: "Remember your pick for when it is your turn in the booth.",
   change: "Change my pick",
-  linksTitle: "Producer and engineer",
+  linksTitle: "Engineers and studio",
   links: [
-    { role: "Producer", label: "Producer name and link (placeholder)", url: "" },
-    { role: "Engineer", label: "Engineer name and link (placeholder)", url: "" },
+    { role: "Engineer", label: "Ayake", url: "https://instagram.com/ayake.io" },
+    { role: "Engineer", label: "4stro", url: "https://instagram.com/4stro.naut" },
+    { role: "Studio", label: "Studio404, Brooklyn, NY", url: "https://studio404.nyc/" },
   ],
 };

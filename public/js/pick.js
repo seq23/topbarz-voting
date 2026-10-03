@@ -68,8 +68,15 @@ export function savePick(storage, slug) {
   return false;
 }
 
-// The producer and engineer links from the copy: entries with words to show, a link only when
-// its url is https.
+// The intro from the copy, as parts to draw: words, or a name linked only when its url is https.
+export function introParts(parts) {
+  return (Array.isArray(parts) ? parts : [parts])
+    .map((p) => (typeof p === "string" ? { text: p, url: null } : { text: typeof p?.text === "string" ? p.text : "", url: safeLinkUrl(p?.url) }))
+    .filter((p) => p.text);
+}
+export const introText = (parts) => introParts(parts).map((p) => p.text).join("");
+
+// The credit links from the copy: entries with words to show, a link only when its url is https.
 export function cleanLinks(links) {
   return (Array.isArray(links) ? links : [])
     .filter((l) => typeof l?.label === "string" && l.label.trim())

@@ -7,7 +7,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
-  BEATS_STALE_MS, PICK_KEY, cleanBeats, cleanLinks, isBeatSlug, loadPick, pickedBeat, pickedTitle, readPick, safeLinkUrl, savePick, togglePick,
+  BEATS_STALE_MS, PICK_KEY, cleanBeats, cleanLinks, introParts, introText, isBeatSlug, loadPick, pickedBeat, pickedTitle, readPick, safeLinkUrl, savePick, togglePick,
 } from "../public/js/pick.js";
 import { COPY } from "../public/js/select-copy.js";
 
@@ -77,6 +77,16 @@ test("beats: only well-formed beats are drawn, each once; a credit is a link onl
     { role: "Engineer", label: "No link yet", url: null },
   ]);
   assert.deepEqual(cleanLinks(undefined), []);
+});
+
+test("intro parts: words stay words, a name links only to an https address, and the text reads as one sentence", () => {
+  const parts = ["Beats by ", { text: "Kay", url: "https://example.com/kay" }, " and ", { text: "Lo", url: "http://example.com/lo" }, { text: "", url: "https://example.com/nobody" }, ".", 7, null];
+  assert.deepEqual(introParts(parts), [
+    { text: "Beats by ", url: null }, { text: "Kay", url: "https://example.com/kay" }, { text: " and ", url: null }, { text: "Lo", url: null }, { text: ".", url: null },
+  ]);
+  assert.equal(introText(parts), "Beats by Kay and Lo.");
+  assert.deepEqual(introParts("One plain sentence."), [{ text: "One plain sentence.", url: null }], "a plain string still works");
+  assert.deepEqual(introParts(undefined), []);
 });
 
 // ── The page's own script, run against a stand-in page ───────────────────────────────────────
@@ -188,7 +198,11 @@ test("select page: the beats load, each with a player and a Choose button; nothi
   assert.equal(page.row(1).find("credit").hidden, true, "a beat with no credit shows none");
   // The words come from the one copy object.
   assert.deepEqual([page.$("select-headline").textContent, page.$("select-intro").textContent, page.$("beats-title").textContent, page.$("picked-line").textContent, page.$("pick-change").textContent, page.$("links-title").textContent],
-    [COPY.headline, COPY.intro, COPY.listTitle, COPY.done, COPY.change, COPY.linksTitle]);
+    [COPY.headline, introText(COPY.intro), COPY.listTitle, COPY.done, COPY.change, COPY.linksTitle]);
+  // The three names in the intro are links, in the order written, each to its https address.
+  assert.deepEqual(page.$("select-intro").all("a").map((a) => [a.textContent, a.getAttribute("href"), a.getAttribute("rel")]),
+    introParts(COPY.intro).filter((p) => p.url).map((p) => [p.text, p.url, "noopener"]));
+  assert.equal(page.$("select-intro").all("a").length, 3, "Ayake, 4stro and Studio404 are linked");
   assert.equal(page.tab.title, `${COPY.headline} | Top Barz`);
   assert.equal(page.$("links").hidden, false);
   assert.deepEqual(page.$("links-list").children.map((li) => li.textContent), COPY.links.map((l) => `${l.role}: ${l.label}`));
@@ -349,7 +363,7 @@ test("select page: a credit shows only when a beat has one; a browser that canno
 test("select page: same look and the same policy as the voting page; noindex; not linked from the vote", () => {
   const html = read("select.html");
   const index = read("index.html");
-  assert.match(html, /<meta name="robots" content="noindex">/, "noindex until the real copy lands (RUNBOOK.md, The select page)");
+  assert.doesNotMatch(html, /name="robots"/, "the real copy landed 3 Oct 2026: the page is no longer noindex, and must not become so again (RUNBOOK.md, The select page)");
   const head = (page, re) => [...page.matchAll(re)].map((m) => m[0]);
   for (const re of [/<link rel="stylesheet"[^>]*>/g, /<link rel="preload"[^>]*as="font"[^>]*>/g, /<link rel="(?:icon|apple-touch-icon)"[^>]*>/g, /<meta name="(?:viewport|theme-color|color-scheme)"[^>]*>/g]) {
     assert.deepEqual(head(html, re), head(index, re), `the same ${re.source} as the voting page`);
@@ -369,17 +383,26 @@ test("select page: same look and the same policy as the voting page; noindex; no
   for (const file of ["js/app.js", "js/gate.js", "js/comments.js", "js/gallery.js", "js/api.js", "js/logic.js"]) assert.ok(!/["'`/]select\b|select-copy|pick\.js/.test(read(file)), `${file} does not reach the select page`);
 });
 
-test("select page: the placeholder copy lives in one object, and nowhere else", () => {
+test("select page: the copy lives in one object, and nowhere else; it is Top Barz's real copy, not a placeholder", () => {
   assert.deepEqual(Object.keys(COPY), ["headline", "intro", "listTitle", "choose", "chosen", "pickedTitle", "done", "change", "linksTitle", "links"]);
-  for (const key of ["headline", "intro", "listTitle", "choose", "chosen", "pickedTitle", "done", "change", "linksTitle"]) assert.ok(typeof COPY[key] === "string" && COPY[key].trim(), `COPY.${key}`);
+  for (const key of ["headline", "listTitle", "choose", "chosen", "pickedTitle", "done", "change", "linksTitle"]) assert.ok(typeof COPY[key] === "string" && COPY[key].trim(), `COPY.${key}`);
   assert.ok(COPY.pickedTitle.includes("{name}"), "the done state names the beat");
-  assert.equal(COPY.linksTitle, "Producer and engineer");
-  assert.ok(COPY.links.length >= 2 && COPY.links.every((l) => l.label && (l.url === "" || safeLinkUrl(l.url))), "each link is https, or empty until Top Barz sends it");
+  // The intro Scooter sent on 3 Oct 2026, with the three names linked (he may swap the two engineer names later).
+  assert.ok(Array.isArray(COPY.intro) && COPY.intro.length >= 3, "the intro is parts: words and linked names");
+  assert.equal(introText(COPY.intro), "These are beats from professional engineers, Ayake and 4stro, who have engineered hundreds of sessions with some of your favorite notable artists. This is made possible by our partnership with Studio404 located in Brooklyn, NY.");
+  assert.deepEqual(introParts(COPY.intro).filter((p) => p.url).map((p) => p.url), ["https://instagram.com/ayake.io", "https://instagram.com/4stro.naut", "https://studio404.nyc/"]);
+  assert.ok(COPY.intro.filter((p) => typeof p === "object").every((p) => safeLinkUrl(p.url)), "every linked name in the intro has an https address");
+  assert.equal(COPY.linksTitle, "Engineers and studio");
+  assert.ok(COPY.links.length === 3 && COPY.links.every((l) => l.label && safeLinkUrl(l.url)), "the three credits are links, each https");
+  for (const text of ["placeholder", "goes here"]) {
+    assert.ok(!JSON.stringify(COPY).toLowerCase().includes(text), `no "${text}" is left in the copy`);
+  }
   const html = read("select.html");
   const js = read("js/select.js") + read("js/pick.js");
-  for (const key of ["headline", "intro", "listTitle", "choose", "chosen", "done", "change", "linksTitle"]) {
+  for (const key of ["headline", "listTitle", "choose", "chosen", "done", "change", "linksTitle"]) {
     assert.ok(!html.includes(COPY[key]) && !js.includes(`"${COPY[key]}"`), `"${COPY[key]}" is written once, in select-copy.js`);
   }
+  assert.ok(!html.includes("Ayake") && !js.includes("Ayake"), "the intro is written once, in select-copy.js");
   for (const id of ["tbz-select-headline", "tbz-select-intro", "tbz-beats-title", "tbz-picked-title", "tbz-picked-line", "tbz-pick-change", "tbz-links-title", "tbz-links-list"]) {
     assert.match(html, new RegExp(`<([a-z0-9]+)\\b[^>]*\\bid="${id}"[^>]*></\\1>`), `#${id} is empty in the page: its words come from the copy`);
   }

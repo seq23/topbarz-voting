@@ -387,10 +387,10 @@ test("select page: the copy lives in one object, and nowhere else; it is Top Bar
   assert.deepEqual(Object.keys(COPY), ["headline", "intro", "listTitle", "choose", "chosen", "pickedTitle", "done", "change", "linksTitle", "links"]);
   for (const key of ["headline", "listTitle", "choose", "chosen", "pickedTitle", "done", "change", "linksTitle"]) assert.ok(typeof COPY[key] === "string" && COPY[key].trim(), `COPY.${key}`);
   assert.ok(COPY.pickedTitle.includes("{name}"), "the done state names the beat");
-  // The intro Scooter sent on 3 Oct 2026, with the three names linked (he may swap the two engineer names later).
+  // The intro Scooter sent on 3 Oct 2026 (the morning update: named artists, new Ayake and 4stro links), with the three names linked.
   assert.ok(Array.isArray(COPY.intro) && COPY.intro.length >= 3, "the intro is parts: words and linked names");
-  assert.equal(introText(COPY.intro), "These are beats from professional engineers, Ayake and 4stro, who have engineered hundreds of sessions with some of your favorite notable artists. This is made possible by our partnership with Studio404 located in Brooklyn, NY.");
-  assert.deepEqual(introParts(COPY.intro).filter((p) => p.url).map((p) => p.url), ["https://instagram.com/ayake.io", "https://instagram.com/4stro.naut", "https://studio404.nyc/"]);
+  assert.equal(introText(COPY.intro), "These are beats from professional engineers, Ayake and 4stro, who have engineered hundreds of sessions with some of your favorite artists like Ice Spice, Jay Gwuapo, Fivio Foreign and the Goo Goo Dolls. This is made possible by our partnership with Studio404 located in Brooklyn, NY.");
+  assert.deepEqual(introParts(COPY.intro).filter((p) => p.url).map((p) => p.url), ["https://ayake.base44.app/", "https://linktr.ee/4stro", "https://studio404.nyc/"]);
   assert.ok(COPY.intro.filter((p) => typeof p === "object").every((p) => safeLinkUrl(p.url)), "every linked name in the intro has an https address");
   assert.equal(COPY.linksTitle, "Engineers and studio");
   assert.ok(COPY.links.length === 3 && COPY.links.every((l) => l.label && safeLinkUrl(l.url)), "the three credits are links, each https");

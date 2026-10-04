@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="color-scheme" content="dark">
+<title>Hear your track | Top Barz</title>
+<meta name="description" content="Enter the code your engineer gave you to hear and download your track from the Top Barz booth.">
+<link rel="icon" type="image/png" href="/img/favicon.png">
+<link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
+<link rel="preload" href="/fonts/dela-gothic-one-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/epilogue-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/css/site.css">
+<link rel="modulepreload" href="/js/logic.js">
+<link rel="modulepreload" href="/js/api.js">
+<link rel="modulepreload" href="/js/dom.js">
+<link rel="modulepreload" href="/js/player.js">
+<link rel="modulepreload" href="/js/booth-rules.js">
+<link rel="modulepreload" href="/js/track-copy.js">
+<script type="module" src="/js/track.js"></script>
+</head>
+<body>
+<a class="skip" href="#tbz-code">Skip to the code</a>
+
+<header class="top">
+  <a class="logo" href="https://www.topbarz.xyz/"><img src="/img/logo.png" width="212" height="186" alt="Top Barz"></a>
+  <h1 class="slogan">JUMP IN THE BOOTH</h1>
+</header>
+
+<main>
+  <section class="intro">
+    <h2 id="tbz-track-headline" class="page-title"></h2>
+    <p id="tbz-track-intro" class="lede"></p>
+  </section>
+
+  <form id="tbz-code-form" class="code-form" novalidate>
+    <div class="field field-code">
+      <label for="tbz-code" id="tbz-code-label"></label>
+      <input id="tbz-code" type="text" inputmode="numeric" autocomplete="off" autocorrect="off" spellcheck="false" maxlength="4" pattern="[0-9]*" enterkeyhint="go" aria-describedby="tbz-code-msg">
+    </div>
+    <button type="submit" id="tbz-go" class="btn"></button>
+    <p id="tbz-code-msg" class="field-error" role="alert" hidden></p>
+    <p id="tbz-code-wait" class="list-note" role="status" hidden></p>
+  </form>
+
+  <section id="tbz-found" class="found" aria-labelledby="tbz-found-title" hidden>
+    <h2 id="tbz-found-title" tabindex="-1"></h2>
+    <div id="tbz-found-list" class="list"></div>
+    <a id="tbz-download" class="btn" download></a>
+    <button type="button" id="tbz-another" class="btn btn-small btn-ghost"></button>
+  </section>
+  <noscript><p class="list-note">This page needs JavaScript to find and play your track. Turn it on and reload.</p></noscript>
+</main>
+
+<footer class="foot">
+  <div class="foot-inner">
+    <section class="foot-block" aria-labelledby="tbz-contact-title">
+      <h2 id="tbz-contact-title">Contact</h2>
+      <p>Questions? Message Top Barz on Instagram.</p>
+      <p class="foot-links">
+        <a href="https://www.instagram.com/topbarz.xyz" rel="noopener">@topbarz.xyz on Instagram</a>
+        <a href="https://www.topbarz.xyz/">topbarz.xyz</a>
+      </p>
+    </section>
+    <p class="foot-mark">Top Barz</p>
+  </div>
+</footer>
+</body>
+</html>

@@ -12,6 +12,13 @@ export const LIMITS = {
   commentsPerVoter: { window: 300, max: 10 },
   giphyPerIp: { window: 60, max: 30 },
   verifyPerIp: { window: 600, max: 40 },
+  // The booth (functions/api/booth): uploads per engineer's connection and for the whole site per
+  // day; the log; and code lookups, so a code cannot be guessed by trying them all.
+  boothUploadsPerIp: { window: 3600, max: 60 },
+  boothUploadsPerDay: { window: 86400, max: 300 },
+  boothLogPerIp: { window: 60, max: 60 },
+  boothLookupPerMinute: { window: 60, max: 5 },
+  boothLookupPerHour: { window: 3600, max: 30 },
 };
 export const COMMENT_MAX_CHARS = 500;
 export const NAME_MAX_CHARS = 80;

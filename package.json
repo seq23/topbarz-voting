@@ -18,9 +18,12 @@
     "load-tracks": "node scripts/load-tracks.mjs",
     "load-photos": "node scripts/load-photos.mjs",
     "load-beats": "node scripts/load-beats.mjs",
-    "export": "node scripts/export.mjs"
+    "export": "node scripts/export.mjs",
+    "booth-log": "node scripts/booth-log.mjs",
+    "make-track-qr": "node scripts/make-track-qr.mjs"
   },
   "devDependencies": {
+    "qrcode": "^1.5.4",
     "sharp": "^0.34.0",
     "smol-toml": "^1.3.0",
     "wrangler": "^4.0.0"

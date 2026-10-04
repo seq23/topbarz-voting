@@ -74,7 +74,7 @@ Production commands; add `-preview --env preview` to the database name for previ
 - **New table or column:** add `migrations/000N_name.sql`; Deploy applies it to preview, then production.
 
 ## Work on it locally
-- `npm ci`, then `npm run dev:seed` (local database + the 4 test tracks + the 4 test photos + the 4 stand-in beats), then `npm run dev` → http://localhost:8788 (the select page: http://localhost:8788/select).
+- `npm ci`, then `npm run dev:seed` (local database + the 4 test tracks + the 4 test photos + the 4 stand-in beats), then `npm run dev` → http://localhost:8788 (the select page: http://localhost:8788/select; the booth: /booth, /track, /track-qr).
 - `npm run check` runs every test (about 30 seconds).
 
 ## The page (front end)
@@ -127,6 +127,19 @@ Static files in `public/`, no framework and no build step: what is in the folder
 - **Waiting, done, failed.** "Loading the beats…" (and a slower-connection line after 5 s); a failed load says why and offers "Try again"; no beats shows the empty panel; audio that fails says so on its row and play tries again. One beat plays at a time, and choosing does not stop it. A page left open asks for the beats again when it is shown after a minute.
 - **Check it in a browser:** open `https://staging.topbarz-voting.pages.dev/select`, play a beat, start another (the first stops), choose one (the page moves to "You picked …"), refresh (still picked), open a second tab (picked there too), "Change my pick".
 
+## The booth (engineer upload and track codes)
+At the CultureCon booth an engineer records a rapper and hands the finished file back by a 4-digit code: no Dropbox, no email, no passphrase (the client's call, 3 Oct 2026). Booth tracks are their own data (table `booth_tracks`, `migrations/0004_booth_tracks.sql`; audio in R2 under `booth/`) and are never in the vote: not `/api/state`, the tally, the export or `/api/beats`; `tests/booth.test.mjs` fails if that changes.
+
+- **The engineer: `https://voting.topbarz.xyz/booth`** (`public/booth.html`, not for search). Drop the finished file on the zone, or tap it to choose one on a phone. It uploads at once with a progress bar; when it is done the page shows the 4-digit code in very large type with the file name under it. Read the code to the artist, tap **Next file**. A failed upload says why and offers **Try again** (the same file). Under the zone: today's uploads (code, file name, time, size, how often opened), from `GET /api/booth/tracks`.
+- **The rapper: `https://voting.topbarz.xyz/track`** (`public/track.html`; `/track/` and `/track.html` redirect to it). "Hear your track", one code box (numeric keyboard; it sends itself on the fourth digit), Go. The right code shows the file name, the same player the vote uses, and **Download** (`/media/booth/<key>?dl=1`, sent as an attachment under the engineer's file name). A wrong code: "No track with that code yet. Ask your engineer." Too many tries: "Too many tries. Give it a minute." `/track?code=2468` looks the code up on load.
+- **The sign: `https://voting.topbarz.xyz/track-qr`** (`public/track-qr.html`): print it and put it in the booth. One big QR (`public/img/track-qr.svg`) that opens `https://voting.topbarz.xyz/track`, the line "Scan. Enter the code your engineer gives you. Hear and download your track." and the address in words. It prints ink on white. The SVG is made once by `npm run make-track-qr` (`scripts/make-track-qr.mjs`; the `qrcode` library is a dev dependency and nothing of it ships) and committed; the test re-runs the generator and fails if the committed file differs.
+- **What the upload takes.** Audio only, by extension AND declared type: WAV, MP3, M4A, AIF/AIFF or FLAC, as `audio/*` or `application/octet-stream`; 1 byte to 100 MB, with the size declared (`content-length`); the name from the `x-file-name` header, kept as the base name, printable characters, at most 120. The file streams straight into R2 (`booth/<code>-<16 random hex>.<ext>`); the code is four digits from the platform's random source, reserved by the table's UNIQUE constraint and retried on a collision, so two tracks never share one. A track is reachable only with the key the lookup hands out, never by its code against `/media`.
+- **Limits** (`functions/_lib/config.js`): 60 uploads an hour per IP and 300 a day for the whole site (one counter in `rate_limits`, key `booth-uploads-day`; past it the upload answers 429 `daily_limit` and the page says "Upload limit reached for today, tell Sequoia"); the log 60 reads a minute per IP; code lookups 5 a minute and 30 an hour per IP, so a code cannot be found by trying them all. Over a limit is a 429 with a message the page shows.
+- **The log:** `npm run booth-log -- --env production` (or `preview`) writes `exports/booth-log.csv` (code, file name, size, uploaded_at ISO, opened), newest first, from `booth_tracks` only; `exports/` is git-ignored. It stops and says so when the table is empty.
+- **Where the copy lives:** `public/js/booth-copy.js` (the engineer's page) and `public/js/track-copy.js` (the rapper's page), one object each; the pages' elements are empty in the HTML and filled from them. The rules with no screen in them (what a code is, which files the zone takes, today's rows) are `public/js/booth-rules.js`.
+- **Take a track down:** `npx wrangler d1 execute topbarz-voting --remote --command "DELETE FROM booth_tracks WHERE code = '2468'"` and `npx wrangler r2 object delete topbarz-voting-media/<media_key>` (the key is in the row; read it first with `SELECT media_key FROM booth_tracks WHERE code = '2468'`). Nothing deletes by itself.
+- **Check it in a browser:** open `https://staging.topbarz-voting.pages.dev/booth` on a phone, drop or choose an MP3, read the code; open `/track` in another tab, type the code (it sends on the fourth digit), play, Download; try a wrong code; try six wrong codes in a minute.
+
 ## The API a front end calls
 Same origin, JSON in and out. Every error is `{ "error": "<code>", "message": "<plain words to show>" }` with a 4xx/5xx status.
 
@@ -142,7 +155,10 @@ Same origin, JSON in and out. Every error is `{ "error": "<code>", "message": "<
 | `GET /api/giphy/trending` | GIFs to show before a search. |
 | `GET /api/giphy/search` | GIF search. |
 | `GET /api/beats` | The beats the select page (`/select`) plays. Not part of the vote. |
-| `GET /media/tracks/…`, `/media/photos/…`, `/media/beats/…` | Audio and photos (use the URLs from state and beats as they are). |
+| `POST /api/booth/tracks` | The booth: the engineer's upload (the raw file) → a 4-digit code. Not part of the vote. |
+| `GET /api/booth/tracks` | The booth's log, newest first, at most 200 rows. |
+| `GET /api/booth/tracks/<code>` | The rapper's lookup: the track behind a code (counts the open). |
+| `GET /media/tracks/…`, `/media/photos/…`, `/media/beats/…`, `/media/booth/…` | Audio and photos (use the URLs from state, beats and the booth as they are). `/media/booth/…?dl=1` is a download. |
 
 **`GET /api/state`**
 ```json
@@ -163,6 +179,12 @@ Same origin, JSON in and out. Every error is `{ "error": "<code>", "message": "<
 - **`giphy.available: false`**: hide the GIF picker. **`gate.available: false`**: voting is not switched on (the signing secret is missing); show the tracks only. **`verification.available`**: `true` = the gate emails a code and the popup shows the code step; `false` (`reason`: `switched_off` or `no_key`) = the gate returns the token at once. The page does not need to branch on it: it follows the answer `POST /api/voters` gives.
 
 **`GET /api/beats`** → `{ "beats": [{ "slug": "midnight-run", "name": "Midnight Run", "audio_url": "/media/beats/midnight-run-3290fefeb1.mp3", "duration_ms": 92000, "credit_label": "Kay Beats" | null, "credit_url": "https://…" | null }] }`, in display order. Read-only (any other method is a 405), cached 5 s, never per-visitor, and the same before and after voting closes. `beats: []` means none are loaded: show the empty state. `credit_url` is only ever https, and only present with a `credit_label`. The pick is not an API call: the page keeps the chosen `slug` on the device.
+
+**`POST /api/booth/tracks`** — the body is the raw file (not multipart, not JSON), with headers `x-file-name` (the file's name, URL-encoded), `content-type` (`audio/*` or `application/octet-stream`) and `content-length` (required, 1 byte to 100 MB). → `{ "code": "2468", "file_name": "Take 3.wav", "uploaded_at": "…" }`. Errors: 400 `file_name_required` / `empty_body` / `bad_size` (the bytes did not match the declared size), 413 `bad_size`, 415 `not_audio`, 429 `rate_limited` (60 an hour from one IP) and 429 `daily_limit` (300 a day, the whole site), 503 `no_code_free`. Send it with an `XMLHttpRequest` to show upload progress.
+
+**`GET /api/booth/tracks`** → `{ "tracks": [{ "code", "file_name", "uploaded_at", "opened", "size" }] }`, newest first, at most 200, never a key. 429 `rate_limited` past 60 reads a minute from one IP.
+
+**`GET /api/booth/tracks/<code>`** → `{ "code", "file_name", "audio_url": "/media/booth/<key>", "download_url": "/media/booth/<key>?dl=1", "size", "uploaded_at" }`; each answer counts as one open. 404 `not_found` for anything that is not a known 4-digit code (show "No track with that code yet. Ask your engineer."); 429 `rate_limited` past 5 tries a minute or 30 an hour from one IP (show "Too many tries. Give it a minute."). No token, no email, never a list, never a search.
 
 **`POST /api/voters`** body `{ "name", "email", "city", "marketing_opt_in": false, "website": "" }`
 - All three text fields are required. `marketing_opt_in` is `true` only if the box was ticked (default off). `website` is the honeypot: render it hidden from people (off-screen, `tabindex="-1"`, `autocomplete="off"`) and send whatever is in it.
@@ -185,4 +207,4 @@ Same origin, JSON in and out. Every error is `{ "error": "<code>", "message": "<
 **Share text** (built in the page, from the track label): `<label> wants you to vote on their track from the Top Barz experience https://voting.topbarz.xyz/#<slug>` (the link is on whatever address the page is open at; see "The page").
 
 ## Limits (functions/_lib/config.js)
-Per hour: 40 sign-ups per IP, 10 per email. Per minute: 60 likes per voter, 240 per IP. Comments: 10 per voter per 5 minutes, 120 per IP per hour. GIF searches: 30 per IP per minute. Email codes: 50 emails in any 24 hours for the whole site (production 45, staging 5), 3 an hour per email, 60 s between sends, 5 tries per code, 40 code checks per IP per 10 minutes. Over a limit is a 429 `rate_limited` with a `message` to show.
+Per hour: 40 sign-ups per IP, 10 per email. Per minute: 60 likes per voter, 240 per IP. Comments: 10 per voter per 5 minutes, 120 per IP per hour. GIF searches: 30 per IP per minute. Email codes: 50 emails in any 24 hours for the whole site (production 45, staging 5), 3 an hour per email, 60 s between sends, 5 tries per code, 40 code checks per IP per 10 minutes. Over a limit is a 429 `rate_limited` with a `message` to show. Booth: 60 uploads an hour per IP and 300 a day for the whole site (`booth-uploads-day`); log 60 a minute per IP; code lookups 5 a minute and 30 an hour per IP.

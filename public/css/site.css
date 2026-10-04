@@ -39,6 +39,8 @@
   --color-off: #6f6a66;
   --color-error: #ff9d8a;
   --color-focus: hsl(31.65 90.1% 80.2%);
+  --color-print-paper: #fff;
+  --color-print-ink: #111;
   --color-backdrop: rgb(0 0 0 / 0.8);
   --color-backdrop-deep: rgb(0 0 0 / 0.94);
   --color-shadow: rgb(0 0 0 / 0.6);
@@ -415,6 +417,55 @@ dialog::backdrop { background: var(--color-backdrop); }
 /* A link that may wrap over several lines: a thumb-sized target that does not move the lines. */
 .credit a, .credits a { padding-block: 13px; }
 
+/* ── The booth (/booth, /track, /track-qr): the drop zone, the code, the log, the sign ───── */
+.booth { max-width: var(--measure); margin: var(--space-6) auto 0; padding-inline: var(--space-5); display: grid; gap: var(--space-4); }
+.zone {
+  display: grid; gap: var(--space-2); justify-items: center; align-content: center; min-height: 200px; padding: var(--space-6) var(--space-4);
+  border: 3px dashed var(--color-accent); text-align: center; cursor: pointer;
+  transition: background-color 0.1s linear, border-color 0.1s linear;
+}
+.zone:focus-within { outline: 3px solid var(--color-focus); outline-offset: 2px; }
+.zone.is-over { background: var(--color-accent-wash); border-style: solid; }
+.zone.is-busy { opacity: 0.55; cursor: wait; }
+.zone-text { font: 400 var(--text-head)/1.17 var(--font-display); letter-spacing: var(--tracking-display); color: var(--color-accent); }
+.zone-hint { font-size: var(--text-sm); color: var(--color-ink-2); }
+.progress { height: 16px; background: var(--color-paper-3); border: 1px solid var(--color-field-line); }
+.progress-bar { height: 100%; width: var(--p, 0%); background: var(--color-accent); transition: width 0.15s linear; }
+.progress-text { text-align: center; color: var(--color-ink-2); overflow-wrap: anywhere; }
+.progress-text:empty { display: none; }
+.done {
+  display: grid; justify-items: center; gap: var(--space-2); padding: var(--space-6) var(--space-3); text-align: center;
+  background: var(--color-accent-wash); border-block: 1px solid var(--color-warm);
+}
+.done-title { font: 400 var(--text-head)/1.17 var(--font-display); letter-spacing: var(--tracking-display); color: var(--color-warm); }
+/* The code is read from across the room: as wide as the phone allows, four digits on one line. */
+.booth-code { font: 400 clamp(4.5rem, 23vw, 12rem)/1 var(--font-display); letter-spacing: 0.06em; margin-left: 0.06em; color: var(--color-warm); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.booth-code:focus { outline: none; }
+.done-file { color: var(--color-ink-2); overflow-wrap: anywhere; }
+.done .btn { margin-top: var(--space-3); }
+.failed { display: grid; justify-items: center; gap: var(--space-3); padding: var(--space-4); text-align: center; color: var(--color-error); border: 1px solid var(--color-error); overflow-wrap: anywhere; }
+.booth-log { max-width: var(--column); margin: var(--space-10) auto 0; padding: 0 var(--space-3) var(--space-16); }
+.booth-log > h2 { font: 400 var(--text-head)/1.17 var(--font-display); letter-spacing: var(--tracking-display); color: var(--color-accent); padding: 0 var(--space-2) var(--space-3); }
+.log { display: grid; border-top: 1px solid var(--color-rule); }
+.log li { display: grid; grid-template-columns: 4.4em minmax(0, 1fr); gap: var(--space-1) var(--space-3); align-items: baseline; padding: var(--space-3) var(--space-2); border-bottom: 1px solid var(--color-rule); }
+.log-code { grid-row: span 2; font: 400 1.4rem/1.2 var(--font-display); color: var(--color-warm); font-variant-numeric: tabular-nums; }
+.log-file { overflow-wrap: anywhere; }
+.log-meta { font-size: var(--text-sm); color: var(--color-ink-2); }
+.code-form { max-width: var(--measure); margin: var(--space-6) auto 0; padding-inline: var(--space-5); display: grid; gap: var(--space-4); justify-items: center; }
+.code-form .field { width: min(100%, 300px); text-align: center; }
+.code-form .btn { min-width: 160px; }
+.found { max-width: var(--column); margin: var(--space-8) auto 0; padding: var(--space-6) var(--space-3) var(--space-16); display: grid; gap: var(--space-4); justify-items: center; text-align: center; scroll-margin-top: var(--space-3); }
+.found h2 { font: 400 var(--text-head)/1.17 var(--font-display); letter-spacing: var(--tracking-display); color: var(--color-warm); }
+.found h2:focus { outline: none; }
+.found .list { width: 100%; text-align: left; }
+.found .btn { margin-top: var(--space-2); }
+.qr { max-width: var(--measure); margin: 0 auto; padding: 0 var(--space-5) var(--space-16); display: grid; gap: var(--space-6); justify-items: center; text-align: center; }
+.qr-title { font: 400 var(--text-display)/1.09 var(--font-display); letter-spacing: var(--tracking-display); color: var(--color-warm); }
+.qr-code { width: min(100%, 480px); background: var(--color-print-paper); }
+.qr-text { font-size: clamp(1.25rem, 1rem + 1.2vw, 1.75rem); line-height: 1.4; }
+.qr-url { font: 400 var(--text-lead)/1.3 var(--font-display); letter-spacing: var(--tracking-display); color: var(--color-accent); overflow-wrap: anywhere; }
+.print-logo { width: 88px; margin-bottom: var(--space-8); }
+
 /* ── Small phones, then wider screens ────────────────────────────────────────────────────── */
 @media (max-width: 359px) {
   .field-pair { grid-template-columns: minmax(0, 1fr); }
@@ -426,6 +477,7 @@ dialog::backdrop { background: var(--color-backdrop); }
   .top { padding-top: var(--space-10); padding-bottom: var(--space-8); }
   .logo { margin-bottom: var(--space-10); }
   .logo img { width: 116px; }
+  .print-logo { width: 116px; }
   .slogan { max-width: none; }
   .strip { height: 300px; gap: var(--space-3); padding: 0 var(--space-16); scroll-padding: 0 var(--space-16); }
   .gallery .arrow { display: grid; }
@@ -459,4 +511,12 @@ dialog::backdrop { background: var(--color-backdrop); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
   .spinner { border-right-color: currentColor; border-style: dotted; }
+}
+
+/* The sign (/track-qr) on paper: ink on white, nothing from the screen's chrome. */
+@media print {
+  .print-page { background: var(--color-print-paper); color: var(--color-print-ink); }
+  .print-page .top { padding-top: 0; }
+  .print-page .qr-text { color: var(--color-print-ink); }
+  .print-page .qr-code { width: 420px; }
 }

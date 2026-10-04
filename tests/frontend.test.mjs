@@ -1049,7 +1049,21 @@ test("link preview: Open Graph tags and a 1200x630 image", async () => {
 // ── Wiring: nothing the page needs is missing, nothing inline, nothing heavy ─────────────────
 // Each page that runs a script, and the one script it runs. Every other script is reached from
 // one of these by import, and belongs to the page (or pages) that reach it.
-const PAGE_SCRIPTS = { "index.html": "app.js", "select.html": "select.js" };
+const PAGE_SCRIPTS = { "index.html": "app.js", "select.html": "select.js", "booth.html": "booth.js", "track.html": "track.js" };
+// What each pair of pages may have in common. The vote's page shares its helpers and player with
+// the select page and the rapper's page; the engineer's page takes only the DOM helpers.
+const SHARED = {
+  "app.js+select.js": ["api.js", "dom.js", "logic.js", "player.js"],
+  "app.js+track.js": ["api.js", "dom.js", "logic.js", "player.js"],
+  "app.js+booth.js": ["dom.js"],
+  "booth.js+select.js": ["dom.js"],
+  "select.js+track.js": ["api.js", "dom.js", "logic.js", "player.js"],
+  "booth.js+track.js": ["booth-rules.js", "dom.js"],
+};
+// The scripts of the two vote-side pages (the same eleven files as before the booth existed),
+// and the scripts that belong only to the booth's two pages.
+const VOTE_SCRIPTS = ["api.js", "app.js", "comments.js", "dom.js", "gallery.js", "gate.js", "logic.js", "pick.js", "player.js", "select-copy.js", "select.js"];
+const BOOTH_ONLY_SCRIPTS = ["booth-copy.js", "booth-rules.js", "booth.js", "track-copy.js", "track.js"];
 function scriptsOf(entry) {
   const seen = new Set();
   const walk = (file) => {
@@ -1094,9 +1108,22 @@ test("wiring: every file a page names exists; every element a page's scripts loo
   assert.deepEqual([...owned].sort(), [...JS].sort(), "every script in public/js belongs to a page");
   assert.ok(lookups["index.html"] >= 40, `checked ${lookups["index.html"]} element lookups in index.html`);
   assert.ok(lookups["select.html"] >= 15, `checked ${lookups["select.html"]} element lookups in select.html`);
-  // The voting page loads nothing of the select page's own.
-  const shared = scriptsOf("app.js").filter((f) => scriptsOf("select.js").includes(f));
-  assert.deepEqual(shared, ["api.js", "dom.js", "logic.js", "player.js"], "the two pages share the player and the helpers, and nothing else");
+  assert.ok(lookups["booth.html"] >= 20, `checked ${lookups["booth.html"]} element lookups in booth.html`);
+  assert.ok(lookups["track.html"] >= 13, `checked ${lookups["track.html"]} element lookups in track.html`);
+  // No page loads anything of another page's own: each pair shares exactly what SHARED says.
+  const entries = Object.values(PAGE_SCRIPTS);
+  for (let i = 0; i < entries.length; i++) {
+    for (let j = i + 1; j < entries.length; j++) {
+      const [a, b] = [entries[i], entries[j]].sort();
+      const shared = scriptsOf(a).filter((f) => scriptsOf(b).includes(f));
+      assert.ok(`${a}+${b}` in SHARED, `SHARED names the pair ${a}+${b}`);
+      assert.deepEqual(shared, SHARED[`${a}+${b}`], `${a} and ${b} share exactly these, and nothing else`);
+    }
+  }
+  assert.equal(Object.keys(SHARED).length, (entries.length * (entries.length - 1)) / 2, "every pair is named");
+  assert.deepEqual([...new Set([...scriptsOf("app.js"), ...scriptsOf("select.js")])].sort(), VOTE_SCRIPTS, "the vote's two pages still run exactly the eleven scripts they did");
+  assert.deepEqual([...new Set([...scriptsOf("booth.js"), ...scriptsOf("track.js")])].filter((f) => !VOTE_SCRIPTS.includes(f)).sort(), BOOTH_ONLY_SCRIPTS, "and these belong only to the booth's pages");
+  assert.deepEqual([...VOTE_SCRIPTS, ...BOOTH_ONLY_SCRIPTS].sort(), [...JS].map((f) => f.replace(/^js\//, "")).sort(), "the two lists are every script there is");
 });
 
 test("safety: text is never written as markup, nothing runs inline, and the page loads only its own files and Giphy's GIFs", () => {
@@ -1126,10 +1153,20 @@ test("weight: no libraries, and the whole page is small", () => {
   const fonts = fs.readdirSync(path.join(PUBLIC, "fonts")).reduce((n, f) => n + size(`fonts/${f}`), 0);
   assert.ok(js < 110_000, `the voting page's scripts are ${js} bytes before compression`);
   assert.ok(pageJs("select.js") < 60_000, `the select page's scripts are ${pageJs("select.js")} bytes before compression`);
-  assert.ok(JS.reduce((n, f) => n + size(f), 0) < 120_000, "and every script in public/js together");
+  const voteJs = VOTE_SCRIPTS.reduce((n, f) => n + size(`js/${f}`), 0);
+  const boothJs = BOOTH_ONLY_SCRIPTS.reduce((n, f) => n + size(`js/${f}`), 0);
+  assert.ok(voteJs < 120_000, `the scripts of the voting and select pages together are ${voteJs} bytes (the same eleven files as before the booth)`);
+  assert.ok(boothJs < 30_000, `the scripts that belong only to the booth's pages are ${boothJs} bytes together`);
+  assert.equal(voteJs + boothJs, JS.reduce((n, f) => n + size(f), 0), "and the two together are every script in public/js");
+  assert.ok(pageJs("track.js") < 60_000, `the rapper's page's scripts are ${pageJs("track.js")} bytes before compression`);
+  assert.ok(pageJs("booth.js") < 20_000, `the engineer's page's scripts are ${pageJs("booth.js")} bytes before compression`);
   assert.ok(size("css/site.css") < 40_000);
   assert.ok(size("index.html") < 20_000);
   assert.ok(size("select.html") < 8_000);
+  assert.ok(size("booth.html") < 8_000);
+  assert.ok(size("track.html") < 8_000);
+  assert.ok(size("track-qr.html") < 8_000);
+  assert.ok(size("img/track-qr.svg") < 20_000);
   assert.ok(fonts < 60_000, `fonts are ${fonts} bytes`);
   assert.ok(size("img/logo.png") < 30_000);
   for (const file of [...HTML, ...JS]) assert.ok(!/\bcdn\.|unpkg|jsdelivr|googleapis|gstatic|jquery|\breact\b/i.test(read(file)), `${file}: no library, no CDN`);

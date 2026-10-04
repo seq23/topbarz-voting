@@ -1,7 +1,11 @@
-// GET /media/tracks/<file>, /media/photos/<file> and /media/beats/<file> — straight from the R2 bucket.
-// Keys carry a content hash, so they are cached for a year and never change. Range requests are
-// answered with 206: iOS Safari will not play audio without them.
-const ALLOWED = /^(tracks|photos|beats)\/[A-Za-z0-9][A-Za-z0-9._-]{0,200}$/;
+// GET /media/tracks/<file>, /media/photos/<file>, /media/beats/<file> and /media/booth/<file> —
+// straight from the R2 bucket. Keys carry a content hash (booth: random characters), so they are
+// cached for a year and never change. Range requests are answered with 206: iOS Safari will not
+// play audio without them. A booth file with ?dl=1 is sent as a download under the engineer's
+// file name (the cache key includes the query, so the two forms are cached apart).
+import { downloadName } from "../_lib/booth.js";
+
+const ALLOWED = /^(tracks|photos|beats|booth)\/[A-Za-z0-9][A-Za-z0-9._-]{0,200}$/;
 const CACHE = "public, max-age=31536000, immutable";
 
 function parseRange(header, size) {
@@ -39,6 +43,9 @@ export async function onRequest(context) {
     "accept-ranges": "bytes",
     etag: head.httpEtag,
   });
+  if (key.startsWith("booth/") && new URL(request.url).searchParams.get("dl") === "1") {
+    headers.set("content-disposition", `attachment; filename="${downloadName(head.customMetadata?.fileName)}"`);
+  }
   if (request.headers.get("if-none-match") === head.httpEtag) return new Response(null, { status: 304, headers });
 
   if (rangeHeader) {

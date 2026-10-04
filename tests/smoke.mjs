@@ -105,6 +105,90 @@ try {
   const beatRange = await fetch(base + beats.body.beats[0].audio_url, { headers: { range: "bytes=0-1" } });
   ok(beatRange.status === 206 && beatRange.headers.get("content-range") === "bytes 0-1/4096" && beatRange.headers.get("content-type") === "audio/mpeg", "a beat's audio answers Range with 206, as a track's does");
 
+  // The booth: the engineer's page, the rapper's page, the sign, and a real upload end to end.
+  for (const [p, needle] of [["/booth", 'id="tbz-zone"'], ["/track", 'id="tbz-code"'], ["/track-qr", 'src="/img/track-qr.svg"']]) {
+    const r = await fetch(base + p, { redirect: "manual" });
+    const t = await r.text();
+    const ids = [...t.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]);
+    ok(r.status === 200 && /text\/html/.test(r.headers.get("content-type")) && t.includes(needle), `GET ${p} serves its page`);
+    ok((r.headers.get("content-security-policy") ?? "").startsWith("default-src 'self'; script-src 'self'; style-src 'self'") && !/<script(?![^>]*\bsrc=)[^>]*>|<style\b|\sstyle="/.test(t) && ids.length > 0 && ids.every((id) => id.startsWith("tbz-")), `${p}: the same policy, nothing inline, every id starts with tbz- (${ids.length} ids)`);
+    const named = [...new Set([...t.matchAll(/(?:src|href)="(\/(?:js|css|img|fonts)\/[^"]+)"/g)].map((m) => m[1]))];
+    const missing = (await Promise.all(named.map(async (a) => { const x = await fetch(base + a); await x.arrayBuffer(); return x.status === 200 ? null : `${a} → ${x.status}`; }))).filter(Boolean);
+    ok(named.length >= 6 && missing.length === 0, `every file ${p} names is served (${named.length} files${missing.length ? `; missing: ${missing.join(", ")}` : ""})`);
+  }
+  for (const alias of ["/track/", "/track.html"]) {
+    const hop = await fetch(base + alias, { redirect: "manual" });
+    const landed = await fetch(base + alias);
+    ok([301, 308].includes(hop.status) && new URL(hop.headers.get("location"), base).pathname === "/track" && landed.status === 200 && new URL(landed.url).pathname === "/track", `GET ${alias} ends up at /track`);
+  }
+  ok(!/href="\/(?:booth|track)|booth\.js|track\.js/.test(pageText) && !/href="\/(?:booth|track)|booth\.js|track\.js/.test(selectText), "neither the voting page nor the select page links to the booth");
+  // Each check speaks from its own address (local dev keeps a cf-connecting-ip the client sends),
+  // so the lookup limit (5 a minute per address) is proven on purpose below, not tripped by accident.
+  let addr = 20;
+  const look = (code, ip = `203.0.113.${addr++}`) => j(`/api/booth/tracks/${code}`, { headers: { "cf-connecting-ip": ip } });
+  const sendFile = (name, bytes, type) => fetch(base + "/api/booth/tracks", { method: "POST", headers: { "x-file-name": encodeURIComponent(name), "content-type": type, "content-length": String(bytes.length), "cf-connecting-ip": "203.0.113.9" }, body: bytes }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }));
+  // A small WAV made here: a RIFF header, then a second of silence.
+  const wavBytes = Buffer.alloc(44 + 8000);
+  wavBytes.write("RIFF", 0); wavBytes.writeUInt32LE(36 + 8000, 4); wavBytes.write("WAVEfmt ", 8); wavBytes.writeUInt32LE(16, 16); wavBytes.writeUInt16LE(1, 20); wavBytes.writeUInt16LE(1, 22);
+  wavBytes.writeUInt32LE(8000, 24); wavBytes.writeUInt32LE(8000, 28); wavBytes.writeUInt16LE(1, 32); wavBytes.writeUInt16LE(8, 34); wavBytes.write("data", 36); wavBytes.writeUInt32LE(8000, 40);
+  const up = await sendFile("Smoke Take 1.wav", wavBytes, "audio/wav");
+  ok(up.status === 200 && /^\d{4}$/.test(up.body?.code ?? "") && up.body.file_name === "Smoke Take 1.wav" && Object.keys(up.body).join() === "code,file_name,uploaded_at", `POST /api/booth/tracks takes a generated WAV and answers a 4-digit code (${up.body?.code})`);
+  const found = await look(up.body.code);
+  ok(found.status === 200 && found.body.file_name === "Smoke Take 1.wav" && found.body.size === wavBytes.length && /^\/media\/booth\/\d{4}-[0-9a-f]{16}\.wav$/.test(found.body.audio_url) && found.body.download_url === `${found.body.audio_url}?dl=1`, "GET /api/booth/tracks/<code> finds it, with its audio and download addresses");
+  const dl = await fetch(base + found.body.download_url);
+  ok(dl.status === 200 && dl.headers.get("content-disposition") === 'attachment; filename="Smoke Take 1.wav"' && dl.headers.get("content-length") === String(wavBytes.length) && dl.headers.get("content-type") === "audio/wav" && (await dl.arrayBuffer()).byteLength === wavBytes.length, "the download address sends the whole file as an attachment under its name");
+  const playing = await fetch(base + found.body.audio_url, { headers: { range: "bytes=0-3" } });
+  ok(playing.status === 206 && playing.headers.get("content-range") === `bytes 0-3/${wavBytes.length}` && Buffer.from(await playing.arrayBuffer()).toString() === "RIFF" && playing.headers.get("content-disposition") === null, "the audio address answers Range with 206 and plays inline");
+
+  // The real sample songs: one is in the repo (so this runs on every machine, CI included), and
+  // wherever the Drive package is synced all four are uploaded from it. A synced package with no
+  // "Test tracks" folder is a loud failure, never a skip.
+  const fixture = path.join(ROOT, "tests", "fixtures", "Test - Carlos & Damien.mp3");
+  if (!fs.existsSync(fixture)) throw new Error(`FAILED: the sample song is not in the repo at ${fixture}`);
+  const drive = path.join(os.homedir(), "topbarz-source", "drive");
+  const testTracks = path.join(drive, "Test tracks");
+  const songs = [fixture];
+  if (fs.existsSync(drive)) {
+    if (!fs.existsSync(testTracks)) throw new Error(`FAILED: the Drive package is synced at ${drive} but has no "Test tracks" folder (${testTracks}); run npm run sync-drive`);
+    const four = fs.readdirSync(testTracks).filter((f) => f.endsWith(".mp3")).sort();
+    if (four.length < 4) throw new Error(`FAILED: ${testTracks} holds ${four.length} MP3(s); the four sample songs are expected there`);
+    songs.push(...four.map((f) => path.join(testTracks, f)));
+  }
+  let realUploads = 0;
+  let lastCode = null;
+  for (const song of songs) {
+    const name = path.basename(song);
+    const bytes = fs.readFileSync(song);
+    const r = await sendFile(name, bytes, "audio/mpeg");
+    if (r.status !== 200) throw new Error(`FAILED: uploading ${name} (${bytes.length} bytes) answered ${r.status} ${JSON.stringify(r.body)}`);
+    const f = await look(r.body.code);
+    lastCode = r.body.code;
+    const d = await fetch(base + f.body.download_url, { headers: { range: "bytes=0-1" } });
+    await d.arrayBuffer();
+    const whole = await fetch(base + f.body.download_url, { method: "HEAD" });
+    const audio = await fetch(base + f.body.audio_url, { headers: { range: "bytes=0-1" } });
+    await audio.arrayBuffer();
+    ok(r.body.file_name === name && f.status === 200 && f.body.file_name === name && f.body.size === bytes.length && whole.status === 200 && whole.headers.get("content-length") === String(bytes.length) && whole.headers.get("content-disposition") === `attachment; filename="${name}"` && d.status === 206 && audio.status === 206 && audio.headers.get("content-range") === `bytes 0-1/${bytes.length}`, `the real song "${name}" (${bytes.length} bytes) goes up, is found by code ${r.body.code}, downloads under its own name at full length, and plays by Range`);
+    realUploads++;
+  }
+  ok(realUploads === songs.length && realUploads >= 1, `${realUploads} real sample song(s) uploaded${songs.length > 1 ? " (the repo's copy plus the Drive package's four)" : " (the repo's copy; no Drive package on this machine)"}`);
+  const logRes = await j("/api/booth/tracks");
+  ok(logRes.status === 200 && logRes.body.tracks.length === 1 + realUploads && logRes.body.tracks[0].code === lastCode && logRes.body.tracks.at(-1).code === up.body.code && logRes.body.tracks.every((t) => /^\d{4}$/.test(t.code) && t.opened === 1 && !("media_key" in t)), `GET /api/booth/tracks lists the ${1 + realUploads} uploads, newest first, each opened once, no key`);
+  const wrongCode = up.body.code === "0000" ? "0001" : "0000";
+  const none = await look(wrongCode);
+  ok(none.status === 404 && none.body.error === "not_found", "a wrong code is a 404 not_found");
+  const notAudio = await sendFile("notes.txt", Buffer.from("hello"), "text/plain");
+  ok(notAudio.status === 415 && notAudio.body.error === "not_audio", "a text file is refused (415 not_audio)");
+  // Lookups: 5 a minute per address. One fresh address, six wrong tries: five 404s, then the 429.
+  // (The minute is a fixed window; if it is about to roll over, wait for the next one first.)
+  const slack = 60_000 - (Date.now() % 60_000);
+  if (slack < 5_000) await new Promise((r) => setTimeout(r, slack + 200));
+  const tries = [];
+  for (let i = 0; i < 6; i++) tries.push((await look(wrongCode, "203.0.113.200")).status);
+  ok(tries.join() === "404,404,404,404,404,429", `code lookups are rate limited: the 6th wrong try in a minute is a 429 (${tries.join(",")})`);
+  const limited = await look(wrongCode, "203.0.113.200");
+  ok(limited.status === 429 && limited.body.error === "rate_limited" && /Give it a minute/.test(limited.body.message), "and it stays shut for the minute, with a message to show");
+
   const s1 = await j("/api/state");
   ok(s1.status === 200 && s1.body.tracks.length === 1 && s1.body.tracks[0].slug === "smoke" && s1.body.tracks[0].likes === 0, "GET /api/state lists the track with 0 likes");
   ok(!/beat/i.test(JSON.stringify(s1.body)) && Object.keys(s1.body).sort().join() === "closed,gate,giphy,now,photos,tracks,verification,voting_ends_at", "the beat is not in /api/state, whose shape has not changed");
@@ -163,7 +247,7 @@ try {
   ok(whole.status === 200 && whole.headers.get("accept-ranges") === "bytes" && /immutable/.test(whole.headers.get("cache-control")) && whole.headers.get("content-type") === "audio/mpeg", "media is served whole with a long cache");
   ok((await fetch(base + "/media/manifest/photos.json")).status === 404, "the manifest is not reachable under /media");
 
-  if (passed < 40) throw new Error(`only ${passed} checks ran`);
+  if (passed < 60) throw new Error(`only ${passed} checks ran`);
   console.log(`smoke: ${passed} checks passed`);
 } catch (err) {
   console.error(String(err.message ?? err));

@@ -6,7 +6,7 @@ import { $, h, icon, reducedMotion } from "./dom.js";
 import { createGallery } from "./gallery.js";
 import { createGate } from "./gate.js";
 import {
-  countdownSpoken, detectPlatform, formatCountdown, formatCount, formatEndsLine, holdFrom,
+  canReorder, countdownSpoken, detectPlatform, displayOrder, formatCountdown, formatCount, formatEndsLine, holdFrom,
   LIKE_WAIT_MS, likeInitial, likeReduce, likeRequest, likeView, nextPollDelay, plural,
   rulesEndLine, safeMediaUrl, serverNow, serverTimeOf, shareMessage, slugFromHash, smsHref, syncClock, trackLink, voterRecord,
 } from "./logic.js";
@@ -57,13 +57,15 @@ const app = {
   cards: new Map(), // slug → card
   linkApplied: null,
   platform: detectPlatform(navigator),
+  order: null, // slugs as shown (most likes first), held while the page is being touched
+  lastInput: null, // mono() of the last touch, scroll or key
 };
 
 const mono = () => performance.now();
 const now = () => serverNow(app.clock, mono());
 const scrollBehavior = () => (reducedMotion() ? "auto" : "smooth");
 
-// ── The line at the bottom of the screen: offline, slow, back ────────────────────────────────
+// ── The line at the bottom of the screen: offline, slow, back
 let statusTimer = null;
 function setStatus(kind) {
   clearTimeout(statusTimer);
@@ -81,7 +83,7 @@ function setStatus(kind) {
   if (kind === "late") statusTimer = setTimeout(() => setStatus(null), 7000);
 }
 
-// ── The player ───────────────────────────────────────────────────────────────────────────────
+// ── The player
 const player = createPlayer((slug, audio) => {
   const card = app.cards.get(slug);
   if (!card) return;
@@ -89,7 +91,7 @@ const player = createPlayer((slug, audio) => {
   card.renderAudio();
 });
 
-// ── The voter ────────────────────────────────────────────────────────────────────────────────
+// ── The voter
 function renderWho() {
   els.who.hidden = !app.voter;
   els.whoName.textContent = app.voter?.first_name || "a saved voter";
@@ -148,7 +150,7 @@ function onVoter(response) {
   renderWho();
 }
 
-// ── What this device just changed ────────────────────────────────────────────────────────────
+// ── What this device just changed
 // The server's own answer to this voter's like or comment is kept for a minute (api.js, keepOwn;
 // logic.js, rememberOwn), so a refresh or a second tab inside the server's few seconds of cache
 // shows the count the voter just saw, never the one from before it.
@@ -160,7 +162,7 @@ function applyOwn(card, generatedAt, stored = loadOwn()) {
   if (own.comments !== null) { card.commentCount = own.comments; card.commentsHold = Math.max(card.commentsHold, own.until); }
 }
 
-// ── Likes ────────────────────────────────────────────────────────────────────────────────────
+// ── Likes
 // One request per track at a time. Taps while it is on the wire only change what is wanted; when
 // the answer lands, a newer wish goes out. So rapid taps cannot double-vote or stick the button.
 async function pumpLike(card) {
@@ -211,7 +213,7 @@ function tapLike(card) {
   pumpLike(card);
 }
 
-// ── Share ────────────────────────────────────────────────────────────────────────────────────
+// ── Share
 function closeShare(card) {
   card.sharePanel.hidden = true;
   card.shareBtn.setAttribute("aria-expanded", "false");
@@ -275,7 +277,7 @@ function tapShare(card) {
   openShare(card);
 }
 
-// ── The gate ─────────────────────────────────────────────────────────────────────────────────
+// ── The gate
 const gate = createGate({
   onVoter,
   codesOn: () => app.codesOn,
@@ -328,7 +330,7 @@ const threadContext = {
   onAuthLost: () => signOut(),
 };
 
-// ── A track card ─────────────────────────────────────────────────────────────────────────────
+// ── A track card
 function createCard(track) {
   const slug = track.slug;
   const card = {
@@ -451,7 +453,16 @@ function createCard(track) {
 function renderTracks(tracks, generatedAt) {
   const seen = new Set();
   const stored = loadOwn(); // read once per state, not once per card
-  tracks.forEach((track, i) => {
+  // Most liked first; the order on screen is kept while the page is being touched.
+  const wanted = displayOrder(tracks);
+  let order = wanted.map((t) => t?.slug);
+  if (app.order !== null && !canReorder(app.lastInput, mono())) {
+    const offered = new Set(order);
+    order = app.order.filter((slug) => offered.has(slug)).concat(order.filter((slug) => !app.order.includes(slug)));
+  }
+  const rank = new Map(order.map((slug, i) => [slug, i]));
+  const ordered = wanted.filter((t) => rank.has(t?.slug)).sort((a, b) => rank.get(a.slug) - rank.get(b.slug));
+  ordered.forEach((track, i) => {
     if (typeof track?.slug !== "string" || seen.has(track.slug)) return;
     seen.add(track.slug);
     let card = app.cards.get(track.slug);
@@ -459,6 +470,7 @@ function renderTracks(tracks, generatedAt) {
     card.update(track, generatedAt, stored);
     if (els.list.children[i] !== card.el) els.list.insertBefore(card.el, els.list.children[i] || null);
   });
+  app.order = ordered.map((t) => t.slug).filter((slug) => seen.has(slug));
   for (const [slug, card] of app.cards) {
     if (seen.has(slug)) continue;
     player.drop(slug);
@@ -473,7 +485,7 @@ function renderTracks(tracks, generatedAt) {
   els.vote.hidden = none;
 }
 
-// ── Deep links: /#<slug> scrolls to that card and marks it ───────────────────────────────────
+// ── Deep links: /#<slug> scrolls to that card and marks it
 function applyDeepLink() {
   const slug = slugFromHash(location.hash);
   for (const card of app.cards.values()) {
@@ -488,7 +500,7 @@ function applyDeepLink() {
   requestAnimationFrame(() => card.el.scrollIntoView({ behavior: scrollBehavior(), block: "start" }));
 }
 
-// ── The voting window ────────────────────────────────────────────────────────────────────────
+// ── The voting window
 function setClosed(closed) {
   app.closed = closed;
   document.body.dataset.voting = closed ? "closed" : "open";
@@ -534,7 +546,7 @@ function votingClosedByServer() {
   if (!app.closed) setClosed(true);
 }
 
-// ── /api/state ───────────────────────────────────────────────────────────────────────────────
+// ── /api/state
 const gallery = createGallery();
 
 function applyState(state, generatedAt) {
@@ -599,10 +611,13 @@ async function poll() {
   }
 }
 
-// ── Start ────────────────────────────────────────────────────────────────────────────────────
+// ── Start
 let tickTimer = null;
 function startTick() { clearInterval(tickTimer); tickTimer = setInterval(renderWindow, 1000); }
 
+for (const ev of ["pointerdown", "touchstart", "keydown", "wheel", "scroll"]) {
+  document.addEventListener(ev, () => { app.lastInput = mono(); }, { passive: true, capture: true });
+}
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) { clearTimeout(pollTimer); clearInterval(tickTimer); return; }
   startTick();

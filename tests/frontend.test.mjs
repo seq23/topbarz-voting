@@ -12,6 +12,7 @@ import {
   isVoterToken, likeInitial, likeReduce, likeRequest, likeView, nextPollDelay, POLL_MS, relativeTime, safeGifUrl,
   safeMediaUrl, serverNow, serverTimeOf, shareMessage, slugFromHash, smsHref, syncClock, trackLink, validateGate, voterRecord,
   COMMENT_FOLD_CHARS, COMMENT_FOLD_LINES, LIKE_WAIT_MS, OWN_KEEP_MS, isLongComment, pruneOwn, readOwn, rememberOwn, rulesEndLine, stripTarget,
+  REORDER_STILL_MS, canReorder, displayOrder,
 } from "../public/js/logic.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -224,6 +225,40 @@ test("like: the voter's own likes (/api/me, or the gate) fill the hearts without
   // /api/me arriving while a tap is pending does not undo the tap.
   const pending = likeReduce(likeReduce(likeInitial(4, false), { type: "tap" }), { type: "me", liked: false });
   assert.equal(likeView(pending).liked, true);
+});
+
+test("order: the most-liked track is shown first, ties keep the server's order, and the count is never touched", () => {
+  const sent = [
+    { slug: "a", label: "A", likes: 2 },
+    { slug: "b", label: "B", likes: 5 },
+    { slug: "c", label: "C", likes: 2 },
+    { slug: "d", label: "D", likes: 0 },
+    { slug: "e", label: "E", likes: 5 },
+  ];
+  const before = JSON.stringify(sent);
+  assert.deepEqual(displayOrder(sent).map((t) => t.slug), ["b", "e", "a", "c", "d"], "highest first; b before e and a before c because the server sent them that way");
+  assert.equal(JSON.stringify(sent), before, "the server's array is not reordered or changed: display only");
+  assert.deepEqual(displayOrder(sent).map((t) => t.likes), [5, 5, 2, 2, 0], "every count is exactly what the server sent");
+  assert.deepEqual(displayOrder([{ slug: "x", likes: "3" }, { slug: "y", likes: -4 }, { slug: "z" }, { slug: "w", likes: NaN }]).map((t) => t.slug), ["x", "y", "z", "w"], "a bad count sorts as zero, in the server's order");
+  assert.deepEqual(displayOrder(null), []);
+  // The source of truth for the count is unchanged: the server still orders by sort, label, id and
+  // counts likes from like_events as before; the page sorts a copy of what it is sent.
+  const stateSql = fs.readFileSync(path.join(ROOT, "functions/_lib/state.js"), "utf8");
+  assert.match(stateSql, /FROM tracks t WHERE t\.active = 1 ORDER BY t\.sort, t\.label, t\.id`/, "the API's own order is untouched");
+  assert.ok(!/likes/i.test(stateSql.split("ORDER BY")[1].split("`")[0]), "the API never orders by likes: the client does, as display only");
+  const app = fs.readFileSync(path.join(PUBLIC, "js/app.js"), "utf8");
+  assert.match(app, /const wanted = displayOrder\(tracks\);/, "renderTracks draws the cards in display order");
+  assert.match(app, /app\.order !== null && !canReorder\(app\.lastInput, mono\(\)\)/, "and keeps the order on screen while the page is being touched");
+  for (const ev of ["pointerdown", "touchstart", "keydown", "wheel", "scroll"]) assert.ok(app.includes(`"${ev}"`), `${ev} counts as touching the page`);
+});
+
+test("order: a reorder waits until the page has been still for 2.5 s, so a card never moves under a thumb", () => {
+  assert.equal(REORDER_STILL_MS, 2500);
+  assert.equal(canReorder(null, 10_000), true, "never touched: reorder at once");
+  assert.equal(canReorder(undefined, 10_000), true);
+  assert.equal(canReorder(9_000, 10_000), false, "touched 1 s ago: hold the order");
+  assert.equal(canReorder(7_500, 10_000), true, "still for exactly 2.5 s: reorder");
+  assert.equal(canReorder(7_501, 10_000), false);
 });
 
 test("polling: every 7 s, sooner after a failure, never slower than 15 s", () => {

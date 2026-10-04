@@ -47,7 +47,7 @@ export async function api(path, { method = "GET", body, token, timeout = 12000, 
   }
 }
 
-// ── The remembered voter: { token, first_name } in localStorage, and the token in a cookie ────
+// ── The remembered voter: { token, first_name } in localStorage, and the token in a cookie
 // (two places, so clearing one does not bring the form back). Never an email.
 export const VOTER_KEY = "tbz.voter";
 const COOKIE = "tbz_voter";
@@ -90,7 +90,7 @@ export function forgetVoter() {
   try { writeCookie("", 0); } catch {}
 }
 
-// ── A voter part-way through the email code ───────────────────────────────────────────────────
+// ── A voter part-way through the email code
 // What they typed at the gate and the code's timings (logic.js, pendingRecord), in localStorage
 // only, so a refresh or a closed popup returns them to the code step. Never the code. Forgotten
 // the moment they are let in or change the email, and after an hour whatever happens.

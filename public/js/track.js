@@ -26,7 +26,7 @@ const els = {
 
 const app = { looking: null, track: null, row: null };
 
-// ── The words (track-copy.js) ────────────────────────────────────────────────────────────────
+// ── The words (track-copy.js)
 document.title = `${COPY.headline} | Top Barz`;
 els.headline.textContent = COPY.headline;
 els.intro.textContent = COPY.intro;
@@ -36,7 +36,7 @@ els.foundTitle.textContent = COPY.found;
 els.download.textContent = COPY.download;
 els.another.textContent = COPY.another;
 
-// ── The player: one for the page ─────────────────────────────────────────────────────────────
+// ── The player: one for the page
 const player = createPlayer((slug, audio) => {
   if (app.row?.slug !== slug) return;
   app.row.audio = audio;
@@ -59,7 +59,7 @@ function createRow(track) {
   return row;
 }
 
-// ── Looking a code up ────────────────────────────────────────────────────────────────────────
+// ── Looking a code up
 function say(text) {
   els.msg.textContent = text;
   els.msg.hidden = !text;

@@ -43,7 +43,7 @@ const app = {
 };
 const scrollBehavior = () => (reducedMotion() ? "auto" : "smooth");
 
-// ── The words (select-copy.js) ───────────────────────────────────────────────────────────────
+// ── The words (select-copy.js)
 document.title = `${COPY.headline} | Top Barz`;
 els.headline.textContent = COPY.headline;
 els.intro.replaceChildren(...introParts(COPY.intro).map((p) => (p.url ? h("a", { href: p.url, rel: "noopener", text: p.text }) : p.text)));
@@ -57,7 +57,7 @@ els.linksList.replaceChildren(...links.map((l) => h("li", {},
   l.url ? h("a", { href: l.url, rel: "noopener", text: l.label }) : h("span", { text: l.label }))));
 els.links.hidden = links.length === 0;
 
-// ── The player: one for the page, so only one beat plays at a time ───────────────────────────
+// ── The player: one for the page, so only one beat plays at a time
 const player = createPlayer((slug, audio) => {
   const row = app.rows.get(slug);
   if (!row) return;
@@ -65,7 +65,7 @@ const player = createPlayer((slug, audio) => {
   row.renderAudio();
 });
 
-// ── A beat row ───────────────────────────────────────────────────────────────────────────────
+// ── A beat row
 function createRow(beat) {
   const slug = beat.slug;
   const row = { slug, beat, audio: { status: "idle", slow: false, time: 0, duration: beat.duration_ms / 1000 } };
@@ -113,7 +113,7 @@ function createRow(beat) {
   return row;
 }
 
-// ── The pick ─────────────────────────────────────────────────────────────────────────────────
+// ── The pick
 // Draws whatever app.pick and app.beats say: the done panel, and each row's button.
 function renderPick() {
   const beat = app.loaded ? pickedBeat(app.pick, app.beats) : null;
@@ -141,7 +141,7 @@ function choose(slug, fromRow) {
   els.beatsTitle.focus({ preventScroll: true });
 }
 
-// ── The list ─────────────────────────────────────────────────────────────────────────────────
+// ── The list
 function renderBeats(beats) {
   app.beats = beats;
   const seen = new Set();
@@ -195,7 +195,7 @@ async function load() {
   }
 }
 
-// ── Start ────────────────────────────────────────────────────────────────────────────────────
+// ── Start
 els.loadRetry.addEventListener("click", () => {
   els.loadRetry.disabled = true;
   els.loadRetry.textContent = "Loading…";

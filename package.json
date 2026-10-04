@@ -20,6 +20,7 @@
     "load-beats": "node scripts/load-beats.mjs",
     "export": "node scripts/export.mjs",
     "booth-log": "node scripts/booth-log.mjs",
+    "promote-booth": "node scripts/promote-booth.mjs",
     "make-track-qr": "node scripts/make-track-qr.mjs"
   },
   "devDependencies": {

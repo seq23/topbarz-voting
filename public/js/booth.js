@@ -1,10 +1,12 @@
 // The engineer's page (/booth): drop or choose a finished file, watch it go up, read the 4-digit
 // code out to the artist, next file. Under it, today's uploads (GET /api/booth/tracks). The
-// upload is an XMLHttpRequest because fetch has no upload progress. Nothing here is part of the
-// vote, and nothing here is remembered on the device.
+// upload is an XMLHttpRequest because fetch has no upload progress. Each row says how many people
+// entered its code ("3 people") and "all in" when every one of them opted in to the public vote:
+// counts only, never a name or an address (the log route carries none). Nothing here is part of
+// the vote, and nothing here is remembered on the device.
 import { $, h } from "./dom.js";
 import { COPY } from "./booth-copy.js";
-import { formatSize, formatTime, openedWords, refuseFile, todayRows, uploadFailure } from "./booth-rules.js";
+import { formatSize, formatTime, openedWords, peopleWords, refuseFile, todayRows, uploadFailure } from "./booth-rules.js";
 
 const els = {
   headline: $("tbz-booth-headline"),
@@ -127,7 +129,7 @@ function renderLog(rows) {
     h("span", { class: "log-code", text: r.code }),
     r.art_url ? h("img", { class: "log-art", src: r.art_url, width: 40, height: 40, alt: "", loading: "lazy" }) : null,
     h("span", { class: "log-file", text: r.file_name }),
-    h("span", { class: "log-meta", text: [formatTime(r.uploaded_at), formatSize(r.size), openedWords(r.opened), r.public ? "public" : ""].filter(Boolean).join(" · ") }))));
+    h("span", { class: "log-meta", text: [formatTime(r.uploaded_at), formatSize(r.size), openedWords(r.opened), peopleWords(COPY, r.people), r.everyone_in ? COPY.allIn : "", r.public ? "public" : ""].filter(Boolean).join(" · ") }))));
   els.logNote.textContent = rows.length ? "" : COPY.logEmpty;
   els.logNote.hidden = rows.length > 0;
 }

@@ -12,6 +12,20 @@ export function codeDigits(value) {
   return String(value ?? "").replace(/\D/g, "").slice(0, CODE_LENGTH);
 }
 
+// An email as the server keeps it (the same rule, word for word, as functions/_lib/booth.js
+// cleanEmail; tests/booth.test.mjs pins the two are the same): trimmed, lower-cased, at most 254
+// characters, no whitespace, one @ with something before it, a dot after the @ that is neither
+// first nor last. Anything else → "" (the page says so and sends nothing).
+export const EMAIL_MAX = 254;
+export function cleanEmail(raw) {
+  if (typeof raw !== "string") return "";
+  const e = raw.trim().toLowerCase();
+  if (!e || e.length > EMAIL_MAX || /\s/.test(e)) return "";
+  const at = e.indexOf("@");
+  if (at < 1 || e.indexOf("@", at + 1) !== -1) return "";
+  return /^[^.][^.]*(\.[^.]+)+$/.test(e.slice(at + 1)) ? e : "";
+}
+
 // The ?code= in the address, if it is a code.
 export function codeFromSearch(search) {
   try {
@@ -31,16 +45,40 @@ export function refuseFile(file) {
   return null;
 }
 
-// The server's answer to a lookup → what the page shows, or null for anything malformed. The
-// share state comes from the server every time: public is true only when it says so, the share
-// id only when it is 16 hex characters, the artwork only when it is a booth art address.
+// The server's answer to entering a code → what the page shows, or null for anything malformed.
+// The share state comes from the server every time: public is true only when it says so, the
+// share id only when it is 16 hex characters, the artwork only when it is a booth art address.
+// The people (4 Oct 2026): this device's own state (`you`, the one email the page ever shows) and
+// the counts, read through cleanPeople.
 export function cleanTrack(data) {
   if (!data || typeof data !== "object") return null;
   const { code, file_name: name, audio_url: audio, download_url: download } = data;
   if (!isCode(code) || typeof name !== "string" || !name.trim()) return null;
   if (!safeBoothUrl(audio, false) || !safeBoothUrl(download, true)) return null;
   const pub = data.public === true && isShareId(data.share_id);
-  return { code, file_name: name.trim(), audio_url: audio, download_url: download, size: Number(data.size) > 0 ? Number(data.size) : 0, public: pub, share_id: pub ? data.share_id : null, art_url: safeArtUrl(data.art_url) };
+  const people = cleanPeople(data);
+  if (!people) return null;
+  return { code, file_name: name.trim(), audio_url: audio, download_url: download, size: Number(data.size) > 0 ? Number(data.size) : 0, public: pub, share_id: pub ? data.share_id : null, art_url: safeArtUrl(data.art_url), ...people };
+}
+// The people part of an answer (enter, vote) → { you: { email, vote_opt_in }, people, opted,
+// everyone_in }, or null when it is malformed. Counts are whole numbers, never below 0;
+// everyone_in is true only when the server said so AND the counts agree (nobody is not everyone).
+export function cleanPeople(data) {
+  const you = data?.you;
+  const email = cleanEmail(you?.email);
+  if (!email) return null;
+  const count = (v) => (Number.isInteger(Number(v)) && Number(v) >= 0 ? Number(v) : null);
+  const people = count(data.people);
+  const opted = count(data.opted);
+  if (people === null || opted === null || opted > people) return null;
+  return { you: { email, vote_opt_in: you.vote_opt_in === true }, people, opted, everyone_in: data.everyone_in === true && people > 0 && opted === people };
+}
+// The line under the vote switch: the copy's words with the numbers in. Only you so far when
+// one person is attached; everyone's in when all are; else how many are still out.
+export function voteWords(copy, { people, opted, everyone_in: all } = {}) {
+  if (people === 1) return copy.voteOnlyYou;
+  if (all) return copy.voteAll;
+  return copy.voteWaiting.replace("{n}", String(people - opted)).replace("{total}", String(people));
 }
 
 // ── The share (4 Oct 2026)
@@ -98,7 +136,8 @@ export function todayRows(rows, now = Date.now()) {
     if (!isCode(r?.code) || typeof r.file_name !== "string") continue;
     const at = Date.parse(r.uploaded_at);
     if (!Number.isFinite(at) || new Date(at).toDateString() !== today) continue;
-    out.push({ code: r.code, file_name: r.file_name, uploaded_at: at, opened: Number(r.opened) > 0 ? Number(r.opened) : 0, size: Number(r.size) > 0 ? Number(r.size) : 0, public: r.public === true, art_url: safeArtUrl(r.art_url) });
+    const people = Number.isInteger(Number(r.people)) && Number(r.people) > 0 ? Number(r.people) : 0;
+    out.push({ code: r.code, file_name: r.file_name, uploaded_at: at, opened: Number(r.opened) > 0 ? Number(r.opened) : 0, size: Number(r.size) > 0 ? Number(r.size) : 0, public: r.public === true, art_url: safeArtUrl(r.art_url), people, everyone_in: r.everyone_in === true && people > 0 });
   }
   return out.sort((a, b) => b.uploaded_at - a.uploaded_at);
 }
@@ -115,6 +154,8 @@ export function formatTime(ms) {
 }
 
 export const openedWords = (n) => (n === 0 ? "not opened yet" : n === 1 ? "opened once" : `opened ${n} times`);
+// How many people are attached, in the engineer's page's words (booth-copy.js): "nobody yet", "1 person", "3 people".
+export const peopleWords = (copy, n) => (n === 0 ? copy.nobody : n === 1 ? copy.onePerson : copy.people.replace("{n}", String(n)));
 
 // The line the booth page shows for a failed upload: the page's own words for the cases it
 // knows, else the server's message, else a plain line.

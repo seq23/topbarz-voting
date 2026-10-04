@@ -2,8 +2,9 @@
 //   The page's elements are empty in track.html and filled from here.
 export const COPY = {
   headline: "Hear your track",
-  intro: "Type the 4-digit code your engineer gave you.",
+  intro: "Type the 4-digit code your engineer gave you, and your email.",
   codeLabel: "4-digit code",
+  emailLabel: "Your email",
   go: "Go",
   looking: "Looking it up",
   found: "Your track",
@@ -12,6 +13,10 @@ export const COPY = {
   notFound: "No track with that code yet. Ask your engineer.",
   tooMany: "Too many tries. Give it a minute.",
   needCode: "Type all 4 digits.",
+  needEmail: "Enter your email.",
+  badEmail: "That email does not look right. Check it and try again.",
+  notAttached: "Enter the code with your email first.",
+  you: "You are in as {email}",
   audioNone: "This track has no audio yet.",
   audioFailed: "The track did not load. Tap play to try again.",
   // The share (4 Oct 2026): the switch, the Share button and what it says, the artwork.
@@ -19,6 +24,7 @@ export const COPY = {
   publicOff: "Only you can hear it. Switch it on to get a link you can share.",
   publicOn: "Anyone with the link can hear it.",
   publicFailed: "That did not save. Try again.",
+  publicNote: "Recorded this with a group? Make sure you're all on the same page about sharing.",
   share: "Share",
   shareMessage: "I made a song at the Top Barz experience. Check it out:",
   copied: "Link copied",
@@ -28,4 +34,11 @@ export const COPY = {
   artWorking: "Adding your artwork",
   artUnreadable: "That picture could not be read, try another",
   artFailed: "The artwork did not upload. Try again.",
+  // The vote (4 Oct 2026): this person's own switch, and where the group stands. Share is anyone's
+  // call; the vote is everyone's consent.
+  voteLabel: "Count me in for the public vote",
+  voteWaiting: "Vote: waiting on {n} of {total}",
+  voteAll: "Everyone's in for the vote",
+  voteOnlyYou: "Only you so far: the others enter the code with their own email",
+  voteFailed: "That did not save. Try again.",
 };

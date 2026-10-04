@@ -23,6 +23,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci --ignore-scripts
+      - name: ffprobe (the loaders and promote-booth read durations with it; the smoke runs promote-booth for real)
+        run: command -v ffprobe || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null && ffprobe -version | head -1)
       - name: Rules (gate, token, likes, window, comments, state, media, giphy, loaders, docs)
         run: npm test
       - name: Every route over HTTP (wrangler pages dev, local D1 + R2)

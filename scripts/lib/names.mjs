@@ -1,21 +1,15 @@
 // File names → tracks, and the two refusals the loaders make. Pure (no I/O): tests/loaders.test.mjs.
 import path from "node:path";
 
-const norm = (s) => s.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase();
+import { isScooterTaylor, isTestName } from "../../functions/_lib/exclusions.js";
+
+const norm = (s) => s.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 export const slugify = (s) => norm(s).replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
 
-// Scooter Taylor's own track must never be in the vote. True for any file named for him:
-// "Scooter Taylor", "Taylor, Scooter", "scootertaylor", "@scootertaylor", or just "Scooter".
-export function isScooterTaylor(name) {
-  const flat = norm(name).replace(/[^a-z0-9]+/g, " ").trim();
-  const tokens = flat.split(" ").filter((t) => t && t !== "test");
-  if (flat.replace(/ /g, "").includes("scootertaylor")) return true;
-  if (tokens.includes("scooter") && tokens.includes("taylor")) return true;
-  return tokens.length === 1 && tokens[0] === "scooter";
-}
-
-const TEST_SEGMENT = /^test([^a-z]|$)/i;
-export const isTestName = (name) => TEST_SEGMENT.test(name.trim());
+// The two name rules (Scooter Taylor's track is never in the vote; "Test …" names are preview
+// only) live in functions/_lib/exclusions.js, shared with the booth's promotion; re-exported here
+// so the loaders and their tests read them from one place.
+export { isScooterTaylor, isTestName };
 
 // Test tracks and test photos are for PREVIEW (and local) only. Production refuses any folder with
 // a "Test …" segment in its real path, and any file whose name starts with "Test".

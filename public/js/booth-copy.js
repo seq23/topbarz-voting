@@ -18,4 +18,9 @@ export const COPY = {
   logTitle: "Today's uploads",
   logEmpty: "Nothing uploaded today yet.",
   logFailed: "The log did not load.",
+  // The people (4 Oct 2026): how many entered the code on /track, and whether all opted in to the vote. Never a name.
+  nobody: "nobody yet",
+  onePerson: "1 person",
+  people: "{n} people",
+  allIn: "all in",
 };

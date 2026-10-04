@@ -27,7 +27,10 @@ export function targets(envName, tomlText = fs.readFileSync(path.join(ROOT, "wra
   };
 }
 
+// TBZ_PERSIST_TO (tests only): where `--local` state lives, so tests/smoke.mjs can run a script
+// against the same throwaway D1 and R2 its `wrangler pages dev` is serving. Never set in use.
 async function wrangler(args, opts = {}) {
+  if (process.env.TBZ_PERSIST_TO && args.includes("--local")) args = [...args, "--persist-to", process.env.TBZ_PERSIST_TO];
   try {
     return await run(WRANGLER, args, {
       cwd: ROOT, maxBuffer: 512 * 1024 * 1024,

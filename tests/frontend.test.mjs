@@ -318,8 +318,13 @@ test("gate: the browser remembers a token and a first name, never the email", as
   } finally {
     delete globalThis.localStorage; delete globalThis.document; delete globalThis.location;
   }
-  // Only the gate reads the email field, and only to send it.
-  for (const file of JS.filter((f) => !/^js\/(gate|logic|api)\.js$/.test(f))) assert.ok(!/email/i.test(read(file)), `${file} has no business with emails`);
+  // Only the gate reads the email field, and only to send it. The rapper's page (/track) takes an
+  // email with the code since 4 Oct 2026: its script, its copy and the booth's rules are the three
+  // other files allowed the word, and tests/booth.test.mjs pins every mention in them by name,
+  // the one storage key (tbz.booth.email) and the one line that shows an email (the device's own).
+  // The engineer's page, the listen page and their copy stay without one.
+  for (const file of JS.filter((f) => !/^js\/(gate|logic|api|track|track-copy|booth-rules)\.js$/.test(f))) assert.ok(!/email/i.test(read(file)), `${file} has no business with emails`);
+  assert.ok(/EMAIL_MENTIONS = \{\n    "track\.js":/.test(fs.readFileSync(path.join(ROOT, "tests/booth.test.mjs"), "utf8")), "the booth's test enumerates the mentions");
   assert.ok(!/localStorage|document\.cookie|sessionStorage/.test(read("js/gate.js")), "the gate stores nothing itself");
 });
 
@@ -1150,7 +1155,7 @@ test("wiring: every file a page names exists; every element a page's scripts loo
   assert.ok(lookups["index.html"] >= 40, `checked ${lookups["index.html"]} element lookups in index.html`);
   assert.ok(lookups["select.html"] >= 15, `checked ${lookups["select.html"]} element lookups in select.html`);
   assert.ok(lookups["booth.html"] >= 20, `checked ${lookups["booth.html"]} element lookups in booth.html`);
-  assert.ok(lookups["track.html"] >= 22, `checked ${lookups["track.html"]} element lookups in track.html`);
+  assert.ok(lookups["track.html"] >= 29, `checked ${lookups["track.html"]} element lookups in track.html`);
   assert.ok(lookups["listen.html"] >= 9, `checked ${lookups["listen.html"]} element lookups in listen.html`);
   // No page loads anything of another page's own: each pair shares exactly what SHARED says.
   const entries = Object.values(PAGE_SCRIPTS);
@@ -1198,10 +1203,10 @@ test("weight: no libraries, and the whole page is small", () => {
   const voteJs = VOTE_SCRIPTS.reduce((n, f) => n + size(`js/${f}`), 0);
   const boothJs = BOOTH_ONLY_SCRIPTS.reduce((n, f) => n + size(`js/${f}`), 0);
   assert.ok(voteJs < 120_000, `the scripts of the voting and select pages together are ${voteJs} bytes (the same eleven files as before the booth)`);
-  assert.ok(boothJs < 31_000, `the scripts belonging only to booth/track/listen are ${boothJs} bytes together (29,143 on 4 Oct 2026; was < 30_000 for booth/track alone: the listen page and the share added listen.js, listen-copy.js and the share rules)`);
+  assert.ok(boothJs < 37_500, `the scripts belonging only to booth/track/listen are ${boothJs} bytes together (36,6xx on 4 Oct 2026 with the people: the email box, the vote switch and its rules in track.js, booth-rules.js and the two copy files; 29,143 before that, with the share; was < 30_000 for booth/track alone)`);
   assert.equal(voteJs + boothJs, JS.reduce((n, f) => n + size(f), 0), "and the two together are every script in public/js");
-  assert.ok(pageJs("track.js") < 60_000, `the rapper's page's scripts are ${pageJs("track.js")} bytes before compression`);
-  assert.ok(pageJs("booth.js") < 20_000, `the engineer's page's scripts are ${pageJs("booth.js")} bytes before compression`);
+  assert.ok(pageJs("track.js") < 64_000, `the rapper's page's scripts are ${pageJs("track.js")} bytes before compression (61,7xx on 4 Oct 2026 with the people; the shared api/dom/logic/player files are most of it)`);
+  assert.ok(pageJs("booth.js") < 22_000, `the engineer's page's scripts are ${pageJs("booth.js")} bytes before compression (20,8xx on 4 Oct 2026: the people's rules sit in the shared booth-rules.js, as the share's do)`);
   assert.ok(pageJs("listen.js") < 60_000, `the listen page's scripts are ${pageJs("listen.js")} bytes before compression`);
   assert.ok(size("css/site.css") < 40_000);
   assert.ok(size("index.html") < 20_000);

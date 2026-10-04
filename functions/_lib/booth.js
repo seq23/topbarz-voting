@@ -1,7 +1,10 @@
 // The booth's rules with no request in them: what a file name may be, what a file may be, what a
-// code is and how one is reserved. Used by functions/api/booth/[[path]].js and the media route
-// (the download name). Booth tracks are their own data (the `booth_tracks` table, R2 keys under
-// booth/): never tracks, never in the vote (tests/booth.test.mjs).
+// code is and how one is reserved, what an email is, who may change a song and when everyone is in
+// for the vote. Used by functions/api/booth/[[path]].js, the media route (the download name) and
+// scripts/promote-booth.mjs (the verdict). Booth tracks are their own data (the `booth_tracks` and
+// `booth_people` tables, R2 keys under booth/): never tracks, never in the vote (tests/booth.test.mjs).
+import { isScooterTaylor, isTestName } from "./exclusions.js";
+
 export const BOOTH_EXTENSIONS = ["wav", "mp3", "m4a", "aif", "aiff", "flac"];
 export const BOOTH_MAX_BYTES = 100 * 1024 * 1024;
 export const BOOTH_LOG_ROWS = 200;
@@ -10,6 +13,45 @@ export const BOOTH_CODE_TRIES = 25;
 export const BOOTH_DAY_KEY = "booth-uploads-day"; // the one site-wide counter in rate_limits
 export const ART_MAX_BYTES = 2 * 1024 * 1024;
 export const ART_TYPES = { "image/jpeg": "jpg", "image/png": "png" };
+export const EMAIL_MAX = 254;
+
+// ── The people (4 Oct 2026) ──────────────────────────────────────────────────────────────────
+// An email as it is kept: trimmed, lower-cased, at most 254 characters, no whitespace, exactly one
+// @ with something before it, and a dot after the @ that is neither first nor last. Anything else
+// → "" (the caller refuses). The same rule, word for word, is public/js/booth-rules.js cleanEmail,
+// so the page refuses what the server would (tests/booth.test.mjs pins the two are the same).
+export function cleanEmail(raw) {
+  if (typeof raw !== "string") return "";
+  const e = raw.trim().toLowerCase();
+  if (!e || e.length > EMAIL_MAX || /\s/.test(e)) return "";
+  const at = e.indexOf("@");
+  if (at < 1 || e.indexOf("@", at + 1) !== -1) return "";
+  return /^[^.][^.]*(\.[^.]+)+$/.test(e.slice(at + 1)) ? e : "";
+}
+
+// Everyone is in when at least one person is attached and every one of them has opted in:
+// nobody attached is NOT everyone in. One definition: the routes (rows), the log (counts) and
+// the promotion (rows) all go through here.
+export const allIn = (people, opted) => Number(people) > 0 && Number(opted) === Number(people);
+export const everyoneIn = (rows) => allIn(rows.length, rows.filter((r) => r.vote_opt_in === 1).length);
+export const countPeople = (rows) => ({ people: rows.length, opted: rows.filter((r) => r.vote_opt_in === 1).length, everyone_in: everyoneIn(rows) });
+
+// The only door onto the voting site (scripts/promote-booth.mjs): the verdict, pure. → { ok: true }
+// or { ok: false, reason, message }, in this order: the code exists; the file is not Scooter
+// Taylor's (the loaders' rule, by file name); production takes no "Test …" file; at least one
+// person is attached; every person attached has opted in. Share is anyone's call; the vote is
+// everyone's consent.
+export function promoteVerdict({ track, people, env } = {}) {
+  const rows = Array.isArray(people) ? people : [];
+  if (!track || typeof track !== "object" || !isCode(track.code)) return { ok: false, reason: "no_such_code", message: "no booth track has that code" };
+  const name = String(track.file_name ?? "");
+  if (isScooterTaylor(name.replace(/\.[^.]+$/, ""))) return { ok: false, reason: "scooter_taylor", message: `"${name}" is Scooter Taylor's track, which is never in the vote` };
+  if (env === "production" && isTestName(name)) return { ok: false, reason: "test_file_in_production", message: `"${name}" is a test file: test files go to preview only, never production` };
+  if (rows.length === 0) return { ok: false, reason: "nobody_attached", message: `nobody has entered code ${track.code} with their email yet, so nobody can have opted in` };
+  const { people: n, opted } = countPeople(rows);
+  if (!allIn(n, opted)) return { ok: false, reason: "not_everyone_in", message: `${n - opted} of the ${n} people attached to code ${track.code} ${n - opted === 1 ? "has" : "have"} not opted in to the public vote; the vote is everyone's consent` };
+  return { ok: true, reason: "everyone_in", message: `all ${n} ${n === 1 ? "person" : "people"} attached to code ${track.code} opted in` };
+}
 
 // The engineer's file name as it is kept and shown: the base name only (no folder, whatever the
 // separator), printable characters only, at most 120, trimmed. Empty in → "" (the caller refuses).
@@ -119,13 +161,22 @@ export async function reserveCode(db, { fileName, contentType, size, ext, upload
   return null;
 }
 
-export const LOG_SQL = `SELECT code, file_name, size, uploaded_at, opened, public, art_key FROM booth_tracks ORDER BY uploaded_at DESC, id DESC LIMIT ${BOOTH_LOG_ROWS}`;
-export const OPEN_SQL = "UPDATE booth_tracks SET opened = opened + 1, last_opened_at = ?2 WHERE code = ?1 RETURNING code, file_name, media_key, size, uploaded_at, public, share_id, art_key";
+// The log carries how many people are attached to each track and how many opted in (counts, never
+// an email): the page says "3 people" and "all in".
+export const LOG_SQL = `SELECT t.code, t.file_name, t.size, t.uploaded_at, t.opened, t.public, t.art_key, COUNT(p.id) AS people, COALESCE(SUM(p.vote_opt_in), 0) AS opted FROM booth_tracks t LEFT JOIN booth_people p ON p.track_id = t.id GROUP BY t.id ORDER BY t.uploaded_at DESC, t.id DESC LIMIT ${BOOTH_LOG_ROWS}`;
+export const OPEN_SQL = "UPDATE booth_tracks SET opened = opened + 1, last_opened_at = ?2 WHERE code = ?1 RETURNING id, code, file_name, media_key, size, uploaded_at, public, share_id, art_key";
+// The people: entering a code attaches the email to that track (the same email again is the same
+// person: UNIQUE (track_id, email)); the people of one track are read by its id; one person's own
+// opt-in is set by track and email; and the change routes ask whether this email is attached to
+// this code in the same read that finds the code (no row: a wrong code; no person: not attached).
+export const ATTACH_SQL = "INSERT OR IGNORE INTO booth_people (track_id, email, attached_at) VALUES (?1, ?2, ?3)";
+export const PEOPLE_SQL = "SELECT email, vote_opt_in FROM booth_people WHERE track_id = ?1";
+export const VOTE_SQL = "UPDATE booth_people SET vote_opt_in = ?3, opted_at = ?4 WHERE track_id = ?1 AND email = ?2 RETURNING vote_opt_in";
+export const ACCESS_SQL = "SELECT t.id AS track_id, p.id AS person_id FROM booth_tracks t LEFT JOIN booth_people p ON p.track_id = t.id AND p.email = ?2 WHERE code = ?1";
 export const DROP_SQL = "DELETE FROM booth_tracks WHERE id = ?1";
 // The share: the switch (a track from before the share existed gets its id now), the artwork,
 // and the listen page's read, by share id only (never the code), which never counts an open.
 export const PUBLIC_SQL = "UPDATE booth_tracks SET public = ?2, share_id = COALESCE(share_id, ?3) WHERE code = ?1 RETURNING public, share_id";
-export const HAS_CODE_SQL = "SELECT id FROM booth_tracks WHERE code = ?1";
 export const ART_SQL = "UPDATE booth_tracks SET art_key = ?2 WHERE code = ?1 RETURNING art_key";
 export const LISTEN_SQL = "SELECT file_name, media_key, art_key, public FROM booth_tracks WHERE share_id = ?1";
 

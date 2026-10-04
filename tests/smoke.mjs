@@ -125,7 +125,10 @@ try {
   // Each check speaks from its own address (local dev keeps a cf-connecting-ip the client sends),
   // so the lookup limit (5 a minute per address) is proven on purpose below, not tripped by accident.
   let addr = 20;
-  const look = (code, ip = `203.0.113.${addr++}`) => j(`/api/booth/tracks/${code}`, { headers: { "cf-connecting-ip": ip } });
+  // The way in since 4 Oct 2026: the code WITH an email (POST …/enter); `look` is that with one default email.
+  const ME = "artist@example.com";
+  const enter = (code, email = ME, ip = `203.0.113.${addr++}`) => j(`/api/booth/tracks/${code}/enter`, { method: "POST", headers: { "content-type": "application/json", "cf-connecting-ip": ip }, body: JSON.stringify({ email }) });
+  const look = (code, ip) => enter(code, ME, ip);
   const sendFile = (name, bytes, type) => fetch(base + "/api/booth/tracks", { method: "POST", headers: { "x-file-name": encodeURIComponent(name), "content-type": type, "content-length": String(bytes.length), "cf-connecting-ip": "203.0.113.9" }, body: bytes }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }));
   // A small WAV made here: a RIFF header, then a second of silence.
   const wavBytes = Buffer.alloc(44 + 8000);
@@ -134,7 +137,14 @@ try {
   const up = await sendFile("Smoke Take 1.wav", wavBytes, "audio/wav");
   ok(up.status === 200 && /^\d{4}$/.test(up.body?.code ?? "") && up.body.file_name === "Smoke Take 1.wav" && Object.keys(up.body).join() === "code,file_name,uploaded_at", `POST /api/booth/tracks takes a generated WAV and answers a 4-digit code (${up.body?.code})`);
   const found = await look(up.body.code);
-  ok(found.status === 200 && found.body.file_name === "Smoke Take 1.wav" && found.body.size === wavBytes.length && /^\/media\/booth\/\d{4}-[0-9a-f]{16}\.wav$/.test(found.body.audio_url) && found.body.download_url === `${found.body.audio_url}?dl=1`, "GET /api/booth/tracks/<code> finds it, with its audio and download addresses");
+  ok(found.status === 200 && found.body.file_name === "Smoke Take 1.wav" && found.body.size === wavBytes.length && /^\/media\/booth\/\d{4}-[0-9a-f]{16}\.wav$/.test(found.body.audio_url) && found.body.download_url === `${found.body.audio_url}?dl=1`, "POST /api/booth/tracks/<code>/enter with an email finds it, with its audio and download addresses");
+  ok(JSON.stringify(found.body.you) === JSON.stringify({ email: ME, vote_opt_in: false }) && found.body.people === 1 && found.body.opted === 0 && found.body.everyone_in === false, "and answers this person's own state: attached, out, the only one so far");
+  const oldGet = await j(`/api/booth/tracks/${up.body.code}`, { headers: { "cf-connecting-ip": "203.0.113.19" } });
+  ok([404, 405].includes(oldGet.status) && !("audio_url" in (oldGet.body ?? {})), `the old GET /api/booth/tracks/<code> lookup is gone (${oldGet.status}): no track without an email`);
+  const badEmail = await enter(up.body.code, "not-an-email");
+  ok(badEmail.status === 400 && badEmail.body.error === "bad_email", "a bad email is a 400 bad_email");
+  const noEmail = await j(`/api/booth/tracks/${up.body.code}/enter`, { method: "POST", headers: { "content-type": "application/json", "cf-connecting-ip": `203.0.113.${addr++}` }, body: "{}" });
+  ok(noEmail.status === 400 && noEmail.body.error === "bad_email", "and so is no email at all");
   const dl = await fetch(base + found.body.download_url);
   ok(dl.status === 200 && dl.headers.get("content-disposition") === 'attachment; filename="Smoke Take 1.wav"' && dl.headers.get("content-length") === String(wavBytes.length) && dl.headers.get("content-type") === "audio/wav" && (await dl.arrayBuffer()).byteLength === wavBytes.length, "the download address sends the whole file as an attachment under its name");
   const playing = await fetch(base + found.body.audio_url, { headers: { range: "bytes=0-3" } });
@@ -180,7 +190,7 @@ try {
   ok(logRes.status === 200 && logRes.body.tracks.length === 1 + realUploads && logRes.body.tracks[0].code === lastCode && logRes.body.tracks.at(-1).code === up.body.code && logRes.body.tracks.every((t) => /^\d{4}$/.test(t.code) && t.opened === 1 && !("media_key" in t)), `GET /api/booth/tracks lists the ${1 + realUploads} uploads, newest first, each opened once, no key`);
   const wrongCode = up.body.code === "0000" ? "0001" : "0000";
   const none = await look(wrongCode);
-  ok(none.status === 404 && none.body.error === "not_found", "a wrong code is a 404 not_found");
+  ok(none.status === 404 && none.body.error === "not_found", "a wrong code with an email is a 404 not_found");
   const notAudio = await sendFile("notes.txt", Buffer.from("hello"), "text/plain");
   ok(notAudio.status === 415 && notAudio.body.error === "not_audio", "a text file is refused (415 not_audio)");
   // Lookups: 5 a minute per address. One fresh address, six wrong tries: five 404s, then the 429.
@@ -193,12 +203,27 @@ try {
   const limited = await look(wrongCode, "203.0.113.200");
   ok(limited.status === 429 && limited.body.error === "rate_limited" && /Give it a minute/.test(limited.body.message), "and it stays shut for the minute, with a message to show");
 
-  // The share (4 Oct 2026): the switch, the listen page's read, the artwork, all through HTTP.
-  const flip = (code, pub, ip = `203.0.113.${addr++}`) => j(`/api/booth/tracks/${code}/public`, { method: "POST", headers: { "content-type": "application/json", "cf-connecting-ip": ip }, body: JSON.stringify({ public: pub }) });
+  // The people (4 Oct 2026): a second email on the same code, each person's own vote switch, and
+  // the rule that everyone_in needs every one of them.
+  const OTHER = "friend@example.com";
+  const voteAs = (code, email, optIn, ip = `203.0.113.${addr++}`) => j(`/api/booth/tracks/${code}/vote`, { method: "POST", headers: { "content-type": "application/json", "cf-connecting-ip": ip }, body: JSON.stringify({ email, opt_in: optIn }) });
+  const second = await enter(up.body.code, OTHER);
+  ok(second.status === 200 && second.body.people === 2 && second.body.everyone_in === false && second.body.you.email === OTHER && !JSON.stringify(second.body).includes(ME), "a second email, the same code: 2 people, not everyone in, and the first person's email is not in the answer");
+  const mineIn = await voteAs(up.body.code, ME, true);
+  ok(mineIn.status === 200 && mineIn.body.you.vote_opt_in === true && mineIn.body.opted === 1 && mineIn.body.everyone_in === false, "POST /api/booth/tracks/<code>/vote: one in of two is not everyone");
+  const bothIn = await voteAs(up.body.code, OTHER, true);
+  ok(bothIn.status === 200 && bothIn.body.opted === 2 && bothIn.body.everyone_in === true && (await look(up.body.code)).body.everyone_in === true, "both in: everyone_in, on the vote's answer and the next entry");
+  ok((await voteAs(up.body.code, "stranger@example.com", true)).status === 403, "a stranger's vote is a 403");
+
+  // The share (4 Oct 2026): the switch (anyone attached), the listen page's read, the artwork, all through HTTP.
+  const flip = (code, pub, ip = `203.0.113.${addr++}`, email = ME) => j(`/api/booth/tracks/${code}/public`, { method: "POST", headers: { "content-type": "application/json", "cf-connecting-ip": ip }, body: JSON.stringify({ email, public: pub }) });
   const hear = (id, ip = `203.0.113.${addr++}`) => j(`/api/booth/listen/${id}`, { headers: { "cf-connecting-ip": ip } });
   const fresh = await look(up.body.code);
-  ok(fresh.status === 200 && fresh.body.public === false && fresh.body.share_id === null && fresh.body.art_url === null && Object.keys(fresh.body).join() === "code,file_name,audio_url,download_url,size,uploaded_at,public,share_id,art_url", "the lookup carries the share state: private, no link, no artwork, until the rapper says otherwise");
-  const on = await flip(up.body.code, true);
+  ok(fresh.status === 200 && fresh.body.public === false && fresh.body.share_id === null && fresh.body.art_url === null && Object.keys(fresh.body).join() === "code,file_name,audio_url,download_url,size,uploaded_at,public,share_id,art_url,you,people,opted,everyone_in", "the entry carries the share state: private, no link, no artwork, until someone attached says otherwise");
+  const stranger = await flip(up.body.code, true, undefined, "stranger@example.com");
+  ok(stranger.status === 403 && stranger.body.error === "not_attached" && (await look(up.body.code)).body.public === false, "the switch answers 403 not_attached to an email that never entered the code, and nothing flips");
+  const on = await flip(up.body.code, true, undefined, OTHER);
+  ok(on.status === 200, "any attached person may flip it: share is anyone's call");
   ok(on.status === 200 && on.body.public === true && /^[0-9a-f]{16}$/.test(on.body.share_id ?? "") && on.body.share_id !== up.body.code && Object.keys(on.body).join() === "code,public,share_id", `POST /api/booth/tracks/<code>/public switches the track on and hands out a 16-character share id (${on.body.share_id})`);
   const shareId = on.body.share_id;
   ok((await look(up.body.code)).body.share_id === shareId, "the next lookup says public, with the same id");
@@ -217,7 +242,9 @@ try {
   ok((await flip(wrongCode, true, "203.0.113.201")).status === 404, "a wrong code on the switch is a 404");
   // Artwork: the smallest JPEG by its first bytes (the server never decodes a picture), raw.
   const art = Buffer.alloc(700, 0x5c); art.set([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00], 0); art.set([0xff, 0xd9], 698);
-  const sendArt = (code, bytes, type, ip = `203.0.113.${addr++}`) => fetch(base + `/api/booth/tracks/${code}/art`, { method: "POST", headers: { "content-type": type, "content-length": String(bytes.length), "cf-connecting-ip": ip }, body: bytes }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }));
+  const sendArt = (code, bytes, type, ip = `203.0.113.${addr++}`, email = ME) => fetch(base + `/api/booth/tracks/${code}/art`, { method: "POST", headers: { "content-type": type, "content-length": String(bytes.length), "cf-connecting-ip": ip, ...(email === null ? {} : { "x-email": email }) }, body: bytes }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }));
+  const noOne = await sendArt(up.body.code, art, "image/jpeg", undefined, null);
+  ok(noOne.status === 403 && noOne.body.error === "not_attached", "artwork without an x-email is a 403 not_attached");
   const put = await sendArt(up.body.code, art, "image/jpeg");
   ok(put.status === 200 && /^\/media\/booth\/art\/[0-9a-f]{16}-[0-9a-f]{10}\.jpg$/.test(put.body?.art_url ?? "") && !put.body.art_url.includes(up.body.code) && Object.keys(put.body).join() === "code,art_url", `POST /api/booth/tracks/<code>/art takes a generated JPEG and answers its address (${put.body?.art_url})`);
   const pic = await fetch(base + put.body.art_url);
@@ -231,6 +258,9 @@ try {
   const logNow = (await j("/api/booth/tracks")).body.tracks;
   const myRow = logNow.find((t) => t.code === up.body.code);
   ok(myRow && myRow.public === true && myRow.art_url === put.body.art_url && logNow.every((t) => typeof t.public === "boolean" && "art_url" in t && !("share_id" in t) && !("art_key" in t)), "GET /api/booth/tracks says which tracks are public and which have artwork, never a share id or a key");
+  ok(myRow.people === 2 && myRow.everyone_in === true && logNow.every((t) => Number.isInteger(t.people) && typeof t.everyone_in === "boolean") && !JSON.stringify(logNow).includes("@"), "and how many people each has and whether all are in: counts, never an email (no \"@\" in the whole log)");
+  const heardAgain = await hear(shareId);
+  ok(Object.keys(heardAgain.body).join() === "file_name,audio_url,art_url" && !JSON.stringify(heardAgain.body).includes("@"), "the listen page's read is unchanged: no email, no people");
 
   const s1 = await j("/api/state");
   ok(s1.status === 200 && s1.body.tracks.length === 1 && s1.body.tracks[0].slug === "smoke" && s1.body.tracks[0].likes === 0, "GET /api/state lists the track with 0 likes");
@@ -290,7 +320,32 @@ try {
   ok(whole.status === 200 && whole.headers.get("accept-ranges") === "bytes" && /immutable/.test(whole.headers.get("cache-control")) && whole.headers.get("content-type") === "audio/mpeg", "media is served whole with a long cache");
   ok((await fetch(base + "/media/manifest/photos.json")).status === 404, "the manifest is not reachable under /media");
 
-  if (passed < 90) throw new Error(`only ${passed} checks ran`);
+  // The only door onto the voting site: npm run promote-booth, against this same throwaway D1 and
+  // R2 (TBZ_PERSIST_TO points the script's wrangler at it). A track with someone still out is
+  // refused, non-zero; the smoke track, with both in, is promoted, and then it is in /api/state.
+  const promote = (...args) => {
+    try { return { status: 0, out: execFileSync(process.execPath, [path.join(ROOT, "scripts/promote-booth.mjs"), ...args], { cwd: ROOT, env: { ...env, TBZ_PERSIST_TO: dir }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) }; }
+    catch (e) { return { status: e.status, out: `${e.stdout ?? ""}${e.stderr ?? ""}` }; }
+  };
+  const refused = promote("--env", "local", "--code", lastCode);
+  ok(refused.status === 1 && /REFUSED: 1 of the 1 people attached to code \d{4} has not opted in/.test(refused.out), `promote-booth refuses a track whose one person is out, exit ${refused.status}`);
+  const unknown = promote("--env", "local", "--code", wrongCode);
+  ok(unknown.status === 1 && /REFUSED: no booth track has that code/.test(unknown.out), "and an unknown code");
+  const dry = promote("--env", "local", "--code", up.body.code, "--dry-run");
+  ok(dry.status === 0 && /ALLOWED \(everyone_in\): all 2 people attached/.test(dry.out) && /dry run: would add smoke-take-1  "Smoke Take 1"/.test(dry.out) && (await j("/api/state")).body.tracks.length === 1, "a dry run says everyone is in and what it would add, and adds nothing");
+  const done = promote("--env", "local", "--code", up.body.code, "--label", "Smoke Group");
+  ok(done.status === 0 && /promoted  smoke-group  "Smoke Group"  1\.0 s  → topbarz-voting-media\/tracks\/smoke-group-[0-9a-f]{10}\.wav/.test(done.out) && /The deep link: http:\/\/localhost:8788\/#smoke-group/.test(done.out), `promote-booth copies the audio under tracks/ and adds the vote track: ${done.out.split("\n").find((l) => l.startsWith("promoted"))}`);
+  let s4;
+  const promotedBy = Date.now() + 8_000;
+  do { await new Promise((r) => setTimeout(r, 1000)); s4 = await j("/api/state"); } while (!s4.body.tracks.some((t) => t.slug === "smoke-group") && Date.now() < promotedBy);
+  const promoted = s4.body.tracks.find((t) => t.slug === "smoke-group");
+  ok(promoted && promoted.label === "Smoke Group" && promoted.duration_ms === 1000 && /^\/media\/tracks\/smoke-group-[0-9a-f]{10}\.wav$/.test(promoted.audio_url) && s4.body.tracks.length === 2, "the promoted track is in /api/state beside the seeded one, with its label and duration");
+  const promotedAudio = await fetch(base + promoted.audio_url, { headers: { range: "bytes=0-3" } });
+  ok(promotedAudio.status === 206 && Buffer.from(await promotedAudio.arrayBuffer()).toString() === "RIFF" && promotedAudio.headers.get("content-type") === "audio/wav", "and its audio plays by Range from tracks/");
+  ok((await look(up.body.code)).status === 200 && (await j("/api/booth/tracks")).body.tracks.find((t) => t.code === up.body.code).everyone_in === true, "the booth row is untouched");
+  ok(!JSON.stringify(s4.body).includes("@") && !/booth/.test(JSON.stringify(s4.body)), "nothing of the people and nothing of the booth is in /api/state");
+
+  if (passed < 110) throw new Error(`only ${passed} checks ran`);
   console.log(`smoke: ${passed} checks passed`);
 } catch (err) {
   console.error(String(err.message ?? err));

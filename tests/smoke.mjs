@@ -35,7 +35,7 @@ const stub = http.createServer((req, res) => {
   });
 });
 
-let passed = 0, server;
+let passed = 0, server, log = "";
 function ok(cond, what) {
   if (!cond) throw new Error(`FAILED: ${what}`);
   passed++;
@@ -62,16 +62,28 @@ try {
   // EMAIL_VERIFICATION comes from wrangler.toml, as in production; the mail key and the two
   // endpoints are the stand-ins above.
   const bindings = ["VOTER_TOKEN_SECRET=smoke-only-not-a-secret", "RESEND_API_KEY=smoke-only-not-a-key", `RESEND_ENDPOINT=${stubBase}/emails`, `DOH_ENDPOINT=${stubBase}/dns-query`].flatMap((b) => ["--binding", b]);
-  server = spawn(WRANGLER, ["pages", "dev", "public", "--port", String(port), "--inspector-port", String(await freePort()), "--persist-to", dir, ...bindings, "--show-interactive-dev-session=false"], { cwd: ROOT, env, stdio: ["ignore", "pipe", "pipe"] });
-  let log = "";
-  server.stdout.on("data", (d) => { log += d; });
-  server.stderr.on("data", (d) => { log += d; });
-  const deadline = Date.now() + 90_000;
-  for (;;) {
-    try { if ((await fetch(`${base}/api/state`)).status === 200) break; } catch {}
-    if (Date.now() > deadline || server.exitCode !== null) throw new Error(`the dev server did not come up:\n${log.slice(-2000)}`);
-    await new Promise((r) => setTimeout(r, 500));
-  }
+  // The dev server, startable more than once: the promote steps below run a second wrangler
+  // against the same local D1 and R2, which is not safe while this one is serving them (on
+  // Linux the server dies and the next fetch fails), so the server is stopped around them.
+  const startServer = async () => {
+    server = spawn(WRANGLER, ["pages", "dev", "public", "--port", String(port), "--inspector-port", String(await freePort()), "--persist-to", dir, ...bindings, "--show-interactive-dev-session=false"], { cwd: ROOT, env, stdio: ["ignore", "pipe", "pipe"] });
+    server.stdout.on("data", (d) => { log += d; });
+    server.stderr.on("data", (d) => { log += d; });
+    const deadline = Date.now() + 90_000;
+    for (;;) {
+      try { if ((await fetch(`${base}/api/state`)).status === 200) break; } catch {}
+      if (Date.now() > deadline || server.exitCode !== null) throw new Error(`the dev server did not come up:\n${log.slice(-2000)}`);
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  };
+  const stopServer = async () => {
+    if (!server || server.exitCode !== null) return;
+    const gone = new Promise((r) => server.once("exit", r));
+    server.kill("SIGTERM");
+    await Promise.race([gone, new Promise((r) => setTimeout(r, 10_000))]);
+    if (server.exitCode === null) { server.kill("SIGKILL"); await gone; }
+  };
+  await startServer();
   const j = async (p, init) => { const r = await fetch(base + p, init); return { status: r.status, headers: r.headers, body: await r.json().catch(() => null) }; };
   const post = (p, body, token) => j(p, { method: "POST", headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body) });
 
@@ -327,13 +339,17 @@ try {
     try { return { status: 0, out: execFileSync(process.execPath, [path.join(ROOT, "scripts/promote-booth.mjs"), ...args], { cwd: ROOT, env: { ...env, TBZ_PERSIST_TO: dir }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) }; }
     catch (e) { return { status: e.status, out: `${e.stdout ?? ""}${e.stderr ?? ""}` }; }
   };
+  await stopServer();
   const refused = promote("--env", "local", "--code", lastCode);
   ok(refused.status === 1 && /REFUSED: 1 of the 1 people attached to code \d{4} has not opted in/.test(refused.out), `promote-booth refuses a track whose one person is out, exit ${refused.status}`);
   const unknown = promote("--env", "local", "--code", wrongCode);
   ok(unknown.status === 1 && /REFUSED: no booth track has that code/.test(unknown.out), "and an unknown code");
   const dry = promote("--env", "local", "--code", up.body.code, "--dry-run");
+  await startServer();
   ok(dry.status === 0 && /ALLOWED \(everyone_in\): all 2 people attached/.test(dry.out) && /dry run: would add smoke-take-1  "Smoke Take 1"/.test(dry.out) && (await j("/api/state")).body.tracks.length === 1, "a dry run says everyone is in and what it would add, and adds nothing");
+  await stopServer();
   const done = promote("--env", "local", "--code", up.body.code, "--label", "Smoke Group");
+  await startServer();
   ok(done.status === 0 && /promoted  smoke-group  "Smoke Group"  1\.0 s  → topbarz-voting-media\/tracks\/smoke-group-[0-9a-f]{10}\.wav/.test(done.out) && /The deep link: http:\/\/localhost:8788\/#smoke-group/.test(done.out), `promote-booth copies the audio under tracks/ and adds the vote track: ${done.out.split("\n").find((l) => l.startsWith("promoted"))}`);
   let s4;
   const promotedBy = Date.now() + 8_000;
@@ -349,6 +365,7 @@ try {
   console.log(`smoke: ${passed} checks passed`);
 } catch (err) {
   console.error(String(err.message ?? err));
+  if (/fetch failed/.test(String(err?.message)) && server?.exitCode !== null) console.error(`the dev server had exited (code ${server?.exitCode}); its last lines:\n${log.slice(-1500)}`);
   process.exitCode = 1;
 } finally {
   server?.kill("SIGTERM");

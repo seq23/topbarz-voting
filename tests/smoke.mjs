@@ -106,7 +106,7 @@ try {
   ok(beatRange.status === 206 && beatRange.headers.get("content-range") === "bytes 0-1/4096" && beatRange.headers.get("content-type") === "audio/mpeg", "a beat's audio answers Range with 206, as a track's does");
 
   // The booth: the engineer's page, the rapper's page, the sign, and a real upload end to end.
-  for (const [p, needle] of [["/booth", 'id="tbz-zone"'], ["/track", 'id="tbz-code"'], ["/track-qr", 'src="/img/track-qr.svg"']]) {
+  for (const [p, needle] of [["/booth", 'id="tbz-zone"'], ["/track", 'id="tbz-code"'], ["/track-qr", 'src="/img/track-qr.svg"'], ["/listen/0123456789abcdef", 'id="tbz-listen-art"'], ["/listen/anything-at-all", 'id="tbz-listen-private"'], ["/listen", 'id="tbz-listen-ig"']]) {
     const r = await fetch(base + p, { redirect: "manual" });
     const t = await r.text();
     const ids = [...t.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]);
@@ -193,6 +193,45 @@ try {
   const limited = await look(wrongCode, "203.0.113.200");
   ok(limited.status === 429 && limited.body.error === "rate_limited" && /Give it a minute/.test(limited.body.message), "and it stays shut for the minute, with a message to show");
 
+  // The share (4 Oct 2026): the switch, the listen page's read, the artwork, all through HTTP.
+  const flip = (code, pub, ip = `203.0.113.${addr++}`) => j(`/api/booth/tracks/${code}/public`, { method: "POST", headers: { "content-type": "application/json", "cf-connecting-ip": ip }, body: JSON.stringify({ public: pub }) });
+  const hear = (id, ip = `203.0.113.${addr++}`) => j(`/api/booth/listen/${id}`, { headers: { "cf-connecting-ip": ip } });
+  const fresh = await look(up.body.code);
+  ok(fresh.status === 200 && fresh.body.public === false && fresh.body.share_id === null && fresh.body.art_url === null && Object.keys(fresh.body).join() === "code,file_name,audio_url,download_url,size,uploaded_at,public,share_id,art_url", "the lookup carries the share state: private, no link, no artwork, until the rapper says otherwise");
+  const on = await flip(up.body.code, true);
+  ok(on.status === 200 && on.body.public === true && /^[0-9a-f]{16}$/.test(on.body.share_id ?? "") && on.body.share_id !== up.body.code && Object.keys(on.body).join() === "code,public,share_id", `POST /api/booth/tracks/<code>/public switches the track on and hands out a 16-character share id (${on.body.share_id})`);
+  const shareId = on.body.share_id;
+  ok((await look(up.body.code)).body.share_id === shareId, "the next lookup says public, with the same id");
+  const heard = await hear(shareId);
+  ok(heard.status === 200 && heard.body.file_name === "Smoke Take 1.wav" && heard.body.audio_url === found.body.audio_url && heard.body.art_url === null && Object.keys(heard.body).join() === "file_name,audio_url,art_url", "GET /api/booth/listen/<share_id> answers a public track's name and audio, nothing else");
+  const openedBefore = (await j("/api/booth/tracks")).body.tracks.find((t) => t.code === up.body.code).opened;
+  await hear(shareId); await hear(shareId);
+  ok((await j("/api/booth/tracks")).body.tracks.find((t) => t.code === up.body.code).opened === openedBefore, "listening never counts as an open");
+  const unknownId = shareId.replace(/./g, (c) => (c === "0" ? "1" : "0"));
+  const nobody = await hear(unknownId);
+  ok(nobody.status === 404 && nobody.body.error === "not_found" && nobody.body.message === "Sorry, this song is private.", "an unknown share id is a 404 not_found that says private");
+  const off = await flip(up.body.code, false);
+  const quiet = await hear(shareId);
+  ok(off.status === 200 && off.body.public === false && off.body.share_id === null && quiet.status === 404 && quiet.body.error === "private" && quiet.body.message === nobody.body.message && Object.keys(quiet.body).join() === Object.keys(nobody.body).join(), "switched off: the same 404 as an unknown id (code private), the same words, the same shape");
+  ok((await look(up.body.code)).body.public === false, "and the lookup says private again");
+  ok((await flip(wrongCode, true, "203.0.113.201")).status === 404, "a wrong code on the switch is a 404");
+  // Artwork: the smallest JPEG by its first bytes (the server never decodes a picture), raw.
+  const art = Buffer.alloc(700, 0x5c); art.set([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00], 0); art.set([0xff, 0xd9], 698);
+  const sendArt = (code, bytes, type, ip = `203.0.113.${addr++}`) => fetch(base + `/api/booth/tracks/${code}/art`, { method: "POST", headers: { "content-type": type, "content-length": String(bytes.length), "cf-connecting-ip": ip }, body: bytes }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }));
+  const put = await sendArt(up.body.code, art, "image/jpeg");
+  ok(put.status === 200 && /^\/media\/booth\/art\/[0-9a-f]{16}-[0-9a-f]{10}\.jpg$/.test(put.body?.art_url ?? "") && !put.body.art_url.includes(up.body.code) && Object.keys(put.body).join() === "code,art_url", `POST /api/booth/tracks/<code>/art takes a generated JPEG and answers its address (${put.body?.art_url})`);
+  const pic = await fetch(base + put.body.art_url);
+  const picBytes = Buffer.from(await pic.arrayBuffer());
+  ok(pic.status === 200 && pic.headers.get("content-type") === "image/jpeg" && /immutable/.test(pic.headers.get("cache-control")) && pic.headers.get("content-disposition") === null && picBytes.length === 700 && picBytes.equals(art), "the media route serves the artwork, cached a year, never as a download");
+  ok((await look(up.body.code)).body.art_url === put.body.art_url, "the lookup shows the artwork");
+  await flip(up.body.code, true);
+  ok((await hear(shareId)).body.art_url === put.body.art_url, "and so does the listen page's read, once the track is public again");
+  const fake = await sendArt(up.body.code, Buffer.from("GIF89a not a jpeg at all, no matter the type"), "image/jpeg");
+  ok(fake.status === 415 && fake.body.error === "not_image", "bytes that are not a JPEG are refused whatever the type says (415 not_image)");
+  const logNow = (await j("/api/booth/tracks")).body.tracks;
+  const myRow = logNow.find((t) => t.code === up.body.code);
+  ok(myRow && myRow.public === true && myRow.art_url === put.body.art_url && logNow.every((t) => typeof t.public === "boolean" && "art_url" in t && !("share_id" in t) && !("art_key" in t)), "GET /api/booth/tracks says which tracks are public and which have artwork, never a share id or a key");
+
   const s1 = await j("/api/state");
   ok(s1.status === 200 && s1.body.tracks.length === 1 && s1.body.tracks[0].slug === "smoke" && s1.body.tracks[0].likes === 0, "GET /api/state lists the track with 0 likes");
   ok(!/beat/i.test(JSON.stringify(s1.body)) && Object.keys(s1.body).sort().join() === "closed,gate,giphy,now,photos,tracks,verification,voting_ends_at", "the beat is not in /api/state, whose shape has not changed");
@@ -251,7 +290,7 @@ try {
   ok(whole.status === 200 && whole.headers.get("accept-ranges") === "bytes" && /immutable/.test(whole.headers.get("cache-control")) && whole.headers.get("content-type") === "audio/mpeg", "media is served whole with a long cache");
   ok((await fetch(base + "/media/manifest/photos.json")).status === 404, "the manifest is not reachable under /media");
 
-  if (passed < 60) throw new Error(`only ${passed} checks ran`);
+  if (passed < 90) throw new Error(`only ${passed} checks ran`);
   console.log(`smoke: ${passed} checks passed`);
 } catch (err) {
   console.error(String(err.message ?? err));

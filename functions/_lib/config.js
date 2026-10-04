@@ -19,6 +19,10 @@ export const LIMITS = {
   boothLogPerIp: { window: 60, max: 60 },
   boothLookupPerMinute: { window: 60, max: 5 },
   boothLookupPerHour: { window: 3600, max: 30 },
+  // The share (4 Oct 2026): the public switch and artwork uploads from /track (one counter), and
+  // listen-page lookups. A wrong code on a share route counts as a lookup try (the limits above).
+  boothEditsPerMinute: { window: 60, max: 30 },
+  boothListenPerMinute: { window: 60, max: 30 },
 };
 export const COMMENT_MAX_CHARS = 500;
 export const NAME_MAX_CHARS = 80;

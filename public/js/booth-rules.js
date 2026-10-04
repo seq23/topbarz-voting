@@ -31,13 +31,56 @@ export function refuseFile(file) {
   return null;
 }
 
-// The server's answer to a lookup → what the page shows, or null for anything malformed.
+// The server's answer to a lookup → what the page shows, or null for anything malformed. The
+// share state comes from the server every time: public is true only when it says so, the share
+// id only when it is 16 hex characters, the artwork only when it is a booth art address.
 export function cleanTrack(data) {
   if (!data || typeof data !== "object") return null;
   const { code, file_name: name, audio_url: audio, download_url: download } = data;
   if (!isCode(code) || typeof name !== "string" || !name.trim()) return null;
   if (!safeBoothUrl(audio, false) || !safeBoothUrl(download, true)) return null;
-  return { code, file_name: name.trim(), audio_url: audio, download_url: download, size: Number(data.size) > 0 ? Number(data.size) : 0 };
+  const pub = data.public === true && isShareId(data.share_id);
+  return { code, file_name: name.trim(), audio_url: audio, download_url: download, size: Number(data.size) > 0 ? Number(data.size) : 0, public: pub, share_id: pub ? data.share_id : null, art_url: safeArtUrl(data.art_url) };
+}
+
+// ── The share (4 Oct 2026)
+export const isShareId = (s) => typeof s === "string" && /^[0-9a-f]{16}$/.test(s);
+// "/listen/<share id>" → the id, or null for anything else (a trailing slash is allowed).
+export function shareIdFromPath(pathname) {
+  const m = /^\/listen\/([0-9a-f]{16})\/?$/.exec(String(pathname ?? ""));
+  return m ? m[1] : null;
+}
+// Artwork is only ever /media/booth/art/<key>, with no query.
+export function safeArtUrl(url) {
+  return typeof url === "string" && /^\/media\/booth\/art\/[A-Za-z0-9][A-Za-z0-9._-]{0,200}$/.test(url) && !url.includes("..") ? url : null;
+}
+// The listen page's answer → what it shows, or null for anything malformed.
+export function cleanListen(data) {
+  if (!data || typeof data !== "object") return null;
+  const { file_name: name, audio_url: audio } = data;
+  if (typeof name !== "string" || !name.trim() || !safeBoothUrl(audio, false)) return null;
+  return { file_name: name.trim(), audio_url: audio, art_url: safeArtUrl(data.art_url) };
+}
+// How the Share button shares: the share sheet when the browser has one, else the phone's text
+// composer, else (a desktop) the link goes to the clipboard.
+export function shareRoute(nav, platform) {
+  if (typeof nav?.share === "function") return "share";
+  if (platform === "ios" || platform === "android") return "sms";
+  return "copy";
+}
+// The lock-screen artwork for a track with a picture, or none: the player passes it to MediaMetadata.
+export function artworkFor(artUrl, base) {
+  if (!artUrl) return [];
+  let src = artUrl;
+  try { src = new URL(artUrl, base).href; } catch {}
+  return [{ src, sizes: "1024x1024", type: "image/jpeg" }];
+}
+// Where a picture of w × h is cut to a square (the middle), and the size it is drawn at (at
+// most 1024, never scaled up). → { sx, sy, side, out }.
+export const ART_SIDE = 1024;
+export function squareCrop(w, h) {
+  const side = Math.max(1, Math.min(Number(w) || 0, Number(h) || 0));
+  return { sx: Math.max(0, Math.floor((w - side) / 2)), sy: Math.max(0, Math.floor((h - side) / 2)), side, out: Math.min(ART_SIDE, side) };
 }
 
 // A booth media address is /media/booth/<key>, with exactly ?dl=1 for the download.
@@ -55,7 +98,7 @@ export function todayRows(rows, now = Date.now()) {
     if (!isCode(r?.code) || typeof r.file_name !== "string") continue;
     const at = Date.parse(r.uploaded_at);
     if (!Number.isFinite(at) || new Date(at).toDateString() !== today) continue;
-    out.push({ code: r.code, file_name: r.file_name, uploaded_at: at, opened: Number(r.opened) > 0 ? Number(r.opened) : 0, size: Number(r.size) > 0 ? Number(r.size) : 0 });
+    out.push({ code: r.code, file_name: r.file_name, uploaded_at: at, opened: Number(r.opened) > 0 ? Number(r.opened) : 0, size: Number(r.size) > 0 ? Number(r.size) : 0, public: r.public === true, art_url: safeArtUrl(r.art_url) });
   }
   return out.sort((a, b) => b.uploaded_at - a.uploaded_at);
 }

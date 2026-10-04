@@ -123,10 +123,11 @@ els.retry.addEventListener("click", () => {
 
 // ── Today's log
 function renderLog(rows) {
-  els.logList.replaceChildren(...rows.map((r) => h("li", {},
+  els.logList.replaceChildren(...rows.map((r) => h("li", { class: r.art_url ? "has-art" : null },
     h("span", { class: "log-code", text: r.code }),
+    r.art_url ? h("img", { class: "log-art", src: r.art_url, width: 40, height: 40, alt: "", loading: "lazy" }) : null,
     h("span", { class: "log-file", text: r.file_name }),
-    h("span", { class: "log-meta", text: [formatTime(r.uploaded_at), formatSize(r.size), openedWords(r.opened)].filter(Boolean).join(" · ") }))));
+    h("span", { class: "log-meta", text: [formatTime(r.uploaded_at), formatSize(r.size), openedWords(r.opened), r.public ? "public" : ""].filter(Boolean).join(" · ") }))));
   els.logNote.textContent = rows.length ? "" : COPY.logEmpty;
   els.logNote.hidden = rows.length > 0;
 }

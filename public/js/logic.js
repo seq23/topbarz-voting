@@ -12,6 +12,15 @@ export function shareMessage(label, link) {
   return `${label} wants you to vote on their track from the Top Barz experience ${link}`;
 }
 
+// The rapper's own share (/track → /listen/<share id>): the listen page's link on the address the
+// page is open at, and the text that goes with it (the words are the page's, track-copy.js).
+export function listenLink(origin, shareId) {
+  return `${String(origin).replace(/\/+$/, "")}/listen/${shareId}`;
+}
+export function boothShareMessage(intro, link) {
+  return `${intro} ${link}`;
+}
+
 // "ios" | "android" | "desktop". iPadOS reports itself as a Mac with a touch screen.
 export function detectPlatform(nav = {}) {
   const ua = String(nav.userAgent || "");

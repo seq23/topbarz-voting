@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="color-scheme" content="dark">
+<title>Listen | Top Barz</title>
+<meta name="description" content="A song made at the Top Barz experience, shared by the artist.">
+<link rel="icon" type="image/png" href="/img/favicon.png">
+<link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
+<link rel="preload" href="/fonts/dela-gothic-one-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/epilogue-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/css/site.css">
+<link rel="modulepreload" href="/js/logic.js">
+<link rel="modulepreload" href="/js/api.js">
+<link rel="modulepreload" href="/js/dom.js">
+<link rel="modulepreload" href="/js/player.js">
+<link rel="modulepreload" href="/js/booth-rules.js">
+<link rel="modulepreload" href="/js/listen-copy.js">
+<script type="module" src="/js/listen.js"></script>
+</head>
+<body>
+<a class="skip" href="#tbz-listen">Skip to the song</a>
+
+<header class="top">
+  <a class="logo" href="https://www.topbarz.xyz/"><img src="/img/logo.png" width="212" height="186" alt="Top Barz"></a>
+  <h1 class="slogan">JUMP IN THE BOOTH</h1>
+</header>
+
+<main>
+  <section id="tbz-listen" class="listen" aria-labelledby="tbz-listen-title">
+    <p id="tbz-listen-wait" class="list-note" role="status"></p>
+    <div id="tbz-listen-song" class="listen-song" hidden>
+      <img id="tbz-listen-art" class="art art-big art-mark" width="320" height="320" src="/img/logo.png" alt="">
+      <h2 id="tbz-listen-title" class="listen-title" tabindex="-1"></h2>
+      <div id="tbz-listen-list" class="list"></div>
+      <p id="tbz-listen-line" class="listen-line"></p>
+    </div>
+    <div id="tbz-listen-private" class="listen-private" hidden>
+      <h2 id="tbz-listen-private-text" class="page-title"></h2>
+      <a id="tbz-listen-ig" class="btn" href="https://www.instagram.com/topbarz.xyz" rel="noopener"></a>
+    </div>
+  </section>
+  <noscript><p class="list-note">This page needs JavaScript to play the song. Turn it on and reload.</p></noscript>
+</main>
+
+<footer class="foot">
+  <div class="foot-inner">
+    <section class="foot-block" aria-labelledby="tbz-contact-title">
+      <h2 id="tbz-contact-title">Contact</h2>
+      <p>Questions? Message Top Barz on Instagram.</p>
+      <p class="foot-links">
+        <a href="https://www.instagram.com/topbarz.xyz" rel="noopener">@topbarz.xyz on Instagram</a>
+        <a href="https://www.topbarz.xyz/">topbarz.xyz</a>
+      </p>
+    </section>
+    <p class="foot-mark">Top Barz</p>
+  </div>
+</footer>
+</body>
+</html>

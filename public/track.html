@@ -47,7 +47,22 @@
   <section id="tbz-found" class="found" aria-labelledby="tbz-found-title" hidden>
     <h2 id="tbz-found-title" tabindex="-1"></h2>
     <div id="tbz-found-list" class="list"></div>
-    <a id="tbz-download" class="btn" download></a>
+    <div class="art-row">
+      <img id="tbz-art" class="art" width="240" height="240" alt="" hidden>
+      <label id="tbz-art-pick" class="btn btn-small btn-ghost" for="tbz-art-file"></label>
+      <input type="file" id="tbz-art-file" class="sr-only" accept="image/*">
+      <p id="tbz-art-msg" class="field-error" role="alert" hidden></p>
+    </div>
+    <div class="switch-row">
+      <span id="tbz-public-label" class="switch-label"></span>
+      <button type="button" id="tbz-public" class="switch" role="switch" aria-checked="false" aria-labelledby="tbz-public-label"><span class="switch-knob" aria-hidden="true"></span></button>
+    </div>
+    <p id="tbz-public-note" class="switch-note" role="status"></p>
+    <div class="found-actions">
+      <a id="tbz-download" class="btn" download></a>
+      <button type="button" id="tbz-share" class="btn" hidden></button>
+    </div>
+    <p id="tbz-share-msg" class="switch-note" role="status" hidden></p>
     <button type="button" id="tbz-another" class="btn btn-small btn-ghost"></button>
   </section>
   <noscript><p class="list-note">This page needs JavaScript to find and play your track. Turn it on and reload.</p></noscript>

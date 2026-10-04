@@ -14,4 +14,18 @@ export const COPY = {
   needCode: "Type all 4 digits.",
   audioNone: "This track has no audio yet.",
   audioFailed: "The track did not load. Tap play to try again.",
+  // The share (4 Oct 2026): the switch, the Share button and what it says, the artwork.
+  publicLabel: "Make public",
+  publicOff: "Only you can hear it. Switch it on to get a link you can share.",
+  publicOn: "Anyone with the link can hear it.",
+  publicFailed: "That did not save. Try again.",
+  share: "Share",
+  shareMessage: "I made a song at the Top Barz experience. Check it out:",
+  copied: "Link copied",
+  copyFailed: "Could not copy the link. Try again.",
+  addArt: "Add artwork",
+  changeArt: "Change artwork",
+  artWorking: "Adding your artwork",
+  artUnreadable: "That picture could not be read, try another",
+  artFailed: "The artwork did not upload. Try again.",
 };

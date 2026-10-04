@@ -71,10 +71,13 @@ export function createPlayer(onChange) {
     }
     current = { slug: track.slug, url: track.url, hint: track.hint };
     audio.src = track.url;
-    // What a phone's lock screen and notification shade show while it plays.
+    // What a phone's lock screen and notification shade show while it plays: the title, the
+    // artist, and the artwork when the track carries one (a booth track with a picture; the
+    // vote's tracks and the beats pass none).
     try {
       if (typeof MediaMetadata === "function" && navigator.mediaSession) {
-        navigator.mediaSession.metadata = new MediaMetadata({ title: track.title || "CultureCon track", artist: track.artist || "Top Barz at CultureCon" });
+        const artwork = Array.isArray(track.artwork) && track.artwork.length ? { artwork: track.artwork } : {};
+        navigator.mediaSession.metadata = new MediaMetadata({ title: track.title || "CultureCon track", artist: track.artist || "Top Barz at CultureCon", ...artwork });
       }
     } catch {}
     set("loading");

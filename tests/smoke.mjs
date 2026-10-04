@@ -140,25 +140,29 @@ try {
   const playing = await fetch(base + found.body.audio_url, { headers: { range: "bytes=0-3" } });
   ok(playing.status === 206 && playing.headers.get("content-range") === `bytes 0-3/${wavBytes.length}` && Buffer.from(await playing.arrayBuffer()).toString() === "RIFF" && playing.headers.get("content-disposition") === null, "the audio address answers Range with 206 and plays inline");
 
-  // The real sample songs: one is in the repo (so this runs on every machine, CI included), and
-  // wherever the Drive package is synced all four are uploaded from it. A synced package with no
-  // "Test tracks" folder is a loud failure, never a skip.
-  const fixture = path.join(ROOT, "tests", "fixtures", "Test - Carlos & Damien.mp3");
-  if (!fs.existsSync(fixture)) throw new Error(`FAILED: the sample song is not in the repo at ${fixture}`);
-  const drive = path.join(os.homedir(), "topbarz-source", "drive");
-  const testTracks = path.join(drive, "Test tracks");
-  const songs = [fixture];
-  if (fs.existsSync(drive)) {
-    if (!fs.existsSync(testTracks)) throw new Error(`FAILED: the Drive package is synced at ${drive} but has no "Test tracks" folder (${testTracks}); run npm run sync-drive`);
-    const four = fs.readdirSync(testTracks).filter((f) => f.endsWith(".mp3")).sort();
-    if (four.length < 4) throw new Error(`FAILED: ${testTracks} holds ${four.length} MP3(s); the four sample songs are expected there`);
-    songs.push(...four.map((f) => path.join(testTracks, f)));
+  // The real sample songs: the four MP3s in the Drive package's "Test tracks" folder (no media is
+  // ever committed: tests/loaders.test.mjs pins that). On a machine where the folder is missing
+  // this fails loudly, naming it. On GitHub Actions, where no Drive package can exist, the same
+  // four names go up at their real byte sizes with made-up bytes (the server never decodes audio),
+  // and the check's own line says so. Never a silent skip.
+  const testTracks = path.join(os.homedir(), "topbarz-source", "drive", "Test tracks");
+  const SAMPLE_SONGS = { "Test - Brian.mp3": 2602688, "Test - Caleb.mp3": 2865728, "Test - Carlos & Damien.mp3": 2735168, "Test - Chelos x Madame Prez x Cam.mp3": 2865728 };
+  let songs, songSource;
+  if (fs.existsSync(testTracks)) {
+    const names = fs.readdirSync(testTracks).filter((f) => f.endsWith(".mp3")).sort();
+    const absent = Object.keys(SAMPLE_SONGS).filter((n) => !names.includes(n));
+    if (absent.length) throw new Error(`FAILED: ${testTracks} is missing the sample song(s) ${absent.join(", ")}; run npm run sync-drive`);
+    songs = names.map((n) => [n, fs.readFileSync(path.join(testTracks, n))]);
+    songSource = `the real files from ${testTracks}`;
+  } else if (process.env.GITHUB_ACTIONS === "true") {
+    songs = Object.entries(SAMPLE_SONGS).map(([n, size]) => [n, Buffer.alloc(size, 0x5a)]);
+    songSource = "the four real names at their real sizes with stand-in bytes: GitHub Actions has no Drive package";
+  } else {
+    throw new Error(`FAILED: the sample songs are not on this machine: there is no ${testTracks}. Run npm run sync-drive (the Drive package), then npm run check again.`);
   }
   let realUploads = 0;
   let lastCode = null;
-  for (const song of songs) {
-    const name = path.basename(song);
-    const bytes = fs.readFileSync(song);
+  for (const [name, bytes] of songs) {
     const r = await sendFile(name, bytes, "audio/mpeg");
     if (r.status !== 200) throw new Error(`FAILED: uploading ${name} (${bytes.length} bytes) answered ${r.status} ${JSON.stringify(r.body)}`);
     const f = await look(r.body.code);
@@ -171,7 +175,7 @@ try {
     ok(r.body.file_name === name && f.status === 200 && f.body.file_name === name && f.body.size === bytes.length && whole.status === 200 && whole.headers.get("content-length") === String(bytes.length) && whole.headers.get("content-disposition") === `attachment; filename="${name}"` && d.status === 206 && audio.status === 206 && audio.headers.get("content-range") === `bytes 0-1/${bytes.length}`, `the real song "${name}" (${bytes.length} bytes) goes up, is found by code ${r.body.code}, downloads under its own name at full length, and plays by Range`);
     realUploads++;
   }
-  ok(realUploads === songs.length && realUploads >= 1, `${realUploads} real sample song(s) uploaded${songs.length > 1 ? " (the repo's copy plus the Drive package's four)" : " (the repo's copy; no Drive package on this machine)"}`);
+  ok(realUploads === 4 && songs.length === 4, `the four sample songs went up: ${songSource}`);
   const logRes = await j("/api/booth/tracks");
   ok(logRes.status === 200 && logRes.body.tracks.length === 1 + realUploads && logRes.body.tracks[0].code === lastCode && logRes.body.tracks.at(-1).code === up.body.code && logRes.body.tracks.every((t) => /^\d{4}$/.test(t.code) && t.opened === 1 && !("media_key" in t)), `GET /api/booth/tracks lists the ${1 + realUploads} uploads, newest first, each opened once, no key`);
   const wrongCode = up.body.code === "0000" ? "0001" : "0000";

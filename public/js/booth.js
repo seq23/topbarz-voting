@@ -31,7 +31,7 @@ const els = {
 
 const app = { busy: false, lastFile: null };
 
-// ── The words (booth-copy.js) ────────────────────────────────────────────────────────────────
+// ── The words (booth-copy.js)
 document.title = `${COPY.headline} | Top Barz`;
 els.headline.textContent = COPY.headline;
 els.intro.textContent = COPY.intro;
@@ -72,7 +72,7 @@ function done({ code, file_name: name }) {
   loadLog();
 }
 
-// ── The upload ───────────────────────────────────────────────────────────────────────────────
+// ── The upload
 function upload(file) {
   if (app.busy || !file) return;
   const why = refuseFile(file);
@@ -121,7 +121,7 @@ els.retry.addEventListener("click", () => {
   else { show("ready"); els.file.click(); }
 });
 
-// ── Today's log ──────────────────────────────────────────────────────────────────────────────
+// ── Today's log
 function renderLog(rows) {
   els.logList.replaceChildren(...rows.map((r) => h("li", {},
     h("span", { class: "log-code", text: r.code }),

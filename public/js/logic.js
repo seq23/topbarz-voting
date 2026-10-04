@@ -1,7 +1,7 @@
 // Pure logic for the voting page: no DOM, no network. Everything here is unit-tested in
 // tests/frontend.test.mjs, and the page's modules import it as it is.
 
-// ── Share ────────────────────────────────────────────────────────────────────────────────────
+// ── Share
 // A track's own link. `origin` is the address the page is being read at, so a shared link always
 // opens the same site the sharer was on.
 export function trackLink(origin, slug) {
@@ -31,7 +31,7 @@ export function smsHref(platform, message) {
   return null;
 }
 
-// ── Deep links ───────────────────────────────────────────────────────────────────────────────
+// ── Deep links
 // "/#brian" → "brian". Anything that is not a slug (letters, digits, dashes) is null.
 export function slugFromHash(hash) {
   let s = String(hash ?? "").replace(/^#/, "");
@@ -40,7 +40,7 @@ export function slugFromHash(hash) {
   return /^[a-z0-9][a-z0-9-]{0,99}$/.test(s) ? s : null;
 }
 
-// ── The clock ────────────────────────────────────────────────────────────────────────────────
+// ── The clock
 // The countdown runs on the SERVER's time. Each answer from the server carries its clock
 // (`now` in /api/state, and the Date header); between answers we add the time that has passed
 // on a monotonic timer (performance.now), which the phone's wall clock cannot move.
@@ -64,7 +64,7 @@ export function serverNow(clock, monoMs) {
   return clock ? clock.serverMs + (monoMs - clock.monoMs) : null;
 }
 
-// ── Countdown ────────────────────────────────────────────────────────────────────────────────
+// ── Countdown
 export function countdownParts(ms) {
   const total = Math.max(0, Math.ceil((Number(ms) || 0) / 1000));
   return {
@@ -115,7 +115,7 @@ export function formatEndsLine(endMs) {
   return `${parts.weekday}, ${parts.month} ${parts.day} at ${parts.hour}:${parts.minute} ${parts.dayPeriod} ${zone}`;
 }
 
-// ── Likes: optimistic, one request at a time per track, never drifting from the server ───────
+// ── Likes: optimistic, one request at a time per track, never drifting from the server
 // serverLiked / serverCount: the last thing the server confirmed.
 // want:      what the voter last asked for, while the server has not confirmed it (else null).
 // inflight:  a request for this track is on the wire (taps meanwhile only move `want`).
@@ -185,7 +185,7 @@ export function holdFrom(dateHeader, fallbackServerNow) {
 // place). Shorter than this and the answer is already back: a spinner would only flash.
 export const LIKE_WAIT_MS = 400;
 
-// ── What this device itself just changed ─────────────────────────────────────────────────────
+// ── What this device itself just changed
 // /api/state is cached for a few seconds, so straight after a voter's own like or comment a
 // refresh (or a second tab) can be handed a count from before it. The page keeps the server's
 // own answer to that like or comment, with the server time before which a cached state cannot
@@ -226,13 +226,13 @@ export function pruneOwn(own, now) {
   return out;
 }
 
-// ── The rules line about the end of voting ───────────────────────────────────────────────────
+// ── The rules line about the end of voting
 // "Voting ends …" while it is open; once it has closed the page must not promise a future end.
 export function rulesEndLine(closed, endsLine) {
   return `${closed ? "Voting ended" : "Voting ends"} ${endsLine}.`;
 }
 
-// ── A very long comment ──────────────────────────────────────────────────────────────────────
+// ── A very long comment
 // More than 8 lines, or more than 320 characters: the page shows the start and a "Show all".
 export const COMMENT_FOLD_LINES = 8;
 export const COMMENT_FOLD_CHARS = 320;
@@ -241,7 +241,7 @@ export function isLongComment(text) {
   return t.length > COMMENT_FOLD_CHARS || t.split("\n").length > COMMENT_FOLD_LINES;
 }
 
-// ── The photo strip from a keyboard ──────────────────────────────────────────────────────────
+// ── The photo strip from a keyboard
 // The strip is ONE Tab stop however many photos it holds: arrow keys move between photos.
 // → the photo to focus next, or null when the key is not one of the strip's.
 export function stripTarget(index, key, count) {
@@ -254,7 +254,7 @@ export function stripTarget(index, key, count) {
   return null;
 }
 
-// ── Polling ──────────────────────────────────────────────────────────────────────────────────
+// ── Polling
 export const POLL_MS = 7000;
 // After a failed poll: try again soon, then ease off. Never slower than 15 s.
 export function nextPollDelay(failures) {
@@ -262,7 +262,7 @@ export function nextPollDelay(failures) {
   return [3000, 6000, 10000][failures - 1] ?? 15000;
 }
 
-// ── The gate ─────────────────────────────────────────────────────────────────────────────────
+// ── The gate
 const tidy = (v) => String(v ?? "").replace(/\s+/g, " ").trim();
 
 // → { field: "message that names the field" }, empty when the form can be sent.
@@ -298,7 +298,7 @@ export function isVoterToken(token) {
   return typeof token === "string" && /^v1\.[1-9][0-9]{0,14}\.[A-Za-z0-9_-]{43}$/.test(token);
 }
 
-// ── The email code ───────────────────────────────────────────────────────────────────────────
+// ── The email code
 // What the field holds: digits only, six at most. So a pasted "123 456" or "123-456" is the code.
 export function codeDigits(value) {
   return String(value ?? "").replace(/[^0-9]/g, "").slice(0, 6);
@@ -355,7 +355,7 @@ export function resendLabel(seconds) {
   return seconds > 0 ? `Send a new code in ${seconds} s` : "Send a new code";
 }
 
-// ── Small formatters ─────────────────────────────────────────────────────────────────────────
+// ── Small formatters
 // 65.1 → "1:05"
 export function formatClock(seconds) {
   const s = Math.max(0, Math.floor(Number(seconds) || 0));
@@ -395,3 +395,17 @@ export function safeGifUrl(url) {
 export function safeMediaUrl(url) {
   return typeof url === "string" && /^\/media\/[A-Za-z0-9/_.-]+$/.test(url) && !url.includes("..") ? url : null;
 }
+
+// ── Display order
+// Most-liked first ON SCREEN only (Top Barz, 3 Oct 2026): a sorted copy of what the server sent,
+// highest like count first, the server's order among equals. Counting is untouched.
+export function displayOrder(tracks) {
+  return (Array.isArray(tracks) ? tracks : [])
+    .map((t, i) => ({ t, i, n: Math.max(0, Number(t?.likes)) || 0 }))
+    .sort((a, b) => b.n - a.n || a.i - b.i)
+    .map((x) => x.t);
+}
+// A reorder waits until the page has been still (no touch, scroll or key) for this long, so a
+// card never moves under a thumb. Monotonic ms; null = never touched.
+export const REORDER_STILL_MS = 2500;
+export const canReorder = (lastInput, now) => lastInput == null || now - lastInput >= REORDER_STILL_MS;

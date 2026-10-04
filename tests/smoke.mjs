@@ -350,7 +350,7 @@ try {
   await stopServer();
   const done = promote("--env", "local", "--code", up.body.code, "--label", "Smoke Group");
   await startServer();
-  ok(done.status === 0 && /promoted  smoke-group  "Smoke Group"  1\.0 s  → topbarz-voting-media\/tracks\/smoke-group-[0-9a-f]{10}\.wav/.test(done.out) && /The deep link: http:\/\/localhost:8788\/#smoke-group/.test(done.out), `promote-booth copies the audio under tracks/ and adds the vote track: ${done.out.split("\n").find((l) => l.startsWith("promoted"))}`);
+  ok(done.status === 0 && /promoted  smoke-group  "Smoke Group"  1\.0 s  → topbarz-voting-media\/tracks\/smoke-group-[0-9a-f]{10}\.wav/.test(done.out) && /The deep link: http:\/\/localhost:8788\/#smoke-group/.test(done.out), `promote-booth copies the audio under tracks/ and adds the vote track (exit ${done.status}): ${done.out.trim().split("\n").slice(-3).join(" | ")}`);
   let s4;
   const promotedBy = Date.now() + 8_000;
   do { await new Promise((r) => setTimeout(r, 1000)); s4 = await j("/api/state"); } while (!s4.body.tracks.some((t) => t.slug === "smoke-group") && Date.now() < promotedBy);

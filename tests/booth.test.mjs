@@ -502,6 +502,8 @@ test("/booth: a drop zone that is also tap-to-choose, an upload with progress, t
   assert.match(html, /<p id="tbz-code" class="booth-code" tabindex="-1"><\/p>/);
   assert.match(css, /\n\.booth-code \{ font: 400 clamp\(4\.5rem, 23vw, 12rem\)\/1 var\(--font-display\);[^}]*white-space: nowrap;/, "the code is as big as the phone allows, on one line (390px wide: no sideways scroll)");
   assert.match(html, /<button type="button" id="tbz-next" class="btn"><\/button>/);
+  assert.match(css, /\n\.log li \{ display: grid; grid-template-columns: max-content minmax\(0, 1fr\);/, "the log's code column is as wide as the code, never a fixed width that wraps it (390px wide it broke 2947 into 294 / 7)");
+  assert.match(css, /\n\.log-code \{[^}]*white-space: nowrap;/, "a code in the log stays on one line");
   assert.match(html, /<div id="tbz-failed" class="failed" role="alert" hidden>/);
   assert.match(html, /<button type="button" id="tbz-retry" class="btn btn-small"><\/button>/);
   assert.match(js, /if \(app\.lastFile\) upload\(app\.lastFile\)/, "retry sends the same file again");

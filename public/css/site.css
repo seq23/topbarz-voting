@@ -447,8 +447,8 @@ dialog::backdrop { background: var(--color-backdrop); }
 .booth-log { max-width: var(--column); margin: var(--space-10) auto 0; padding: 0 var(--space-3) var(--space-16); }
 .booth-log > h2 { font: 400 var(--text-head)/1.17 var(--font-display); letter-spacing: var(--tracking-display); color: var(--color-accent); padding: 0 var(--space-2) var(--space-3); }
 .log { display: grid; border-top: 1px solid var(--color-rule); }
-.log li { display: grid; grid-template-columns: 4.4em minmax(0, 1fr); gap: var(--space-1) var(--space-3); align-items: baseline; padding: var(--space-3) var(--space-2); border-bottom: 1px solid var(--color-rule); }
-.log-code { grid-row: span 2; font: 400 1.4rem/1.2 var(--font-display); color: var(--color-warm); font-variant-numeric: tabular-nums; }
+.log li { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--space-1) var(--space-3); align-items: baseline; padding: var(--space-3) var(--space-2); border-bottom: 1px solid var(--color-rule); }
+.log-code { grid-row: span 2; font: 400 1.4rem/1.2 var(--font-display); color: var(--color-warm); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .log-file { overflow-wrap: anywhere; }
 .log-meta { font-size: var(--text-sm); color: var(--color-ink-2); }
 .code-form { max-width: var(--measure); margin: var(--space-6) auto 0; padding-inline: var(--space-5); display: grid; gap: var(--space-4); justify-items: center; }

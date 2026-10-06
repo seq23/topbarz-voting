@@ -57,6 +57,19 @@ Production commands; add `-preview --env preview` to the database name for previ
 - **Look for a cluster** (many sign-ups from one address): `npx wrangler d1 execute topbarz-voting --remote --command "SELECT ip_hash, COUNT(*) AS n FROM voters GROUP BY ip_hash HAVING n > 10 ORDER BY n DESC"`
 - **Known limit:** one person with many real inboxes can still vote many times; the emailed code only proves each inbox is real and theirs (Email verification, above). One mailbox is one voter: `+tags` and Gmail dots do not make a second one, and common throwaway domains are refused. When no code could be sent (the daily budget, or the mail service down) a new voter is let in unverified: the export shows which likes are verified.
 
+## Porter may run
+
+Scripts a job may run on the model's request, as `npm run <name> -- <args>` in the worktree, against preview or production, each recorded on the card (script, env, exit, one line). Nothing else is run for the model. The Google key and the Cloudflare token come from the vault by themselves.
+
+- `sync-drive`  -  `node scripts/sync-drive.mjs`
+- `load-tracks`  -  `node scripts/load-tracks.mjs`
+- `load-photos`  -  `node scripts/load-photos.mjs`
+- `export`  -  `node scripts/export.mjs`
+- `booth-log`  -  `node scripts/booth-log.mjs`
+- `promote-booth`  -  `node scripts/promote-booth.mjs`
+
+Production loads (`--env production`) put real entries in the real vote: run them only on Scooter's say-so in the email that asked, never for a "Test ..." folder (the script refuses anyway), and never for a file named for Scooter Taylor.
+
 ## Export the results
 - **`npm run export -- --env production`** writes `exports/production-<time>/tally.csv` (rank, track, likes, likes_verified, comments, tie-break order, when it first reached its count) and `contacts.csv` (name, email, city, opt-in, first interaction, flagged, verified). `exports/` is git-ignored; never commit or paste it.
 - **Tie-break (PROPOSED by the PRD, not yet confirmed by Scooter):** tracks tied on likes are ordered by which first reached that count. `last_reached_at` is in the file too, in case the confirmed rule is "the last climb to that count".

@@ -50,14 +50,15 @@ export const COPY = {
   // "I agree to the official rules", with "official rules" linking to /rules (opens in a new tab so a half-filled form is not lost).
   agree: { before: "I agree to the ", link: "official rules", href: "/rules", after: "" },
   faqTitle: "FAQ",
-  // The questions Scooter listed (his message was cut off after "How long is the con"; add that one here once its answer arrives).
+  // The four questions Scooter asked for (9 Oct 2026, second preview), in his order; the group answer is his words. The rest follow.
   faq: [
-    { q: "When does voting start?", a: "Voting starts Sunday, October 11, at 10 AM ET." },
-    { q: "What does the winner get?", a: "2 (two) free hours of studio time and 1 (one) general admission ticket to CultureCon 2027, provided by Top Barz Inc." },
+    { q: "How long is the contest?", a: "Voting starts Sunday, October 11, at 10 AM ET and closes that night at 11:59 PM PT." },
+    { q: "What's the prize?", a: "2 (two) free hours of studio time and 1 (one) general admission ticket to CultureCon 2027, provided by Top Barz Inc. Winners should email info@topbarz.xyz." },
+    { q: "Who can vote?", a: "Anyone with an email address. Each email gets one like per track, and we send a code to confirm it." },
+    { q: "What if we recorded in a group?", a: "Please list everyone in the group." },
     { q: "Which tracks can I enter?", a: "Only tracks recorded at the Top Barz Studio Experience at CultureCon. Edited, re-recorded or any other tracks are not eligible." },
     { q: "Can I edit or swap my track after I recorded it?", a: "No. The file you upload must be the exact track that appears on the voting platform. Do not swap in another track or edit the uploaded file." },
     { q: "Where are the official rules?", a: "On the official rules page, voting.topbarz.xyz/rules.", link: { text: "Read the official rules", href: "/rules" } },
-    { q: "I won. What do I do?", a: "Winners should email info@topbarz.xyz." },
   ],
   submit: "Enter",
   uploading: "Uploading {name}",

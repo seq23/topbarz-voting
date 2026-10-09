@@ -404,6 +404,8 @@ test("the words: the thank-you, the contest and the prize are Scooter's; the bra
   assert.ok(COPY.eligibility.join(" ").includes("Only tracks recorded at the Top Barz Studio Experience at CultureCon are eligible. Edited, re-recorded or any other tracks are not eligible."));
   assert.ok(COPY.eligibility.join(" ").includes("The file you upload must be the exact track that appears on the voting platform. Do not swap in another track or edit the uploaded file."));
   assert.ok(COPY.faq.length >= 5 && COPY.faq.every((f) => f.q.endsWith("?") && f.a), "the FAQ has questions and answers");
+  assert.deepEqual(COPY.faq.slice(0, 4).map((f) => f.q), ["How long is the contest?", "What's the prize?", "Who can vote?", "What if we recorded in a group?"], "Scooter's four FAQ questions, in order");
+  assert.equal(COPY.faq[3].a, "Please list everyone in the group.", "the group answer is his words");
   assert.ok(COPY.faq.every((f) => !f.link || f.link.href.startsWith("/")), "FAQ links stay on the site");
   assert.equal(COPY.groupLabel, "Did you record in a group?");
   for (const label of [COPY.firstName, COPY.lastName, COPY.city, COPY.email, COPY.phone]) assert.ok(label);

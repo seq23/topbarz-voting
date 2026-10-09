@@ -1048,8 +1048,8 @@ test("copy: Top Barz, JUMP IN THE BOOTH, 11:59 PM PDT, for them and their friend
     const words = text.replace(/topbarz\.xyz|topbarz-voting/g, "");
     for (const m of words.matchAll(/top[\s_-]*barz/gi)) assert.equal(m[0], "Top Barz", `${file}: "${m[0]}" should be "Top Barz"`);
     for (const m of text.matchAll(/jump\s+in\s+the\s+booth/gi)) assert.equal(m[0], "JUMP IN THE BOOTH", `${file}: the slogan is capitals`);
-    // No address of a real person. The only one on the page is the form's placeholder.
-    for (const m of text.matchAll(/[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+\.[A-Za-z]{2,}/g)) assert.equal(m[0], "you@example.com", `${file}: an email address is on the page: ${m[0]}`);
+    // No address of a real person. The only ones are the form's placeholder and the winners' address Scooter named (9 Oct 2026).
+    for (const m of text.matchAll(/[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+\.[A-Za-z]{2,}/g)) assert.ok(["you@example.com", "info@topbarz.xyz"].includes(m[0]), `${file}: an email address is on the page: ${m[0]}`);
   }
 
   const index = read("index.html");
@@ -1217,13 +1217,13 @@ test("weight: no libraries, and the whole page is small", () => {
   assert.ok(voteJs < 120_000, `the scripts of the voting and select pages together are ${voteJs} bytes (the same eleven files as before the booth)`);
   assert.ok(boothJs < 37_500, `the scripts belonging only to booth/track/listen are ${boothJs} bytes together (36,6xx on 4 Oct 2026 with the people: the email box, the vote switch and its rules in track.js, booth-rules.js and the two copy files; 29,143 before that, with the share; was < 30_000 for booth/track alone)`);
   const entryJs = ENTRY_SCRIPTS.reduce((n, f) => n + size(`js/${f}`), 0);
-  assert.ok(entryJs < 20_000, `the scripts belonging only to the contest entry page are ${entryJs} bytes together`);
+  assert.ok(entryJs < 24_000, `the scripts belonging only to the contest entry page are ${entryJs} bytes together`);
   assert.equal(voteJs + boothJs + entryJs, JS.reduce((n, f) => n + size(f), 0), "and the three together are every script in public/js");
   assert.ok(pageJs("entry.js") < 36_000, `the contest entry page's scripts are ${pageJs("entry.js")} bytes before compression`);
   assert.ok(pageJs("track.js") < 64_000, `the rapper's page's scripts are ${pageJs("track.js")} bytes before compression (61,7xx on 4 Oct 2026 with the people; the shared api/dom/logic/player files are most of it)`);
   assert.ok(pageJs("booth.js") < 22_000, `the engineer's page's scripts are ${pageJs("booth.js")} bytes before compression (20,8xx on 4 Oct 2026: the people's rules sit in the shared booth-rules.js, as the share's do)`);
   assert.ok(pageJs("listen.js") < 60_000, `the listen page's scripts are ${pageJs("listen.js")} bytes before compression`);
-  assert.ok(size("css/site.css") < 40_000);
+  assert.ok(size("css/site.css") < 41_000, "the stylesheet stays small (40,7xx on 9 Oct 2026 with the prize list, FAQ and rules page)");
   assert.ok(size("index.html") < 20_000);
   assert.ok(size("select.html") < 8_000);
   assert.ok(size("booth.html") < 8_000);

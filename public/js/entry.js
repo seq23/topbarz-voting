@@ -26,6 +26,16 @@ const els = {
   emailLabel: $("tbz-entry-email-label"),
   phone: $("tbz-entry-phone"),
   phoneLabel: $("tbz-entry-phone-label"),
+  instagram: $("tbz-entry-instagram"),
+  instagramLabel: $("tbz-entry-instagram-label"),
+  title: $("tbz-entry-title"),
+  titleLabel: $("tbz-entry-title-label"),
+  eligibility: $("tbz-entry-eligibility"),
+  prizeTitle: $("tbz-entry-prize-title"),
+  prize: $("tbz-entry-prize"),
+  prizeNote: $("tbz-entry-prize-note"),
+  faqTitle: $("tbz-entry-faq-title"),
+  faq: $("tbz-entry-faq"),
   group: $("tbz-entry-group"),
   groupLabel: $("tbz-entry-group-label"),
   groupYes: $("tbz-entry-group-yes"),
@@ -67,6 +77,21 @@ els.headline.textContent = COPY.headline;
 paragraphs(els.thanks, COPY.thanks);
 els.contestTitle.textContent = COPY.contestTitle;
 paragraphs(els.contest, COPY.contest);
+els.prizeTitle.textContent = COPY.prizeTitle;
+els.prize.replaceChildren(...COPY.prize.map((text) => h("li", { text })));
+els.prizeNote.replaceChildren(
+  h("p", { class: "lede", text: COPY.prizeNote }),
+  h("p", { class: "lede" }, COPY.winners.before, h("a", { href: `mailto:${COPY.winners.email}`, text: COPY.winners.email }), COPY.winners.after),
+);
+paragraphs(els.eligibility, COPY.eligibility);
+els.instagramLabel.textContent = COPY.instagram;
+els.titleLabel.textContent = COPY.trackTitle;
+els.faqTitle.textContent = COPY.faqTitle;
+els.faq.replaceChildren(...COPY.faq.map((item) => h("details", { class: "faq-item" },
+  h("summary", { text: item.q }),
+  h("p", { text: item.a }),
+  ...(item.link ? [h("p", {}, h("a", { href: item.link.href, target: "_blank", rel: "noopener noreferrer", text: item.link.text }))] : []),
+)));
 els.formTitle.textContent = COPY.formTitle;
 els.firstLabel.textContent = COPY.firstName;
 els.lastLabel.textContent = COPY.lastName;
@@ -81,7 +106,7 @@ els.membersHint.textContent = COPY.groupHint;
 els.add.textContent = COPY.add;
 els.zoneText.textContent = COPY.zone;
 els.zoneHint.textContent = COPY.zoneHint;
-els.agreeLabel.textContent = COPY.agree;
+els.agreeLabel.replaceChildren(COPY.agree.before, h("a", { href: COPY.agree.href, target: "_blank", rel: "noopener noreferrer", text: COPY.agree.link }), COPY.agree.after);
 els.submit.textContent = COPY.submit;
 els.retry.textContent = COPY.retry;
 
@@ -196,7 +221,7 @@ function upload(file) {
 // ── Send: validate, upload the track (once per file), then the fields
 function values() {
   return {
-    first_name: els.first.value, last_name: els.last.value, city: els.city.value, email: els.email.value, phone: els.phone.value,
+    first_name: els.first.value, last_name: els.last.value, city: els.city.value, email: els.email.value, phone: els.phone.value, instagram: els.instagram.value, track_title: els.title.value,
     in_group: inGroup(), members: app.rows.map((r) => ({ first_name: r.first.value, last_name: r.last.value, email: r.email.value })),
     agree: els.agree.checked, file: app.file,
   };

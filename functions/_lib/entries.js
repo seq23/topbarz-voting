@@ -12,6 +12,8 @@ export { audioExtension, audioType, cleanFileName, uploadSize } from "./booth.js
 export const ENTRY_MAX_MEMBERS = 10;
 export const ENTRY_NAME_MAX = 80;
 export const ENTRY_CITY_MAX = 80;
+export const ENTRY_INSTAGRAM_MAX = 120; // "@a, @b": the entrant's handle(s), optional
+export const ENTRY_TITLE_MAX = 120; // a suggested title for the track, optional
 export const ENTRY_UPLOAD_DAY_KEY = "entry-uploads-day"; // the one site-wide counter in rate_limits
 export const isUploadId = (s) => typeof s === "string" && /^[0-9a-f]{24}$/.test(s);
 
@@ -58,6 +60,8 @@ export function parseEntry(body) {
   if (!email) return refuse("email", "bad_email", "Enter an email address that works.");
   const phone = cleanPhone(b.phone);
   if (!phone) return refuse("phone", "bad_phone", "Enter a phone number that works.");
+  const instagram = cleanText(b.instagram, ENTRY_INSTAGRAM_MAX); // optional
+  const trackTitle = cleanText(b.track_title, ENTRY_TITLE_MAX); // optional
   if (typeof b.in_group !== "boolean") return refuse("in_group", "group_required", "Say whether you recorded in a group.");
   const members = [];
   if (b.in_group) {
@@ -77,7 +81,7 @@ export function parseEntry(body) {
   if (b.agree !== true) return refuse("agree", "agree_required", "Tick the box to agree to the official rules.");
   const id = typeof b.upload_id === "string" ? b.upload_id.trim() : "";
   if (!isUploadId(id)) return refuse("upload_id", "track_required", "Upload your track first.");
-  return { ok: true, value: { first_name: first, last_name: last, city, email, phone, in_group: b.in_group, members, upload_id: id } };
+  return { ok: true, value: { first_name: first, last_name: last, city, email, phone, instagram, track_title: trackTitle, in_group: b.in_group, members, upload_id: id } };
 }
 
 // The label a promoted entry gets in the vote: the entrant's first name. A second "Jane" is
@@ -102,7 +106,7 @@ export function promoteVerdict({ entry, members, env } = {}) {
 export const INSERT_UPLOAD_SQL = "INSERT INTO entry_uploads (id, file_name, content_type, size, media_key, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)";
 // The entry takes the file from the upload row itself, never from the request, and only while no
 // entry has used that upload (UNIQUE (upload_id) settles two submissions racing).
-export const INSERT_ENTRY_SQL = `INSERT INTO entries (first_name, last_name, city, email, phone, in_group, rules_agreed_at, upload_id, created_at)
-  SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, u.id, ?7 FROM entry_uploads u WHERE u.id = ?8 AND NOT EXISTS (SELECT 1 FROM entries e WHERE e.upload_id = u.id) RETURNING id`;
+export const INSERT_ENTRY_SQL = `INSERT INTO entries (first_name, last_name, city, email, phone, in_group, rules_agreed_at, upload_id, created_at, instagram, track_title)
+  SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, u.id, ?7, ?9, ?10 FROM entry_uploads u WHERE u.id = ?8 AND NOT EXISTS (SELECT 1 FROM entries e WHERE e.upload_id = u.id) RETURNING id`;
 export const INSERT_MEMBER_SQL = "INSERT INTO entry_members (entry_id, first_name, last_name, email) VALUES (?1, ?2, ?3, ?4)";
 export const DROP_ENTRY_SQL = "DELETE FROM entries WHERE id = ?1";

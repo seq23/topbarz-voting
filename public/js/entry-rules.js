@@ -6,6 +6,8 @@ import { cleanEmail, refuseFile } from "./booth-rules.js";
 
 export const MAX_MEMBERS = 10;
 export const NAME_MAX = 80;
+export const INSTAGRAM_MAX = 120;
+export const TITLE_MAX = 120;
 
 export function cleanText(raw, max = NAME_MAX) {
   if (typeof raw !== "string") return "";
@@ -59,6 +61,8 @@ export function entryBody(values, uploadId, honeypot = "") {
     city: cleanText(values.city, 80),
     email: cleanEmail(values.email),
     phone: cleanPhone(values.phone),
+    instagram: cleanText(values.instagram, INSTAGRAM_MAX),
+    track_title: cleanText(values.track_title, TITLE_MAX),
     in_group: inGroup,
     members: inGroup ? values.members.map((m) => ({ first_name: cleanText(m.first_name), last_name: cleanText(m.last_name), email: cleanEmail(m.email) })) : [],
     agree: values.agree === true,

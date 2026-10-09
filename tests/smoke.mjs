@@ -370,7 +370,10 @@ try {
   const entryIds = [...entryText.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]);
   ok(entryPage.status === 200 && entryText.includes('id="tbz-entry-form"') && entryText.includes('name="robots" content="noindex"') && entryIds.every((id) => id.startsWith("tbz-")), `GET /entry serves the entry page, noindex (${entryIds.length} ids)`);
   ok((entryPage.headers.get("content-security-policy") ?? "").startsWith("default-src 'self'; script-src 'self'; style-src 'self'") && !/<script(?![^>]*\bsrc=)[^>]*>|<style\b|\sstyle="/.test(entryText), "/entry is served with the same content security policy, nothing inline");
-  ok(entryText.includes('href="https://docs.google.com/document/d/1VqrGTQdvbFbqno4Wx_J5xC6PlFBHFdTdTeMalDTueks/edit"') && !/authuser/.test(entryText), "/entry links the official rules, without the address of the person who shared them");
+  ok(!/docs\.google|authuser/.test(entryText), "/entry carries no private Google link: the checkbox links /rules");
+  const rulesPage = await fetch(base + "/rules", { redirect: "manual" });
+  const rulesText = await rulesPage.text();
+  ok(rulesPage.status === 200 && rulesText.includes("Official Rules") && rulesText.includes("exact track that appears on the voting platform"), "GET /rules serves the official rules");
   const entryAssets = [...new Set([...entryText.matchAll(/(?:src|href)="(\/(?:js|css|img|fonts)\/[^"]+)"/g)].map((m) => m[1]))];
   const entryMissing = (await Promise.all(entryAssets.map(async (a) => { const x = await fetch(base + a); await x.arrayBuffer(); return x.status === 200 ? null : `${a} → ${x.status}`; }))).filter(Boolean);
   ok(entryAssets.length >= 8 && entryMissing.length === 0, `every file /entry names is served (${entryAssets.length} files${entryMissing.length ? `; missing: ${entryMissing.join(", ")}` : ""})`);

@@ -1,6 +1,7 @@
 // POST /api/entries — step 2 of the contest entry (/entry, 9 Oct 2026): the form's fields and the
 // upload id from POST /api/entries/upload → { entry: <number> }. JSON body:
 //   { first_name, last_name, city, email, phone, in_group: true|false,
+//     instagram, track_title   (both optional),
 //     members: [{ first_name, last_name, email }]   (1 to 10 when in_group, none otherwise),
 //     agree: true   (the "I agree to the official rules" box: refused unless exactly true),
 //     upload_id, website: ""   (the honeypot: must be empty) }
@@ -39,7 +40,7 @@ export const onRequest = route({
 
     let id;
     try {
-      id = (await db.prepare(INSERT_ENTRY_SQL).bind(e.first_name, e.last_name, e.city, e.email, e.phone, e.in_group ? 1 : 0, now, e.upload_id).all()).results?.[0]?.id;
+      id = (await db.prepare(INSERT_ENTRY_SQL).bind(e.first_name, e.last_name, e.city, e.email, e.phone, e.in_group ? 1 : 0, now, e.upload_id, e.instagram, e.track_title).all()).results?.[0]?.id;
     } catch {
       id = undefined; // UNIQUE (upload_id): a second submission raced this one and won
     }

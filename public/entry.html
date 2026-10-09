@@ -28,8 +28,6 @@
 </header>
 
 <main>
-  <p class="lede"><a href="https://docs.google.com/document/d/1VqrGTQdvbFbqno4Wx_J5xC6PlFBHFdTdTeMalDTueks/edit" target="_blank" rel="noopener noreferrer">Official rules</a></p>
-
   <section class="intro" aria-labelledby="tbz-entry-headline">
     <h2 id="tbz-entry-headline" class="page-title"></h2>
     <div id="tbz-entry-thanks"></div>
@@ -38,6 +36,9 @@
   <section class="intro" aria-labelledby="tbz-entry-contest-title">
     <h2 id="tbz-entry-contest-title" class="page-title"></h2>
     <div id="tbz-entry-contest"></div>
+    <h3 id="tbz-entry-prize-title" class="page-title"></h3>
+    <ul id="tbz-entry-prize" class="prize"></ul>
+    <div id="tbz-entry-prize-note"></div>
   </section>
 
   <form id="tbz-entry-form" class="booth" novalidate aria-labelledby="tbz-entry-form-title">
@@ -49,6 +50,8 @@
     <div class="field"><label for="tbz-entry-city" id="tbz-entry-city-label"></label><input id="tbz-entry-city" type="text" autocomplete="address-level2" maxlength="80" aria-describedby="tbz-entry-error"></div>
     <div class="field"><label for="tbz-entry-email" id="tbz-entry-email-label"></label><input id="tbz-entry-email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="254" aria-describedby="tbz-entry-error"></div>
     <div class="field"><label for="tbz-entry-phone" id="tbz-entry-phone-label"></label><input id="tbz-entry-phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="40" aria-describedby="tbz-entry-error"></div>
+
+    <div class="field"><label for="tbz-entry-instagram" id="tbz-entry-instagram-label"></label><input id="tbz-entry-instagram" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="120"></div>
 
     <fieldset class="group" id="tbz-entry-group">
       <legend id="tbz-entry-group-label"></legend>
@@ -62,6 +65,8 @@
       <button type="button" id="tbz-entry-add" class="btn btn-small btn-ghost"></button>
     </div>
 
+    <div class="field"><label for="tbz-entry-title" id="tbz-entry-title-label"></label><input id="tbz-entry-title" type="text" autocomplete="off" maxlength="120"></div>
+    <div id="tbz-entry-eligibility" class="zone-hint"></div>
     <label id="tbz-entry-zone" class="zone" for="tbz-entry-file">
       <span id="tbz-entry-zone-text" class="zone-text"></span>
       <span id="tbz-entry-zone-hint" class="zone-hint"></span>
@@ -72,7 +77,7 @@
     </div>
     <p id="tbz-entry-progress-text" class="progress-text" role="status"></p>
 
-    <label class="check"><input type="checkbox" id="tbz-entry-agree" aria-describedby="tbz-entry-error"><span id="tbz-entry-agree-label"></span></label>
+    <div class="check"><input type="checkbox" id="tbz-entry-agree" aria-describedby="tbz-entry-error"><label for="tbz-entry-agree" id="tbz-entry-agree-label"></label></div>
     <div class="hp" aria-hidden="true"><label for="tbz-entry-website">Website</label><input id="tbz-entry-website" type="text" name="website" tabindex="-1" autocomplete="off"></div>
 
     <p id="tbz-entry-error" class="field-error" role="alert" hidden></p>
@@ -86,6 +91,10 @@
   <section id="tbz-entry-done" class="done" aria-labelledby="tbz-entry-done-title" hidden>
     <p id="tbz-entry-done-title" class="done-title" tabindex="-1"></p>
     <p id="tbz-entry-done-text" class="done-file"></p>
+  </section>
+  <section class="intro" aria-labelledby="tbz-entry-faq-title">
+    <h2 id="tbz-entry-faq-title" class="page-title"></h2>
+    <div id="tbz-entry-faq" class="faq"></div>
   </section>
   <noscript><p class="list-note">This page needs JavaScript to send your entry. Turn it on and reload.</p></noscript>
 </main>

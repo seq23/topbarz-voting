@@ -4,7 +4,7 @@
 //   node scripts/export.mjs --env production
 // tally.csv:    rank, track, slug, likes, likes_verified, comments, tie_break_order, first_reached_at, last_reached_at
 // contacts.csv: name, email, city, marketing_opt_in, first_interaction_at, flagged, flag_reason, verified
-// entries.csv:  entry, first_name, last_name, city, email, phone, in_group, rules_agreed_at, track_file, entered_at
+// entries.csv:  entry, first_name, last_name, city, email, phone, instagram, track_title, in_group, rules_agreed_at, track_file, entered_at
 // entry-members.csv: entry, first_name, last_name, email (the other people in a group recording)
 // (9 Oct 2026, the contest entry at /entry; the tally is skipped while there are no tracks, the entries are not)
 // Likes from flagged voters and hidden comments are not counted. One row per voter (email is unique).
@@ -38,14 +38,14 @@ export function contactsCsv(voters) {
 
 export function entriesCsv(rows) {
   return toCsv(
-    ["entry", "first_name", "last_name", "city", "email", "phone", "in_group", "rules_agreed_at", "track_file", "entered_at"],
-    rows.map((r) => [r.id, r.first_name, r.last_name, r.city, r.email, r.phone, r.in_group ? "yes" : "no", new Date(r.rules_agreed_at).toISOString(), r.file_name, new Date(r.created_at).toISOString()]),
+    ["entry", "first_name", "last_name", "city", "email", "phone", "instagram", "track_title", "in_group", "rules_agreed_at", "track_file", "entered_at"],
+    rows.map((r) => [r.id, r.first_name, r.last_name, r.city, r.email, r.phone, r.instagram, r.track_title, r.in_group ? "yes" : "no", new Date(r.rules_agreed_at).toISOString(), r.file_name, new Date(r.created_at).toISOString()]),
   );
 }
 export function entryMembersCsv(rows) {
   return toCsv(["entry", "first_name", "last_name", "email"], rows.map((r) => [r.entry_id, r.first_name, r.last_name, r.email]));
 }
-export const ENTRIES_SQL = "SELECT e.id, e.first_name, e.last_name, e.city, e.email, e.phone, e.in_group, e.rules_agreed_at, e.created_at, u.file_name FROM entries e JOIN entry_uploads u ON u.id = e.upload_id ORDER BY e.id";
+export const ENTRIES_SQL = "SELECT e.id, e.first_name, e.last_name, e.city, e.email, e.phone, e.instagram, e.track_title, e.in_group, e.rules_agreed_at, e.created_at, u.file_name FROM entries e JOIN entry_uploads u ON u.id = e.upload_id ORDER BY e.id";
 export const ENTRY_MEMBERS_SQL = "SELECT entry_id, first_name, last_name, email FROM entry_members ORDER BY entry_id, id";
 
 if (import.meta.url === `file://${process.argv[1]}`) {

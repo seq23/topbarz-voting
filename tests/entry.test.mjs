@@ -57,7 +57,10 @@ const count = async (table) => (await env.DB.prepare(`SELECT COUNT(*) AS n FROM 
 test("the fields: each is required and refused with its own code and field; the good body passes and is cleaned", () => {
   const good = parseEntry({ ...FIELDS, upload_id: "a".repeat(24) });
   assert.equal(good.ok, true);
-  assert.deepEqual(good.value, { first_name: "Jane", last_name: "Doe", city: "Atlanta", email: "jane.doe@example.com", phone: "4045550100", in_group: false, members: [], upload_id: "a".repeat(24) });
+  assert.deepEqual(good.value, { first_name: "Jane", last_name: "Doe", city: "Atlanta", email: "jane.doe@example.com", phone: "4045550100", instagram: "", track_title: "", in_group: false, members: [], upload_id: "a".repeat(24) });
+  const extras = parseEntry({ ...FIELDS, instagram: "  @jane.doe, @janed ", track_title: "Midnight\n Run", upload_id: "a".repeat(24) });
+  assert.deepEqual([extras.value.instagram, extras.value.track_title], ["@jane.doe, @janed", "Midnight Run"], "the Instagram handle(s) and the title are optional and cleaned");
+  assert.equal(parseEntry({ ...FIELDS, instagram: "x".repeat(300), track_title: "y".repeat(300), upload_id: "a".repeat(24) }).value.instagram.length, 120);
   const base = { ...FIELDS, upload_id: "a".repeat(24) };
   const refusals = [
     [{ first_name: "  " }, "first_name", "first_name_required"],
@@ -353,9 +356,9 @@ test("promote-entry: the script is wired — named in the docs, in package.json,
 // ── The export ───────────────────────────────────────────────────────────────────────────────────
 test("export: entries.csv and entry-members.csv carry the people, with the time the rules were agreed", () => {
   const at = Date.UTC(2026, 9, 10, 18, 30);
-  const csv = entriesCsv([{ id: 3, first_name: "Jane", last_name: "Doe", city: "Atlanta", email: "jane@example.com", phone: "4045550100", in_group: 1, rules_agreed_at: at, created_at: at, file_name: "Jane, the song.mp3" }]);
-  assert.equal(csv.split("\n")[0], "entry,first_name,last_name,city,email,phone,in_group,rules_agreed_at,track_file,entered_at");
-  assert.match(csv, /3,Jane,Doe,Atlanta,jane@example\.com,4045550100,yes,2026-10-10T18:30:00\.000Z,"Jane, the song\.mp3",2026-10-10T18:30:00\.000Z/);
+  const csv = entriesCsv([{ id: 3, first_name: "Jane", last_name: "Doe", city: "Atlanta", email: "jane@example.com", phone: "4045550100", instagram: "@janed", track_title: "The song", in_group: 1, rules_agreed_at: at, created_at: at, file_name: "Jane, the song.mp3" }]);
+  assert.equal(csv.split("\n")[0], "entry,first_name,last_name,city,email,phone,instagram,track_title,in_group,rules_agreed_at,track_file,entered_at");
+  assert.match(csv, /3,Jane,Doe,Atlanta,jane@example\.com,4045550100,'@janed,The song,yes,2026-10-10T18:30:00\.000Z,"Jane, the song\.mp3",2026-10-10T18:30:00\.000Z/);
   const members = entryMembersCsv([{ entry_id: 3, first_name: "Carlos", last_name: "Diaz", email: "c@example.com" }]);
   assert.equal(members.trim(), "entry,first_name,last_name,email\n3,Carlos,Diaz,c@example.com");
   const script = src("scripts/export.mjs");
@@ -369,11 +372,10 @@ test("the page: Scooter's words, the official rules at the top, the form's field
   const html = src("public/entry.html");
   assert.match(html, /<meta name="robots" content="noindex">/, "noindex while these are the working rules");
   assert.match(html, /<h1 class="slogan">JUMP IN THE BOOTH<\/h1>/);
-  const rules = /<a href="(https:\/\/docs\.google\.com\/document\/d\/1VqrGTQdvbFbqno4Wx_J5xC6PlFBHFdTdTeMalDTueks\/edit)" target="_blank" rel="noopener noreferrer">Official rules<\/a>/.exec(html);
-  assert.ok(rules, "the official rules link is https and opens in a new tab so a half-filled form is not lost, and carries no authuser (Scooter's address is not in a public link)");
-  assert.ok(!/authuser|usp=drivesdk|scooter%40|@/.test(html), "and no address of a person");
-  assert.ok(html.indexOf("Official rules") < html.indexOf('id="tbz-entry-headline"'), "the link is at the top, before the thank-you");
-  for (const id of ["first", "last", "city", "email", "phone", "group-yes", "group-no", "file", "agree", "website"]) assert.match(html, new RegExp(`id="tbz-entry-${id}"`), id);
+  assert.ok(!/docs\.google\.com|authuser|usp=drivesdk|scooter%40|@/.test(html), "the page carries no Google link and no address of a person: the rules are on /rules");
+  assert.ok(!/<p class="lede"><a/.test(html), "the rules link is no longer at the top; it is in the checkbox text");
+  assert.match(html, /<label for="tbz-entry-agree" id="tbz-entry-agree-label"><\/label>/, "the box's label is filled from the copy, with the link");
+  for (const id of ["first", "last", "city", "email", "phone", "instagram", "title", "group-yes", "group-no", "file", "agree", "website"]) assert.match(html, new RegExp(`id="tbz-entry-${id}"`), id);
   assert.match(html, /<input id="tbz-entry-email" type="email"/);
   assert.match(html, /<input id="tbz-entry-phone" type="tel"/);
   assert.match(html, /<input type="checkbox" id="tbz-entry-agree"/);
@@ -392,9 +394,17 @@ test("the words: the thank-you, the contest and the prize are Scooter's; the bra
   assert.equal(COPY.headline, "Thank you for jumping in the booth");
   assert.ok(COPY.thanks.join(" ").includes("It has been fun watching your recap videos and stories."));
   assert.ok(COPY.thanks.join(" ").includes("If you post a Top Barz recap on your feed, we are open to a collab post with you."));
-  assert.ok(COPY.contest[0].includes("The song voted best from CultureCon wins two hours of free studio time for the winner and up to five friends, plus one free general admission ticket to CultureCon 2027."));
+  assert.ok(COPY.contest[0].includes("The song voted best from CultureCon wins the prize below."));
   assert.equal(COPY.contest[1], "Voting starts Sunday, October 11, at 10 AM ET.");
-  assert.equal(COPY.agree, "I agree to the official rules");
+  assert.deepEqual(COPY.agree, { before: "I agree to the ", link: "official rules", href: "/rules", after: "" }, "\"I agree to the official rules\", with \"official rules\" linked to /rules");
+  assert.equal(COPY.zone, "Upload your Top Barz song");
+  assert.deepEqual(COPY.prize, ["2 (two) free hours of studio time", "1 (one) general admission ticket to CultureCon 2027"]);
+  assert.equal(COPY.prizeNote, "Provided by Top Barz Inc.");
+  assert.equal(COPY.winners.email, "info@topbarz.xyz");
+  assert.ok(COPY.eligibility.join(" ").includes("Only tracks recorded at the Top Barz Studio Experience at CultureCon are eligible. Edited, re-recorded or any other tracks are not eligible."));
+  assert.ok(COPY.eligibility.join(" ").includes("The file you upload must be the exact track that appears on the voting platform. Do not swap in another track or edit the uploaded file."));
+  assert.ok(COPY.faq.length >= 5 && COPY.faq.every((f) => f.q.endsWith("?") && f.a), "the FAQ has questions and answers");
+  assert.ok(COPY.faq.every((f) => !f.link || f.link.href.startsWith("/")), "FAQ links stay on the site");
   assert.equal(COPY.groupLabel, "Did you record in a group?");
   for (const label of [COPY.firstName, COPY.lastName, COPY.city, COPY.email, COPY.phone]) assert.ok(label);
   const all = src("public/js/entry-copy.js") + src("public/entry.html") + src("public/js/entry.js") + src("public/js/entry-rules.js");
@@ -422,3 +432,14 @@ test("the device keeps nothing: no storage, no cookie, and the done screen shows
   assert.ok(uploadIdOk(uploadId()) && entryKey("a".repeat(24), "mp3") === `entries/${"a".repeat(24)}.mp3`);
 });
 const uploadIdOk = (id) => isUploadId(id) && id.length === 24;
+
+test("the rules page (/rules): the official rules in the site's own page, no draft notes, the Studio Experience rule in it", () => {
+  const html = src("public/rules.html");
+  assert.match(html, /<meta name="robots" content="noindex">/);
+  assert.match(html, /<h2 class="page-title">Official Rules<\/h2>/);
+  assert.ok(html.includes("Only tracks recorded at the Top Barz Studio Experience at CultureCon are eligible: edited, re-recorded or any other tracks are not eligible."));
+  assert.ok(html.includes("The uploaded file must be the exact track that appears on the voting platform"));
+  assert.ok(html.includes("2 (two) free hours of studio time") && html.includes("provided by Top Barz Inc.") && html.includes("info@topbarz.xyz"));
+  assert.ok(!/NOT FOR PUBLICATION|DRAFT|\[(?:OPEN|VERIFY|TOP BARZ|LEGAL|INSERT|Studio 404 comment)|docs\.google|authuser/.test(html), "no review notes, no private Google link");
+  assert.ok(!/spit your bars/i.test(html));
+});

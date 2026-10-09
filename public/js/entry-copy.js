@@ -11,8 +11,21 @@ export const COPY = {
   ],
   contestTitle: "The contest",
   contest: [
-    "Top Barz is hosting a contest. The song voted best from CultureCon wins two hours of free studio time for the winner and up to five friends, plus one free general admission ticket to CultureCon 2027.",
+    "Top Barz is hosting a contest. The song voted best from CultureCon wins the prize below.",
     "Voting starts Sunday, October 11, at 10 AM ET.",
+  ],
+  // The prize, as Scooter wrote it (9 Oct 2026, after the preview).
+  prizeTitle: "The prize",
+  prize: [
+    "2 (two) free hours of studio time",
+    "1 (one) general admission ticket to CultureCon 2027",
+  ],
+  prizeNote: "Provided by Top Barz Inc.",
+  winners: { before: "Winners should email ", email: "info@topbarz.xyz", after: "." },
+  // Which tracks count (Scooter, 9 Oct 2026). Shown above the upload and again in the FAQ.
+  eligibility: [
+    "Only tracks recorded at the Top Barz Studio Experience at CultureCon are eligible. Edited, re-recorded or any other tracks are not eligible.",
+    "The file you upload must be the exact track that appears on the voting platform. Do not swap in another track or edit the uploaded file.",
   ],
   formTitle: "Enter the contest",
   firstName: "First name",
@@ -28,11 +41,24 @@ export const COPY = {
   memberTitle: "Person {n}",
   add: "Add another",
   remove: "Remove",
+  instagram: "Instagram handle(s) (optional)",
+  trackTitle: "Title of your track (optional)",
   trackLabel: "Your track",
-  zone: "Choose your track",
+  zone: "Upload your Top Barz song",
   zoneChosen: "{name}",
   zoneHint: "WAV, MP3, M4A, AIFF or FLAC, up to 100 MB",
-  agree: "I agree to the official rules",
+  // "I agree to the official rules", with "official rules" linking to /rules (opens in a new tab so a half-filled form is not lost).
+  agree: { before: "I agree to the ", link: "official rules", href: "/rules", after: "" },
+  faqTitle: "FAQ",
+  // The questions Scooter listed (his message was cut off after "How long is the con"; add that one here once its answer arrives).
+  faq: [
+    { q: "When does voting start?", a: "Voting starts Sunday, October 11, at 10 AM ET." },
+    { q: "What does the winner get?", a: "2 (two) free hours of studio time and 1 (one) general admission ticket to CultureCon 2027, provided by Top Barz Inc." },
+    { q: "Which tracks can I enter?", a: "Only tracks recorded at the Top Barz Studio Experience at CultureCon. Edited, re-recorded or any other tracks are not eligible." },
+    { q: "Can I edit or swap my track after I recorded it?", a: "No. The file you upload must be the exact track that appears on the voting platform. Do not swap in another track or edit the uploaded file." },
+    { q: "Where are the official rules?", a: "On the official rules page, voting.topbarz.xyz/rules.", link: { text: "Read the official rules", href: "/rules" } },
+    { q: "I won. What do I do?", a: "Winners should email info@topbarz.xyz." },
+  ],
   submit: "Enter",
   uploading: "Uploading {name}",
   sending: "Sending your entry",
@@ -50,7 +76,7 @@ export const COPY = {
     in_group: "Say whether you recorded in a group.",
     members: "Add the first name, last name and email of everyone in your group.",
     member: "Person {n} in your group needs a first name, a last name and an email address that works.",
-    track: "Choose your track.",
+    track: "Upload your Top Barz song.",
     agree: "Tick the box to agree to the official rules.",
   },
   notAudio: "That is not an audio file. WAV, MP3, M4A, AIFF or FLAC.",

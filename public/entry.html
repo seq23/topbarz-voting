@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#000000">
+<meta name="color-scheme" content="dark">
+<title>Enter the contest | Top Barz</title>
+<meta name="description" content="Thank you for jumping in the booth. Enter the Top Barz CultureCon contest.">
+<link rel="icon" type="image/png" href="/img/favicon.png">
+<link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
+<link rel="preload" href="/fonts/dela-gothic-one-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/epilogue-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/css/site.css">
+<link rel="modulepreload" href="/js/dom.js">
+<link rel="modulepreload" href="/js/booth-rules.js">
+<link rel="modulepreload" href="/js/entry-rules.js">
+<link rel="modulepreload" href="/js/entry-copy.js">
+<script type="module" src="/js/entry.js"></script>
+</head>
+<body>
+<a class="skip" href="#tbz-entry-form">Skip to the form</a>
+
+<header class="top">
+  <a class="logo" href="https://www.topbarz.xyz/"><img src="/img/logo.png" width="212" height="186" alt="Top Barz"></a>
+  <h1 class="slogan">JUMP IN THE BOOTH</h1>
+</header>
+
+<main>
+  <p class="lede"><a href="https://docs.google.com/document/d/1VqrGTQdvbFbqno4Wx_J5xC6PlFBHFdTdTeMalDTueks/edit" rel="noopener">Official rules</a></p>
+
+  <section class="intro" aria-labelledby="tbz-entry-headline">
+    <h2 id="tbz-entry-headline" class="page-title"></h2>
+    <div id="tbz-entry-thanks"></div>
+  </section>
+
+  <section class="intro" aria-labelledby="tbz-entry-contest-title">
+    <h2 id="tbz-entry-contest-title" class="page-title"></h2>
+    <div id="tbz-entry-contest"></div>
+  </section>
+
+  <form id="tbz-entry-form" class="booth" novalidate aria-labelledby="tbz-entry-form-title">
+    <h2 id="tbz-entry-form-title" class="page-title"></h2>
+    <div class="field-pair">
+      <div class="field"><label for="tbz-entry-first" id="tbz-entry-first-label"></label><input id="tbz-entry-first" type="text" autocomplete="given-name" maxlength="80" aria-describedby="tbz-entry-error"></div>
+      <div class="field"><label for="tbz-entry-last" id="tbz-entry-last-label"></label><input id="tbz-entry-last" type="text" autocomplete="family-name" maxlength="80" aria-describedby="tbz-entry-error"></div>
+    </div>
+    <div class="field"><label for="tbz-entry-city" id="tbz-entry-city-label"></label><input id="tbz-entry-city" type="text" autocomplete="address-level2" maxlength="80" aria-describedby="tbz-entry-error"></div>
+    <div class="field"><label for="tbz-entry-email" id="tbz-entry-email-label"></label><input id="tbz-entry-email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="254" aria-describedby="tbz-entry-error"></div>
+    <div class="field"><label for="tbz-entry-phone" id="tbz-entry-phone-label"></label><input id="tbz-entry-phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="40" aria-describedby="tbz-entry-error"></div>
+
+    <fieldset class="group" id="tbz-entry-group">
+      <legend id="tbz-entry-group-label"></legend>
+      <label class="check"><input type="radio" name="in_group" id="tbz-entry-group-yes" value="yes"><span id="tbz-entry-yes-label"></span></label>
+      <label class="check"><input type="radio" name="in_group" id="tbz-entry-group-no" value="no"><span id="tbz-entry-no-label"></span></label>
+    </fieldset>
+    <div id="tbz-entry-members" class="group" hidden>
+      <h3 id="tbz-entry-members-title" class="zone-hint"></h3>
+      <p id="tbz-entry-members-hint" class="zone-hint"></p>
+      <div id="tbz-entry-members-list" class="group"></div>
+      <button type="button" id="tbz-entry-add" class="btn btn-small btn-ghost"></button>
+    </div>
+
+    <label id="tbz-entry-zone" class="zone" for="tbz-entry-file">
+      <span id="tbz-entry-zone-text" class="zone-text"></span>
+      <span id="tbz-entry-zone-hint" class="zone-hint"></span>
+      <input type="file" id="tbz-entry-file" class="sr-only" accept="audio/*,.wav,.mp3,.m4a,.aif,.aiff,.flac" aria-describedby="tbz-entry-error">
+    </label>
+    <div id="tbz-entry-progress" class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-labelledby="tbz-entry-progress-text" hidden>
+      <div id="tbz-entry-progress-bar" class="progress-bar"></div>
+    </div>
+    <p id="tbz-entry-progress-text" class="progress-text" role="status"></p>
+
+    <label class="check"><input type="checkbox" id="tbz-entry-agree" aria-describedby="tbz-entry-error"><span id="tbz-entry-agree-label"></span></label>
+    <div class="hp" aria-hidden="true"><label for="tbz-entry-website">Website</label><input id="tbz-entry-website" type="text" name="website" tabindex="-1" autocomplete="off"></div>
+
+    <p id="tbz-entry-error" class="field-error" role="alert" hidden></p>
+    <div id="tbz-entry-failed" class="failed" role="alert" hidden>
+      <p id="tbz-entry-failed-text"></p>
+      <button type="button" id="tbz-entry-retry" class="btn btn-small"></button>
+    </div>
+    <button type="submit" id="tbz-entry-submit" class="btn btn-gate" disabled></button>
+  </form>
+
+  <section id="tbz-entry-done" class="done" aria-labelledby="tbz-entry-done-title" hidden>
+    <p id="tbz-entry-done-title" class="done-title" tabindex="-1"></p>
+    <p id="tbz-entry-done-text" class="done-file"></p>
+  </section>
+  <noscript><p class="list-note">This page needs JavaScript to send your entry. Turn it on and reload.</p></noscript>
+</main>
+
+<footer class="foot">
+  <div class="foot-inner">
+    <p class="foot-mark">Top Barz</p>
+  </div>
+</footer>
+</body>
+</html>

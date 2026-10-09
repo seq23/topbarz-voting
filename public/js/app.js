@@ -31,6 +31,7 @@ const els = {
   loadRetry: $("tbz-load-retry"),
   empty: $("tbz-empty"),
   closedNote: $("tbz-closed-note"),
+  notOpenNote: $("tbz-notopen-note"),
   offNote: $("tbz-off-note"),
   linkNote: $("tbz-link-note"),
   who: $("tbz-who"),
@@ -44,6 +45,7 @@ const app = {
   clock: null, // the server's clock (logic.js, syncClock)
   endMs: NaN,
   serverClosed: false,
+  notOpen: false, // the server says voting has not started yet (state.open === false and not closed)
   closedHold: 0, // server time before which a cached "open" is not believed (after a 403 voting_closed)
   closed: false,
   gateOn: true,
@@ -205,7 +207,7 @@ async function pumpLike(card) {
 }
 
 function tapLike(card) {
-  if (app.closed || !app.gateOn) return;
+  if (app.closed || app.notOpen || !app.gateOn) return;
   if (!app.voter) { gate.open({ type: "like", slug: card.slug, liked: true }, card.likeBtn); return; }
   card.say("");
   card.like = likeReduce(card.like, { type: "tap" });
@@ -398,7 +400,7 @@ function createCard(track) {
   };
   card.renderLike = () => {
     const view = likeView(card.like);
-    const off = app.closed || !app.gateOn;
+    const off = app.closed || app.notOpen || !app.gateOn;
     likeBtn.setAttribute("aria-pressed", String(view.liked));
     likeBtn.classList.toggle("is-busy", card.like.inflight);
     if (card.like.inflight && waitTimer === null) waitTimer = setTimeout(() => showWaiting(card.like.inflight), LIKE_WAIT_MS);
@@ -559,6 +561,12 @@ function applyState(state, generatedAt) {
   if (Number.isFinite(app.endMs)) els.ends.textContent = formatEndsLine(app.endMs);
   renderRuleEnds();
   els.offNote.hidden = app.gateOn;
+  const notOpen = state.open === false && state.closed !== true;
+  els.notOpenNote.hidden = !notOpen;
+  if (notOpen !== app.notOpen) {
+    app.notOpen = notOpen;
+    for (const card of app.cards.values()) { card.renderLike(); card.renderCounts(); }
+  }
   gallery.update(state.photos);
   renderTracks(Array.isArray(state.tracks) ? state.tracks : [], generatedAt);
   renderWindow();

@@ -8,8 +8,8 @@ import * as comments from "../functions/api/comments.js";
 import * as likes from "../functions/api/likes.js";
 import * as state from "../functions/api/state.js";
 import * as voters from "../functions/api/voters.js";
-import { VOTING_ENDS_AT, votingEndsAtMs } from "../functions/_lib/config.js";
-import { ROOT, addTrack, call, makeEnv, signUp } from "./helpers.mjs";
+import { VOTING_ENDS_AT, VOTING_STARTS_AT, votingEndsAtMs, votingPhase, votingStartsAtMs } from "../functions/_lib/config.js";
+import { LONG_OPEN, ROOT, addTrack, call, makeEnv, signUp } from "./helpers.mjs";
 
 let env, dispose, voter;
 before(async () => {
@@ -93,4 +93,75 @@ test("a short test window: the settings row closes voting only where the environ
   await env.DB.prepare("DELETE FROM settings WHERE key = 'voting_ends_at'").run();
   const [reopened] = await act(previewEnv);
   assert.equal(reopened.status, 200, "removing the row reopens it");
+});
+
+// ── The start (Scooter, 9 Oct 2026: "Voting starts Sunday, October 11, at 10am ET") ──────────────
+const walkSources = (hit) => {
+  const hits = [];
+  const walk = (dir) => {
+    for (const f of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (["node_modules", ".git", ".wrangler", ".work", "exports", "tests"].includes(f.name)) continue;
+      const p = path.join(dir, f.name);
+      if (f.isDirectory()) walk(p);
+      else if (/\.(js|mjs|toml|json|yml|html)$/.test(f.name) && hit.test(fs.readFileSync(p, "utf8"))) hits.push(path.relative(ROOT, p));
+    }
+  };
+  walk(ROOT);
+  return hits;
+};
+
+test("the start time is Sunday 11 Oct 2026 10 AM ET, and it is written in exactly one file", () => {
+  assert.equal(VOTING_STARTS_AT, "2026-10-11T14:00:00Z");
+  assert.equal(new Date(VOTING_STARTS_AT).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "full", timeStyle: "short" }), "Sunday, October 11, 2026 at 10:00 AM");
+  assert.ok(Date.parse(VOTING_STARTS_AT) < Date.parse(VOTING_ENDS_AT), "it starts before it ends");
+  assert.deepEqual(walkSources(/2026-10-11T14:00/), ["functions/_lib/config.js"]);
+});
+
+test("production carries no start override; only preview may move it", () => {
+  const cfg = parse(fs.readFileSync(path.join(ROOT, "wrangler.toml"), "utf8"));
+  assert.equal(cfg.vars?.VOTING_STARTS_AT, undefined);
+  assert.equal(cfg.env.preview.vars?.VOTING_STARTS_AT, undefined, "preview moves it with a settings row, not a variable");
+  assert.equal(votingStartsAtMs({}, soon), Date.parse(VOTING_STARTS_AT), "a settings row means nothing without the switch");
+  assert.equal(votingStartsAtMs({ ALLOW_END_OVERRIDE: "1" }, soon), Date.parse(soon));
+  assert.equal(votingStartsAtMs({ ALLOW_END_OVERRIDE: "1" }, "garbage"), Date.parse(VOTING_STARTS_AT));
+  assert.equal(votingStartsAtMs({ VOTING_STARTS_AT: past }, null), Date.parse(past));
+  const at = (iso) => votingPhase({}, Date.parse(iso), null, null);
+  assert.deepEqual([at("2026-10-11T13:59:59Z").notOpen, at("2026-10-11T13:59:59Z").closed], [true, false], "one second before the start");
+  assert.deepEqual([at("2026-10-11T14:00:00Z").notOpen, at("2026-10-11T14:00:00Z").closed], [false, false], "at the start it is open");
+  assert.deepEqual([at("2026-10-12T06:59:00Z").notOpen, at("2026-10-12T06:59:00Z").closed], [false, true], "at the end it is closed");
+  assert.equal(votingPhase({ VOTING_ENDS_AT: past }, Date.now(), null, null).notOpen, false, "closed wins over not open");
+});
+
+test("before the start: the server refuses likes and comments, whatever the browser thinks, and the state says so", async () => {
+  const early = { ...env, VOTING_STARTS_AT: soon };
+  const eventsBefore = (await env.DB.prepare("SELECT COUNT(*) AS n FROM like_events").first()).n;
+  const commentsBefore = (await env.DB.prepare("SELECT COUNT(*) AS n FROM comments").first()).n;
+  for (const res of await act(early)) {
+    assert.equal(res.status, 403);
+    assert.equal(res.body.error, "voting_not_open");
+    assert.match(res.body.message, /Sunday, October 11, at 10 AM ET/);
+  }
+  assert.equal((await call(likes.onRequest, early, { method: "POST", path: "/api/likes", token: voter.token, body: { track: "brian" } })).body.error, "voting_not_open", "a toggle too");
+  assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM like_events").first()).n, eventsBefore);
+  assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM comments").first()).n, commentsBefore);
+  const s = await getState(early);
+  assert.deepEqual([s.open, s.closed, s.voting_starts_at], [false, false, soon]);
+  assert.equal((await call(comments.onRequest, early, { path: "/api/comments?track=brian" })).status, 200, "comments stay readable");
+  assert.equal(s.tracks.length, 1, "tracks stay listed (and playable) before the start");
+  const open = await getState({ ...env, VOTING_STARTS_AT: LONG_OPEN });
+  assert.deepEqual([open.open, open.closed], [true, false]);
+  const real = await getState({ ...env, VOTING_STARTS_AT: undefined });
+  assert.equal(real.voting_starts_at, "2026-10-11T14:00:00.000Z", "with no override the constant is used");
+});
+
+test("a short test start: the settings row holds voting back only where the environment allows it", async () => {
+  await env.DB.prepare("INSERT INTO settings (key, value) VALUES ('voting_starts_at', ?1)").bind(soon).run();
+  const [likeProd] = await act(env);
+  assert.equal(likeProd.status, 200, "production ignores the row");
+  const previewEnv = { ...env, ALLOW_END_OVERRIDE: "1" };
+  for (const res of await act(previewEnv)) assert.equal(res.body.error, "voting_not_open");
+  assert.equal((await getState(previewEnv)).open, false);
+  await env.DB.prepare("DELETE FROM settings WHERE key = 'voting_starts_at'").run();
+  const [reopened] = await act(previewEnv);
+  assert.equal(reopened.status, 200, "removing the row opens it");
 });

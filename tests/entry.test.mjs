@@ -369,8 +369,8 @@ test("the page: Scooter's words, the official rules at the top, the form's field
   const html = src("public/entry.html");
   assert.match(html, /<meta name="robots" content="noindex">/, "noindex while these are the working rules");
   assert.match(html, /<h1 class="slogan">JUMP IN THE BOOTH<\/h1>/);
-  const rules = /<a href="(https:\/\/docs\.google\.com\/document\/d\/1VqrGTQdvbFbqno4Wx_J5xC6PlFBHFdTdTeMalDTueks\/edit)" rel="noopener">Official rules<\/a>/.exec(html);
-  assert.ok(rules, "the official rules link is https and carries no authuser (Scooter's address is not in a public link)");
+  const rules = /<a href="(https:\/\/docs\.google\.com\/document\/d\/1VqrGTQdvbFbqno4Wx_J5xC6PlFBHFdTdTeMalDTueks\/edit)" target="_blank" rel="noopener noreferrer">Official rules<\/a>/.exec(html);
+  assert.ok(rules, "the official rules link is https and opens in a new tab so a half-filled form is not lost, and carries no authuser (Scooter's address is not in a public link)");
   assert.ok(!/authuser|usp=drivesdk|scooter%40|@/.test(html), "and no address of a person");
   assert.ok(html.indexOf("Official rules") < html.indexOf('id="tbz-entry-headline"'), "the link is at the top, before the thank-you");
   for (const id of ["first", "last", "city", "email", "phone", "group-yes", "group-no", "file", "agree", "website"]) assert.match(html, new RegExp(`id="tbz-entry-${id}"`), id);

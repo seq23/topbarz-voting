@@ -61,7 +61,7 @@ try {
   const stubBase = `http://127.0.0.1:${stub.address().port}`;
   // EMAIL_VERIFICATION comes from wrangler.toml, as in production; the mail key and the two
   // endpoints are the stand-ins above.
-  const bindings = ["VOTER_TOKEN_SECRET=smoke-only-not-a-secret", "RESEND_API_KEY=smoke-only-not-a-key", `RESEND_ENDPOINT=${stubBase}/emails`, `DOH_ENDPOINT=${stubBase}/dns-query`].flatMap((b) => ["--binding", b]);
+  const bindings = ["VOTER_TOKEN_SECRET=smoke-only-not-a-secret", "VOTING_STARTS_AT=2020-01-01T00:00:00Z", "RESEND_API_KEY=smoke-only-not-a-key", `RESEND_ENDPOINT=${stubBase}/emails`, `DOH_ENDPOINT=${stubBase}/dns-query`].flatMap((b) => ["--binding", b]);
   // The dev server, startable more than once: the promote steps below run a second wrangler
   // against the same local D1 and R2, which is not safe while this one is serving them (on
   // Linux the server dies and the next fetch fails), so the server is stopped around them.
@@ -276,7 +276,7 @@ try {
 
   const s1 = await j("/api/state");
   ok(s1.status === 200 && s1.body.tracks.length === 1 && s1.body.tracks[0].slug === "smoke" && s1.body.tracks[0].likes === 0, "GET /api/state lists the track with 0 likes");
-  ok(!/beat/i.test(JSON.stringify(s1.body)) && Object.keys(s1.body).sort().join() === "closed,gate,giphy,now,photos,tracks,verification,voting_ends_at", "the beat is not in /api/state, whose shape has not changed");
+  ok(!/beat/i.test(JSON.stringify(s1.body)) && Object.keys(s1.body).sort().join() === "closed,gate,giphy,now,open,photos,tracks,verification,voting_ends_at,voting_starts_at", "the beat is not in /api/state, whose shape has not changed");
   ok(s1.body.closed === false && s1.body.voting_ends_at === "2026-10-12T06:59:00.000Z", "state carries the end time and closed=false");
   ok(s1.body.giphy.available === false && s1.body.giphy.reason === "no_key" && s1.body.gate.available === true, "state names the GIF picker as off (no key) and the gate as on");
   ok(Array.isArray(s1.body.photos) && s1.body.photos.length === 0, "no photos = empty manifest");
@@ -361,7 +361,65 @@ try {
   ok((await look(up.body.code)).status === 200 && (await j("/api/booth/tracks")).body.tracks.find((t) => t.code === up.body.code).everyone_in === true, "the booth row is untouched");
   ok(!JSON.stringify(s4.body).includes("@") && !/booth/.test(JSON.stringify(s4.body)), "nothing of the people and nothing of the booth is in /api/state");
 
-  if (passed < 110) throw new Error(`only ${passed} checks ran`);
+
+  // The contest entry (9 Oct 2026): the page, its two addresses, a real two-step entry over HTTP
+  // (the raw upload streams into R2 through the real runtime), the refusals, and the only door
+  // onto the vote, npm run promote-entry, against this same throwaway D1 and R2.
+  const entryPage = await fetch(base + "/entry", { redirect: "manual" });
+  const entryText = await entryPage.text();
+  const entryIds = [...entryText.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]);
+  ok(entryPage.status === 200 && entryText.includes('id="tbz-entry-form"') && entryText.includes('name="robots" content="noindex"') && entryIds.every((id) => id.startsWith("tbz-")), `GET /entry serves the entry page, noindex (${entryIds.length} ids)`);
+  ok((entryPage.headers.get("content-security-policy") ?? "").startsWith("default-src 'self'; script-src 'self'; style-src 'self'") && !/<script(?![^>]*\bsrc=)[^>]*>|<style\b|\sstyle="/.test(entryText), "/entry is served with the same content security policy, nothing inline");
+  ok(!/docs\.google|authuser/.test(entryText), "/entry carries no private Google link: the checkbox links /rules");
+  const rulesPage = await fetch(base + "/rules", { redirect: "manual" });
+  const rulesText = await rulesPage.text();
+  ok(rulesPage.status === 200 && rulesText.includes("Official Rules") && rulesText.includes("exact track that appears on the voting platform"), "GET /rules serves the official rules");
+  const entryAssets = [...new Set([...entryText.matchAll(/(?:src|href)="(\/(?:js|css|img|fonts)\/[^"]+)"/g)].map((m) => m[1]))];
+  const entryMissing = (await Promise.all(entryAssets.map(async (a) => { const x = await fetch(base + a); await x.arrayBuffer(); return x.status === 200 ? null : `${a} → ${x.status}`; }))).filter(Boolean);
+  ok(entryAssets.length >= 8 && entryMissing.length === 0, `every file /entry names is served (${entryAssets.length} files${entryMissing.length ? `; missing: ${entryMissing.join(", ")}` : ""})`);
+  for (const alias of ["/entry/", "/entry.html"]) {
+    const hop = await fetch(base + alias, { redirect: "manual" });
+    const landed = await fetch(base + alias);
+    ok([301, 308].includes(hop.status) && new URL(hop.headers.get("location"), base).pathname === "/entry" && landed.status === 200 && new URL(landed.url).pathname === "/entry", `GET ${alias} ends up at /entry`);
+  }
+  ok(!/href="\/entry|entry\.js/.test(pageText), "the voting page does not link to /entry");
+  ok((await j("/api/entries")).status === 405, "GET /api/entries is a 405");
+  const s5 = await j("/api/state");
+  ok(s5.body.voting_starts_at === "2020-01-01T00:00:00.000Z" && s5.body.open === true, "the smoke server's start is moved to the past by its binding, so the vote is open; /api/state carries both");
+  const sendEntryFile = (name, bytes, type, ip = "203.0.113.200") => fetch(base + "/api/entries/upload", { method: "POST", headers: { "x-file-name": encodeURIComponent(name), "content-type": type, "content-length": String(bytes.length), "cf-connecting-ip": ip }, body: bytes }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }));
+  const entryFields = { first_name: "Zora", last_name: "Entrant", city: "Atlanta", email: "smoke.entrant@example.com", phone: "(404) 555-0100", in_group: true, members: [{ first_name: "Pal", last_name: "Mate", email: "pal.mate@example.com" }], agree: true, website: "" };
+  const sendEntry = (body, ip = "203.0.113.201") => j("/api/entries", { method: "POST", headers: { "content-type": "application/json", "cf-connecting-ip": ip }, body: JSON.stringify(body) });
+  const badType = await sendEntryFile("notes.pdf", Buffer.from("%PDF-1.4"), "application/pdf");
+  ok(badType.status === 415 && badType.body.error === "not_audio", "POST /api/entries/upload refuses a PDF");
+  const entryUp = await sendEntryFile("Smoke Entry.wav", wavBytes, "audio/wav");
+  ok(entryUp.status === 200 && /^[0-9a-f]{24}$/.test(entryUp.body?.upload_id ?? "") && Object.keys(entryUp.body).join() === "upload_id,file_name,size", "POST /api/entries/upload takes a generated WAV and answers a one-time id");
+  const noRules = await sendEntry({ ...entryFields, agree: false, upload_id: entryUp.body.upload_id });
+  ok(noRules.status === 400 && noRules.body.error === "agree_required", "POST /api/entries without the rules agreement is a 400 agree_required");
+  const entered = await sendEntry({ ...entryFields, upload_id: entryUp.body.upload_id });
+  ok(entered.status === 201 && Object.keys(entered.body).join() === "entry" && Number.isInteger(entered.body.entry) && !JSON.stringify(entered.body).includes("smoke"), `POST /api/entries answers the entry number and nothing else (${entered.body?.entry})`);
+  const reused = await sendEntry({ ...entryFields, upload_id: entryUp.body.upload_id });
+  ok(reused.status === 409 && reused.body.error === "upload_used", "the same upload cannot be entered twice");
+  ok((await fetch(base + `/media/entries/${entryUp.body.upload_id}.wav`)).status === 404, "the entry's file is not reachable under /media");
+  const s6 = await j("/api/state");
+  ok(!JSON.stringify(s6.body).toLowerCase().includes("entr") && s6.body.tracks.length === 2, "an entry is not in /api/state");
+  const promoteEntry = (...args) => {
+    try { return { status: 0, out: execFileSync(process.execPath, [path.join(ROOT, "scripts/promote-entry.mjs"), ...args], { cwd: ROOT, env: { ...env, TBZ_PERSIST_TO: dir }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) }; }
+    catch (e) { return { status: e.status, out: `${e.stdout ?? ""}${e.stderr ?? ""}` }; }
+  };
+  await stopServer();
+  const noSuch = promoteEntry("--env", "local", "--id", "999");
+  ok(noSuch.status === 1 && /REFUSED: no entry has the number 999/.test(noSuch.out), `promote-entry refuses an unknown entry, exit ${noSuch.status}`);
+  const entryDry = promoteEntry("--env", "local", "--id", String(entered.body.entry), "--dry-run");
+  ok(entryDry.status === 0 && /ALLOWED \(agreed\)/.test(entryDry.out) && /dry run: would add zora  "Zora"/.test(entryDry.out), `promote-entry --dry-run says what it would do and writes nothing: ${entryDry.out.trim().split("\n").slice(-2).join(" | ")}`);
+  const entryDone = promoteEntry("--env", "local", "--id", String(entered.body.entry));
+  await startServer();
+  ok(entryDone.status === 0 && /promoted  zora  "Zora"  1\.0 s  → topbarz-voting-media\/tracks\/zora-[0-9a-f]{10}\.wav/.test(entryDone.out), `promote-entry copies the audio under tracks/ and adds the vote track (exit ${entryDone.status}): ${entryDone.out.trim().split("\n").slice(-3).join(" | ")}`);
+  let s7;
+  const entryBy = Date.now() + 8_000;
+  do { await new Promise((r) => setTimeout(r, 1000)); s7 = await j("/api/state"); } while (!s7.body.tracks.some((t) => t.slug === "zora") && Date.now() < entryBy);
+  ok(s7.body.tracks.length === 3 && s7.body.tracks.some((t) => t.slug === "zora" && t.label === "Zora") && !JSON.stringify(s7.body).includes("@"), "the promoted entry is in /api/state with its first name, and no address");
+
+  if (passed < 131) throw new Error(`only ${passed} checks ran`);
   console.log(`smoke: ${passed} checks passed`);
 } catch (err) {
   console.error(String(err.message ?? err));

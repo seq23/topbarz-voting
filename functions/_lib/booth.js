@@ -4,6 +4,7 @@
 // scripts/promote-booth.mjs (the verdict). Booth tracks are their own data (the `booth_tracks` and
 // `booth_people` tables, R2 keys under booth/): never tracks, never in the vote (tests/booth.test.mjs).
 import { isScooterTaylor, isTestName } from "./exclusions.js";
+import { HttpError } from "./http.js";
 
 export const BOOTH_EXTENSIONS = ["wav", "mp3", "m4a", "aif", "aiff", "flac"];
 export const BOOTH_MAX_BYTES = 100 * 1024 * 1024;
@@ -194,3 +195,20 @@ export const toTrack = (row) => ({
   share_id: row.public === 1 && row.share_id ? row.share_id : null,
   art_url: artUrl(row),
 });
+
+// The file goes to R2 as it arrives, never held in memory: on the Workers runtime the body is
+// piped through a FixedLengthStream of the declared size, which R2 streams and which fails the
+// upload if the bytes do not match the declared length. The handler tests run on Node, where the
+// local R2 proxy cannot take a stream, so there (and only there) the body is read whole first.
+export function fileBody(request, size) {
+  if (typeof FixedLengthStream === "function") {
+    const fixed = new FixedLengthStream(size);
+    const piping = request.body.pipeTo(fixed.writable);
+    return { body: fixed.readable, done: piping };
+  }
+  const done = request.arrayBuffer().then((buf) => {
+    if (buf.byteLength !== size) throw new HttpError(400, "bad_size", "The file is not the size the request declared.");
+    return buf;
+  });
+  return { body: done, done };
+}

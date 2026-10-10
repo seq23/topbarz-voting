@@ -1,6 +1,11 @@
 // The voting window. THE ONE PLACE the end time is written: Sunday 11 Oct 2026, 11:59 PM PDT.
 // tests/config.test.mjs fails if this literal appears in any other source file.
 export const VOTING_ENDS_AT = "2026-10-12T06:59:00Z";
+// … and THE ONE PLACE the start time is written: Sunday 11 Oct 2026, 10:00 AM ET (EDT, UTC-4).
+// Scooter, 9 Oct 2026: "Voting starts Sunday, October 11, at 10am ET." Before it the server
+// refuses likes and comments (403 voting_not_open). tests/window.test.mjs fails if this literal
+// appears in any other source file.
+export const VOTING_STARTS_AT = "2026-10-11T14:00:00Z";
 
 // Limits. Windows are seconds.
 export const LIMITS = {
@@ -23,6 +28,11 @@ export const LIMITS = {
   // listen-page lookups. A wrong code on a share route counts as a lookup try (the limits above).
   boothEditsPerMinute: { window: 60, max: 30 },
   boothListenPerMinute: { window: 60, max: 30 },
+  // The contest entry (9 Oct 2026, /entry): audio uploads per connection and for the whole site per
+  // day, and the entry form itself per connection.
+  entryUploadsPerIp: { window: 3600, max: 10 },
+  entryUploadsPerDay: { window: 86400, max: 300 },
+  entriesPerIp: { window: 3600, max: 10 },
 };
 export const COMMENT_MAX_CHARS = 500;
 export const NAME_MAX_CHARS = 80;
@@ -71,6 +81,28 @@ export function votingEndsAtMs(env, settingsValue) {
 }
 
 export const END_SETTING_SQL = "SELECT value FROM settings WHERE key = 'voting_ends_at'";
+
+// The start time for this environment, in ms. The same order as the end time: a `settings` row
+// (key voting_starts_at; only where the environment allows it, i.e. preview), then the env var
+// VOTING_STARTS_AT (tests), then the constant above.
+export function votingStartsAtMs(env, settingsValue) {
+  if (env?.ALLOW_END_OVERRIDE === "1") {
+    const fromSettings = parseTime(settingsValue);
+    if (fromSettings !== null) return fromSettings;
+  }
+  const fromEnv = parseTime(env?.VOTING_STARTS_AT);
+  if (fromEnv !== null) return fromEnv;
+  return Date.parse(VOTING_STARTS_AT);
+}
+export const START_SETTING_SQL = "SELECT value FROM settings WHERE key = 'voting_starts_at'";
+
+// Open means started and not ended. `now` before the start is "not_open"; at or after the end,
+// "closed". The routes and /api/state all go through here, so there is one answer.
+export function votingPhase(env, now, startSetting, endSetting) {
+  const startsAt = votingStartsAtMs(env, startSetting);
+  const endsAt = votingEndsAtMs(env, endSetting);
+  return { startsAt, endsAt, closed: now >= endsAt, notOpen: now < startsAt && now < endsAt };
+}
 
 export async function votingWindow(env, now = Date.now()) {
   let settingsValue = null;

@@ -110,7 +110,7 @@ test("the select page does not depend on the voting window: beats are served the
 
 test("a beat is never in the vote: not in /api/state, not likeable, not commentable, not in the tally or the export", async () => {
   const s = await getState();
-  assert.deepEqual(Object.keys(s.body).sort(), ["closed", "gate", "giphy", "now", "photos", "tracks", "verification", "voting_ends_at"], "the shape of /api/state has not changed");
+  assert.deepEqual(Object.keys(s.body).sort(), ["closed", "gate", "giphy", "now", "open", "photos", "tracks", "verification", "voting_ends_at", "voting_starts_at"], "the shape of /api/state has not changed");
   assert.deepEqual(s.body.tracks, [{ slug: "brian", label: "Brian", audio_url: "/media/tracks/brian-abc123.mp3", duration_ms: 60000, likes: 0, comments: 0 }]);
   assert.ok(!/beat|night-drive|midnight/i.test(s.text), "no beat, by slug, name or audio, is anywhere in /api/state");
 

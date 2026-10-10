@@ -6,6 +6,9 @@ import { getPlatformProxy } from "wrangler";
 import { _resetStateMemo } from "../functions/api/state.js";
 
 export const ROOT = path.resolve(import.meta.dirname, "..");
+// Voting has started in every test environment unless a test says otherwise (the real start,
+// 11 Oct 2026 10 AM ET, is in the future until then): tests/window.test.mjs sets its own.
+export const LONG_OPEN = "2020-01-01T00:00:00Z";
 export const SECRET = "test-secret-not-a-real-one";
 
 export async function makeEnv(extra = {}) {
@@ -16,7 +19,7 @@ export async function makeEnv(extra = {}) {
     for (const stmt of sql.split(";").map((s) => s.trim()).filter(Boolean)) await proxy.env.DB.prepare(stmt).run();
   }
   _resetStateMemo();
-  const env = { DB: proxy.env.DB, MEDIA: proxy.env.MEDIA, APP_ENV: "test", VOTER_TOKEN_SECRET: SECRET, ...extra };
+  const env = { DB: proxy.env.DB, MEDIA: proxy.env.MEDIA, APP_ENV: "test", VOTER_TOKEN_SECRET: SECRET, VOTING_STARTS_AT: LONG_OPEN, ...extra };
   return { env, dispose: () => proxy.dispose() };
 }
 

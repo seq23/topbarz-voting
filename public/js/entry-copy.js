@@ -16,17 +16,16 @@ export const COPY = {
   ],
   // The prize, as Scooter wrote it (9 Oct 2026, after the preview).
   prizeTitle: "The prize",
-  prize: [
-    "2 (two) free hours of studio time",
-    "1 (one) general admission ticket to CultureCon 2027",
-  ],
-  prizeNote: "Provided by Top Barz Inc.",
-  winners: { before: "Winners should email ", email: "info@topbarz.xyz", after: "." },
-  // Which tracks count (Scooter, 9 Oct 2026). Shown above the upload and again in the FAQ.
-  eligibility: [
-    "Only tracks recorded at the Top Barz Studio Experience at CultureCon are eligible. Edited, re-recorded or any other tracks are not eligible.",
-    "The file you upload must be the exact track that appears on the voting platform. Do not swap in another track or edit the uploaded file.",
-  ],
+  // One paragraph (Scooter, 9 Oct 2026, second preview); "Studio 404" links to the studio's Instagram.
+  prize: {
+    before: "The winner gets two hours of studio time at ",
+    studio: { text: "Studio 404", href: "https://www.instagram.com/studio404nyc" },
+    middle: ", plus one general admission ticket to CultureCon 2027, provided by Top Barz Inc. Winners should email ",
+    email: "info@topbarz.xyz",
+    after: ".",
+  },
+  // The only eligibility line on the page; the full restriction is in the official rules (/rules).
+  eligibility: "Your track from CultureCon",
   formTitle: "Enter the contest",
   firstName: "First name",
   lastName: "Last name",
@@ -53,11 +52,9 @@ export const COPY = {
   // The four questions Scooter asked for (9 Oct 2026, second preview), in his order; the group answer is his words. The rest follow.
   faq: [
     { q: "How long is the contest?", a: "Voting starts Sunday, October 11, at 10 AM ET and closes that night at 11:59 PM PT." },
-    { q: "What's the prize?", a: "2 (two) free hours of studio time and 1 (one) general admission ticket to CultureCon 2027, provided by Top Barz Inc. Winners should email info@topbarz.xyz." },
+    { q: "What's the prize?", a: "Two hours of studio time at Studio 404, plus one general admission ticket to CultureCon 2027, provided by Top Barz Inc. Winners should email info@topbarz.xyz." },
     { q: "Who can vote?", a: "Anyone with an email address. Each email gets one like per track, and we send a code to confirm it." },
     { q: "What if we recorded in a group?", a: "Please list everyone in the group." },
-    { q: "Which tracks can I enter?", a: "Only tracks recorded at the Top Barz Studio Experience at CultureCon. Edited, re-recorded or any other tracks are not eligible." },
-    { q: "Can I edit or swap my track after I recorded it?", a: "No. The file you upload must be the exact track that appears on the voting platform. Do not swap in another track or edit the uploaded file." },
     { q: "Where are the official rules?", a: "On the official rules page, voting.topbarz.xyz/rules.", link: { text: "Read the official rules", href: "/rules" } },
   ],
   submit: "Enter",

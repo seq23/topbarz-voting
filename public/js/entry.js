@@ -33,7 +33,6 @@ const els = {
   eligibility: $("tbz-entry-eligibility"),
   prizeTitle: $("tbz-entry-prize-title"),
   prize: $("tbz-entry-prize"),
-  prizeNote: $("tbz-entry-prize-note"),
   faqTitle: $("tbz-entry-faq-title"),
   faq: $("tbz-entry-faq"),
   group: $("tbz-entry-group"),
@@ -78,12 +77,11 @@ paragraphs(els.thanks, COPY.thanks);
 els.contestTitle.textContent = COPY.contestTitle;
 paragraphs(els.contest, COPY.contest);
 els.prizeTitle.textContent = COPY.prizeTitle;
-els.prize.replaceChildren(...COPY.prize.map((text) => h("li", { text })));
-els.prizeNote.replaceChildren(
-  h("p", { class: "lede", text: COPY.prizeNote }),
-  h("p", { class: "lede" }, COPY.winners.before, h("a", { href: `mailto:${COPY.winners.email}`, text: COPY.winners.email }), COPY.winners.after),
-);
-paragraphs(els.eligibility, COPY.eligibility);
+const prize = COPY.prize;
+els.prize.replaceChildren(h("p", { class: "lede" }, prize.before,
+  h("a", { href: prize.studio.href, target: "_blank", rel: "noopener noreferrer", text: prize.studio.text }),
+  prize.middle, h("a", { href: `mailto:${prize.email}`, text: prize.email }), prize.after));
+els.eligibility.textContent = COPY.eligibility;
 els.instagramLabel.textContent = COPY.instagram;
 els.titleLabel.textContent = COPY.trackTitle;
 els.faqTitle.textContent = COPY.faqTitle;

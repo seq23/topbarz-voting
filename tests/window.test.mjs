@@ -9,7 +9,7 @@ import * as likes from "../functions/api/likes.js";
 import * as state from "../functions/api/state.js";
 import * as voters from "../functions/api/voters.js";
 import { VOTING_ENDS_AT, votingEndsAtMs } from "../functions/_lib/config.js";
-import { ROOT, addTrack, call, makeEnv, signUp } from "./helpers.mjs";
+import { ROOT, addTrack, call, makeEnv, signUp, withRealEnd } from "./helpers.mjs";
 
 let env, dispose, voter;
 before(async () => {
@@ -60,7 +60,7 @@ test("before the end: likes and comments are accepted and the state is open", as
   const s = await getState({ ...env, VOTING_ENDS_AT: soon });
   assert.equal(s.closed, false);
   assert.equal(s.voting_ends_at, soon);
-  assert.equal((await getState(env)).voting_ends_at, "2026-10-12T06:59:00.000Z", "with no override the constant is used");
+  assert.equal((await getState(withRealEnd(env))).voting_ends_at, "2026-10-12T06:59:00.000Z", "with no override the constant is used");
 });
 
 test("after the end: the server rejects likes and comments, whatever the browser thinks", async () => {

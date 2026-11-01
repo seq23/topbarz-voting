@@ -12,6 +12,7 @@ import path from "node:path";
 const ROOT = path.resolve(import.meta.dirname, "..");
 const WRANGLER = path.join(ROOT, "node_modules", ".bin", "wrangler");
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tbz-smoke-"));
+const SMOKE_ENDS_AT = "2099-01-01T00:00:00Z";
 const env = { ...process.env, WRANGLER_SEND_METRICS: "false", NO_COLOR: "1", CI: "1" };
 const wr = (args) => execFileSync(WRANGLER, [...args, "--persist-to", dir], { cwd: ROOT, env, stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" });
 const freePort = () => new Promise((resolve) => { const s = net.createServer(); s.listen(0, "127.0.0.1", () => { const { port } = s.address(); s.close(() => resolve(port)); }); });
@@ -61,7 +62,9 @@ try {
   const stubBase = `http://127.0.0.1:${stub.address().port}`;
   // EMAIL_VERIFICATION comes from wrangler.toml, as in production; the mail key and the two
   // endpoints are the stand-ins above.
-  const bindings = ["VOTER_TOKEN_SECRET=smoke-only-not-a-secret", "RESEND_API_KEY=smoke-only-not-a-key", `RESEND_ENDPOINT=${stubBase}/emails`, `DOH_ENDPOINT=${stubBase}/dns-query`].flatMap((b) => ["--binding", b]);
+  // The vote window is pinned open (the real end passed on 12 Oct 2026); the constant itself is
+  // pinned by tests/window.test.mjs and tests/state.test.mjs.
+  const bindings = [`VOTING_ENDS_AT=${SMOKE_ENDS_AT}`, "VOTER_TOKEN_SECRET=smoke-only-not-a-secret", "RESEND_API_KEY=smoke-only-not-a-key", `RESEND_ENDPOINT=${stubBase}/emails`, `DOH_ENDPOINT=${stubBase}/dns-query`].flatMap((b) => ["--binding", b]);
   // The dev server, startable more than once: the promote steps below run a second wrangler
   // against the same local D1 and R2, which is not safe while this one is serving them (on
   // Linux the server dies and the next fetch fails), so the server is stopped around them.
@@ -277,7 +280,7 @@ try {
   const s1 = await j("/api/state");
   ok(s1.status === 200 && s1.body.tracks.length === 1 && s1.body.tracks[0].slug === "smoke" && s1.body.tracks[0].likes === 0, "GET /api/state lists the track with 0 likes");
   ok(!/beat/i.test(JSON.stringify(s1.body)) && Object.keys(s1.body).sort().join() === "closed,gate,giphy,now,photos,tracks,verification,voting_ends_at", "the beat is not in /api/state, whose shape has not changed");
-  ok(s1.body.closed === false && s1.body.voting_ends_at === "2026-10-12T06:59:00.000Z", "state carries the end time and closed=false");
+  ok(s1.body.closed === false && s1.body.voting_ends_at === new Date(SMOKE_ENDS_AT).toISOString(), "state carries the end time and closed=false");
   ok(s1.body.giphy.available === false && s1.body.giphy.reason === "no_key" && s1.body.gate.available === true, "state names the GIF picker as off (no key) and the gate as on");
   ok(Array.isArray(s1.body.photos) && s1.body.photos.length === 0, "no photos = empty manifest");
   ok(s1.body.verification?.available === true, "state says email codes are on (the switch in wrangler.toml, plus a mail key)");

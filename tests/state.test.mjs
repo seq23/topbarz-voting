@@ -8,7 +8,7 @@ import * as state from "../functions/api/state.js";
 import * as media from "../functions/media/[[path]].js";
 import { GIPHY, STATE_CACHE_SECONDS } from "../functions/_lib/config.js";
 import { PHOTO_MANIFEST_KEY } from "../functions/_lib/state.js";
-import { addTrack, call, freshIp, makeEnv } from "./helpers.mjs";
+import { TEST_VOTING_ENDS_AT, addTrack, call, freshIp, makeEnv, withRealEnd } from "./helpers.mjs";
 
 let env, dispose;
 before(async () => {
@@ -30,7 +30,8 @@ test("state lists active tracks in order with counts, the end time, closed, phot
   ]);
   assert.ok(!res.text.includes("Secret-Lastname"), "a contestant's full name is never returned");
   assert.equal(res.body.closed, false);
-  assert.equal(res.body.voting_ends_at, "2026-10-12T06:59:00.000Z");
+  assert.equal(res.body.voting_ends_at, new Date(TEST_VOTING_ENDS_AT).toISOString());
+  assert.equal((await getState(withRealEnd(env))).body.voting_ends_at, "2026-10-12T06:59:00.000Z", "with no override the constant is used");
   assert.deepEqual(res.body.photos, [], "no manifest = no photos = the slider hides");
   assert.deepEqual(res.body.gate, { available: true });
   assert.deepEqual(res.body.verification, { available: false, reason: "switched_off" }, "email codes are named too (this env has no switch); tests/verify.test.mjs covers on");

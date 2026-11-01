@@ -8,6 +8,14 @@ import { _resetStateMemo } from "../functions/api/state.js";
 export const ROOT = path.resolve(import.meta.dirname, "..");
 export const SECRET = "test-secret-not-a-real-one";
 
+// The vote window for tests is pinned open, never read off the wall clock: the real end
+// (VOTING_ENDS_AT in config.js) passed on 12 Oct 2026, and from then every like/comment test
+// answered 403 voting_closed. Tests that exercise the closed window pass their own end in `extra`.
+export const TEST_VOTING_ENDS_AT = "2099-01-01T00:00:00Z";
+
+// The same env with the test pin removed, so the real end (the constant) decides.
+export const withRealEnd = ({ VOTING_ENDS_AT: _pinned, ...rest }) => rest;
+
 export async function makeEnv(extra = {}) {
   const proxy = await getPlatformProxy({ configPath: path.join(ROOT, "wrangler.toml"), persist: false });
   const dir = path.join(ROOT, "migrations");
@@ -16,7 +24,7 @@ export async function makeEnv(extra = {}) {
     for (const stmt of sql.split(";").map((s) => s.trim()).filter(Boolean)) await proxy.env.DB.prepare(stmt).run();
   }
   _resetStateMemo();
-  const env = { DB: proxy.env.DB, MEDIA: proxy.env.MEDIA, APP_ENV: "test", VOTER_TOKEN_SECRET: SECRET, ...extra };
+  const env = { DB: proxy.env.DB, MEDIA: proxy.env.MEDIA, APP_ENV: "test", VOTER_TOKEN_SECRET: SECRET, VOTING_ENDS_AT: TEST_VOTING_ENDS_AT, ...extra };
   return { env, dispose: () => proxy.dispose() };
 }
 

@@ -110,4 +110,5 @@ export function sha256File(file) {
   return import("node:crypto").then(({ createHash }) => createHash("sha256").update(fs.readFileSync(file)).digest("hex"));
 }
 
-export const DRIVE_DIR = path.join(os.homedir(), "topbarz-source", "drive");
+// The one place the Drive package's folder is named; the loaders, sync-drive and the tests import it.
+export const DRIVE_DIR = path.join(os.homedir(), "Work", "topbarz-source", "drive");

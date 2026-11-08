@@ -8,6 +8,7 @@ import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { DRIVE_DIR } from "../scripts/lib/cf.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const WRANGLER = path.join(ROOT, "node_modules", ".bin", "wrangler");
@@ -170,7 +171,7 @@ try {
   // this fails loudly, naming it. On GitHub Actions, where no Drive package can exist, the same
   // four names go up at their real byte sizes with made-up bytes (the server never decodes audio),
   // and the check's own line says so. Never a silent skip.
-  const testTracks = path.join(os.homedir(), "topbarz-source", "drive", "Test tracks");
+  const testTracks = path.join(DRIVE_DIR, "Test tracks");
   const SAMPLE_SONGS = { "Test - Brian.mp3": 2602688, "Test - Caleb.mp3": 2865728, "Test - Carlos & Damien.mp3": 2735168, "Test - Chelos x Madame Prez x Cam.mp3": 2865728 };
   let songs, songSource;
   if (fs.existsSync(testTracks)) {

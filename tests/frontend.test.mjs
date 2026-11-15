@@ -1219,7 +1219,7 @@ test("weight: no libraries, and the whole page is small", () => {
   const entryJs = ENTRY_SCRIPTS.reduce((n, f) => n + size(`js/${f}`), 0);
   assert.ok(entryJs < 24_000, `the scripts belonging only to the contest entry page are ${entryJs} bytes together`);
   assert.equal(voteJs + boothJs + entryJs, JS.reduce((n, f) => n + size(f), 0), "and the three together are every script in public/js");
-  assert.ok(pageJs("entry.js") < 36_000, `the contest entry page's scripts are ${pageJs("entry.js")} bytes before compression`);
+  assert.ok(pageJs("entry.js") < 38_000, `the contest entry page's scripts are ${pageJs("entry.js")} bytes before compression (37,2xx on 15 Nov 2026 with the closed state)`);
   assert.ok(pageJs("track.js") < 64_000, `the rapper's page's scripts are ${pageJs("track.js")} bytes before compression (61,7xx on 4 Oct 2026 with the people; the shared api/dom/logic/player files are most of it)`);
   assert.ok(pageJs("booth.js") < 22_000, `the engineer's page's scripts are ${pageJs("booth.js")} bytes before compression (20,8xx on 4 Oct 2026: the people's rules sit in the shared booth-rules.js, as the share's do)`);
   assert.ok(pageJs("listen.js") < 60_000, `the listen page's scripts are ${pageJs("listen.js")} bytes before compression`);

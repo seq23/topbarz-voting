@@ -7,7 +7,7 @@
 import { $, h } from "./dom.js";
 import { refuseFile } from "./booth-rules.js";
 import { COPY } from "./entry-copy.js";
-import { MAX_MEMBERS, checkEntry, entryBody, failureWords } from "./entry-rules.js";
+import { MAX_MEMBERS, checkEntry, entryBody, entryView, failureWords } from "./entry-rules.js";
 
 const els = {
   headline: $("tbz-entry-headline"),
@@ -64,6 +64,10 @@ const els = {
   done: $("tbz-entry-done"),
   doneTitle: $("tbz-entry-done-title"),
   doneText: $("tbz-entry-done-text"),
+  skip: $("tbz-entry-skip"),
+  closed: $("tbz-entry-closed"),
+  closedTitle: $("tbz-entry-closed-title"),
+  closedLink: $("tbz-entry-closed-link"),
 };
 
 // file: the chosen File; uploaded: { file, id } once that file is up; rows: the group members' inputs.
@@ -76,6 +80,9 @@ els.headline.textContent = COPY.headline;
 paragraphs(els.thanks, COPY.thanks);
 els.contestTitle.textContent = COPY.contestTitle;
 paragraphs(els.contest, COPY.contest);
+els.closedTitle.textContent = COPY.closedTitle;
+els.closedLink.textContent = COPY.closedLink.text;
+els.closedLink.href = COPY.closedLink.href;
 els.prizeTitle.textContent = COPY.prizeTitle;
 const prize = COPY.prize;
 els.prize.replaceChildren(h("p", { class: "lede" }, prize.before,
@@ -85,11 +92,12 @@ els.eligibility.textContent = COPY.eligibility;
 els.instagramLabel.textContent = COPY.instagram;
 els.titleLabel.textContent = COPY.trackTitle;
 els.faqTitle.textContent = COPY.faqTitle;
-els.faq.replaceChildren(...COPY.faq.map((item) => h("details", { class: "faq-item" },
+const drawFaq = (items) => els.faq.replaceChildren(...items.map((item) => h("details", { class: "faq-item" },
   h("summary", { text: item.q }),
   h("p", { text: item.a }),
   ...(item.link ? [h("p", {}, h("a", { href: item.link.href, target: "_blank", rel: "noopener noreferrer", text: item.link.text }))] : []),
 )));
+drawFaq(COPY.faq);
 els.formTitle.textContent = COPY.formTitle;
 els.firstLabel.textContent = COPY.firstName;
 els.lastLabel.textContent = COPY.lastName;
@@ -266,3 +274,20 @@ els.file.addEventListener("change", () => { const file = els.file.files?.[0]; if
 for (const type of ["dragenter", "dragover"]) els.zone.addEventListener(type, (ev) => { ev.preventDefault(); if (!app.busy) els.zone.classList.add("is-over"); });
 for (const type of ["dragleave", "dragend", "drop"]) els.zone.addEventListener(type, () => els.zone.classList.remove("is-over"));
 els.zone.addEventListener("drop", (ev) => { ev.preventDefault(); if (!app.busy) chooseFile(ev.dataTransfer?.files?.[0]); });
+
+// ── Open or closed: the form starts hidden and is shown only while /api/state says entries are
+// open (or the read fails: the server still refuses a late entry). Closed → the closed state.
+async function readState() {
+  try {
+    const res = await fetch("/api/state", { headers: { accept: "application/json" }, credentials: "same-origin" });
+    return res.ok ? await res.json() : null;
+  } catch { return null; }
+}
+readState().then((state) => {
+  const view = entryView(state, COPY);
+  paragraphs(els.contest, view.contest);
+  drawFaq(view.faq);
+  els.form.hidden = view.closed;
+  els.skip.hidden = view.closed;
+  els.closed.hidden = !view.closed;
+});

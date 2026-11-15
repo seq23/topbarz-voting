@@ -7,7 +7,7 @@
     "test:smoke": "node tests/smoke.mjs",
     "check": "npm test && npm run test:smoke",
     "dev": "wrangler pages dev public --port 8788 --binding VOTER_TOKEN_SECRET=local-dev-only-not-a-secret --binding APP_ENV=local",
-    "dev:seed": "wrangler d1 migrations apply topbarz-voting --local && node scripts/load-tracks.mjs --env local && node scripts/load-photos.mjs --env local && node scripts/load-beats.mjs --env local --folder \"$HOME/topbarz-source/drive/Test tracks\"",
+    "dev:seed": "wrangler d1 migrations apply topbarz-voting --local && node scripts/load-tracks.mjs --env local && node scripts/load-photos.mjs --env local && node scripts/load-beats.mjs --env local --folder \"$HOME/Work/topbarz-source/drive/Test tracks\"",
     "migrate:preview": "wrangler d1 migrations apply topbarz-voting-preview --remote --env preview",
     "migrate:production": "wrangler d1 migrations apply topbarz-voting --remote",
     "deploy:staging": "npm run migrate:preview && wrangler pages deploy public --project-name topbarz-voting --branch staging --commit-dirty=true",

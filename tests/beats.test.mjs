@@ -15,6 +15,7 @@ import * as media from "../functions/media/[[path]].js";
 import { BEATS_CACHE_SECONDS, beatsSql, creditUrl } from "../functions/_lib/beats.js";
 import { computeTally } from "../functions/_lib/tally.js";
 import { tallyCsv } from "../scripts/export.mjs";
+import { DRIVE_DIR } from "../scripts/lib/cf.mjs";
 import { assertLoadAllowed, isTestFolder, parseBeatFile, planBeats } from "../scripts/lib/names.mjs";
 import { ROOT, addTrack, call, makeEnv, signUp } from "./helpers.mjs";
 
@@ -191,8 +192,8 @@ test("load-beats: a test file is a stand-in, shown as \"Placeholder beat N\" and
   const loaded = plan.map((p) => ({ slug: p.slug, name: p.name, source_name: p.sourceName }));
   const again = planBeats([...testTracks, "Test - Zed.mp3"], loaded, { testFolder: true });
   assert.deepEqual(again.map((p) => [p.slug, p.isNew]), [["placeholder-beat-1", false], ["placeholder-beat-2", false], ["placeholder-beat-3", false], ["placeholder-beat-4", false], ["placeholder-beat-5", true]]);
-  assert.equal(isTestFolder(path.join(os.homedir(), "topbarz-source", "drive", "Test tracks")), true);
-  assert.equal(isTestFolder(path.join(os.homedir(), "topbarz-source", "drive", "Beats")), false);
+  assert.equal(isTestFolder(path.join(DRIVE_DIR, "Test tracks")), true);
+  assert.equal(isTestFolder(path.join(DRIVE_DIR, "Beats")), false);
 });
 
 test("load-beats refuses test files for production exactly as the track loader does (even via a symlink)", () => {

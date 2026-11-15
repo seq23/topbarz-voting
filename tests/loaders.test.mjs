@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { computeTally } from "../functions/_lib/tally.js";
-import { targets } from "../scripts/lib/cf.mjs";
+import { DRIVE_DIR, targets } from "../scripts/lib/cf.mjs";
 import { csvCell } from "../scripts/lib/csv.mjs";
 import { contactsCsv, tallyCsv } from "../scripts/export.mjs";
 import { assertLoadAllowed, assignSlugs, isScooterTaylor, isTestName, parseTrackFile } from "../scripts/lib/names.mjs";
@@ -45,7 +45,7 @@ test("the loader itself stops on a folder holding only his file, and loads nothi
 });
 
 test("test folders and test files are refused for production, and allowed for preview and local", () => {
-  const testFolder = path.join(os.homedir(), "topbarz-source", "drive", "Test tracks");
+  const testFolder = path.join(DRIVE_DIR, "Test tracks");
   assert.throws(() => assertLoadAllowed("production", testFolder, ["Brian.mp3"]), /REFUSED.*test folder/);
   assert.throws(() => assertLoadAllowed("production", "/x/Test photos", ["a.jpg"]), /REFUSED/);
   assert.throws(() => assertLoadAllowed("production", "/x/test/inner", ["a.jpg"]), /REFUSED/);

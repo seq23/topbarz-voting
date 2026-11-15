@@ -29,3 +29,68 @@ jobs:
         run: npm test
       - name: Every route over HTTP (wrangler pages dev, local D1 + R2)
         run: npm run test:smoke
+
+  # EVERY PR GETS A PREVIEW A PARTNER CAN OPEN (9 Oct 2026). This project is a direct upload, not
+  # a Git-connected Pages project, so nothing deployed a PR until it merged: Scooter's preview email
+  # for #15 carried "no preview deployment — the PR and screenshots stand in for it", which a
+  # partner cannot review. A green Validate on a PR now deploys the branch to the preview
+  # environment (preview D1 + R2, same as staging) at its Pages branch alias and writes that link
+  # in one PR comment, which West Peek OS reads for the preview email (previewUrlsFrom).
+  preview:
+    if: github.event_name == 'pull_request'
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Refuse to run without the deploy token (named stop)
+        env:
+          HAS_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
+        run: |
+          if [ "$HAS_TOKEN" != "true" ]; then
+            echo "::error::NAMED STOP: repo secrets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are missing. See RUNBOOK.md, Deploy."
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Deploy the branch to the preview environment (preview D1 + R2)
+        id: deploy
+        env:
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          npm run -s migrate:preview
+          out="$(npx wrangler pages deploy public --project-name topbarz-voting --branch "$BRANCH" --commit-dirty=true 2>&1 | tee /dev/stderr)"
+          url="$(printf '%s\n' "$out" | grep -oE 'https://[a-z0-9-]+\.topbarz-voting\.pages\.dev' | grep -v '^https://[a-f0-9]{8}\.' | head -1 || true)"
+          if [ -z "$url" ]; then
+            # Cloudflare's branch alias: lower-case, runs of non-alphanumerics become one "-", at most 28 characters.
+            alias="$(printf '%s' "$BRANCH" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' | cut -c1-28 | sed -E 's/-+$//')"
+            url="https://$alias.topbarz-voting.pages.dev"
+          fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+      - name: One comment on the PR with the preview link (updated in place)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          URL: ${{ steps.deploy.outputs.url }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          body="**Preview** (preview data, not production): $URL — rebuilt on every push to this PR."
+          existing="$(gh api "repos/${GITHUB_REPOSITORY}/issues/$PR/comments" --jq '[.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("**Preview**")))][0].id // empty')"
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/$existing" -f body="$body" > /dev/null
+          else
+            gh api "repos/${GITHUB_REPOSITORY}/issues/$PR/comments" -f body="$body" > /dev/null
+          fi
+          echo "preview: $URL"

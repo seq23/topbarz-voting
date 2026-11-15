@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Pull the Top Barz build package from Google Drive to ~/topbarz-source/drive (tracks, photos,
+// Pull the Top Barz build package from Google Drive to ~/Work/topbarz-source/drive (tracks, photos,
 // PRD). Files already here and unchanged are skipped. Needs GSC_SERVICE_ACCOUNT_JSON, which lives
 // in the boss-os vault — so run with no key in the environment, this re-launches itself through
 // `npm run -s vault:run` there and the key goes vault → process, never onto a command line.
@@ -9,9 +9,10 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DRIVE_DIR } from "./lib/cf.mjs";
 
 const FOLDER_ID = process.argv[2] ?? "1M3nB8NQl_ftKTqurJGpIa_QpmedIC4oz";
-const OUT = path.resolve(process.argv[3] ?? path.join(os.homedir(), "topbarz-source", "drive"));
+const OUT = path.resolve(process.argv[3] ?? DRIVE_DIR);
 
 if (!process.env.GSC_SERVICE_ACCOUNT_JSON) {
   const vaultRepo = path.join(os.homedir(), "GitHub", "boss-os");

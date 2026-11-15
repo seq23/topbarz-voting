@@ -16,3 +16,7 @@ The CultureCon track vote for Top Barz at voting.topbarz.xyz: a static page in `
 - **The start time lives in one place too**, `functions/_lib/config.js` (`VOTING_STARTS_AT`, `2026-10-11T14:00:00Z` = Sunday 11 Oct 2026, 10 AM ET). Before it the server refuses likes and comments (403 `voting_not_open`). A test fails if the literal appears anywhere else.
 - **Checks.** `npm run check` = `npm test` (every rule, against a real local D1 and R2) + `npm run test:smoke` (every route over HTTP). That is the merge gate (`Validate`, about a minute); there is no browser suite. A changed rule means a rewritten test, at least as strict.
 - **Deploy.** Merge with `land <pr>`. A green `Validate` on `main` fires `Deploy`: staging, a live check, then production, then a live check. Never a bare `wrangler deploy`.
+
+## Company brain
+
+Read `~/Brains/west-peek.md` before any work (business facts, priorities, voice, settled decisions). New business facts go to the brain via Boss OS, not into this repo or memory. Repo how-tos stay in `docs/`.

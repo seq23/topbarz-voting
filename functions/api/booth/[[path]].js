@@ -18,28 +18,11 @@
 // An email is never in a URL, never in the log, and never answered to anyone but its owner.
 // Booth tracks are their own data (booth_tracks, booth_people, R2 booth/): never in the vote (tests/booth.test.mjs).
 import {
-  ACCESS_SQL, ART_SQL, ATTACH_SQL, BOOTH_DAY_KEY, DROP_SQL, LISTEN_SQL, LOG_SQL, OPEN_SQL, PEOPLE_SQL, PUBLIC_SQL, VOTE_SQL, allIn, artKey, artMagic, artSize, artType, artUrl, audioExtension, audioType, cleanEmail, cleanFileName, countPeople, isCode, isShareId, reserveCode, shareId, toTrack, uploadSize,
+  ACCESS_SQL, ART_SQL, ATTACH_SQL, BOOTH_DAY_KEY, DROP_SQL, LISTEN_SQL, LOG_SQL, OPEN_SQL, PEOPLE_SQL, PUBLIC_SQL, VOTE_SQL, allIn, artKey, artMagic, artSize, artType, artUrl, audioExtension, audioType, cleanEmail, cleanFileName, countPeople, fileBody, isCode, isShareId, reserveCode, shareId, toTrack, uploadSize,
 } from "../../_lib/booth.js";
 import { LIMITS } from "../../_lib/config.js";
 import { HttpError, fail, ipHash, json, readJson, route } from "../../_lib/http.js";
 import { assertUnderLimit, limitStatement, maybePrune } from "../../_lib/ratelimit.js";
-
-// The file goes to R2 as it arrives, never held in memory: on the Workers runtime the body is
-// piped through a FixedLengthStream of the declared size, which R2 streams and which fails the
-// upload if the bytes do not match the declared length. The handler tests run on Node, where the
-// local R2 proxy cannot take a stream, so there (and only there) the body is read whole first.
-function fileBody(request, size) {
-  if (typeof FixedLengthStream === "function") {
-    const fixed = new FixedLengthStream(size);
-    const piping = request.body.pipeTo(fixed.writable);
-    return { body: fixed.readable, done: piping };
-  }
-  const done = request.arrayBuffer().then((buf) => {
-    if (buf.byteLength !== size) throw new HttpError(400, "bad_size", "The file is not the size the request declared.");
-    return buf;
-  });
-  return { body: done, done };
-}
 
 const segments = (params) => (Array.isArray(params?.path) ? params.path : [params?.path]).filter((s) => typeof s === "string" && s !== "");
 

@@ -247,7 +247,7 @@ button:disabled { cursor: not-allowed; }
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   min-height: var(--tap); min-width: 68px; padding: 0 var(--space-4);
   background: transparent; color: var(--color-accent);
-  border: var(--line-chip) solid var(--color-accent); border-radius: 999px;
+  border: var(--line-chip) solid var(--color-accent); border-radius: 0;
   font-size: var(--text-sm); text-transform: uppercase; white-space: nowrap; font-variant-numeric: tabular-nums;
   transition: background-color 0.1s linear, color 0.1s linear;
 }
@@ -545,3 +545,18 @@ dialog::backdrop { background: var(--color-backdrop); }
   .print-page .qr-text { color: var(--color-print-ink); }
   .print-page .qr-code { width: 420px; }
 }
+/* The contest entry (/entry): the group's fieldset and its people; the rest is the booth's own parts. */
+.group { display: grid; gap: var(--space-3); min-width: 0; margin: 0; padding: 0; border: 0; }
+.group legend { padding: 0; margin-bottom: var(--space-2); color: var(--color-accent); text-transform: uppercase; }
+.member { display: grid; gap: var(--space-2); padding-bottom: var(--space-3); border-bottom: 1px solid var(--color-rule); }
+.member .btn { justify-self: start; }
+.booth h2.page-title { margin-inline: 0; padding-inline: 0; }
+
+/* /entry FAQ (answers in the brand orange); /rules. */
+.faq, .rules { max-width: var(--measure); margin-inline: auto; padding-inline: var(--space-5); text-align: left; }
+.faq summary { cursor: pointer; min-height: var(--tap); display: flex; align-items: center; }
+.faq p, .rules p { margin-top: var(--space-2); }
+.faq p { color: var(--color-warm); }
+.faq a, .rules a, .check a { text-decoration: underline; }
+.rules { padding-block: var(--space-6) var(--space-10); }
+.rules h2:not(.page-title) { margin: var(--space-6) 0 0; color: var(--color-accent); }

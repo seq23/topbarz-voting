@@ -23,7 +23,7 @@ const getState = (e = env, fresh = true) => { if (fresh) state._resetStateMemo()
 test("state lists active tracks in order with counts, the end time, closed, photos and named states", async () => {
   const res = await getState();
   assert.equal(res.status, 200);
-  assert.deepEqual(Object.keys(res.body).sort(), ["closed", "gate", "giphy", "now", "photos", "tracks", "verification", "voting_ends_at"]);
+  assert.deepEqual(Object.keys(res.body).sort(), ["closed", "gate", "giphy", "now", "open", "photos", "tracks", "verification", "voting_ends_at", "voting_starts_at"]);
   assert.deepEqual(res.body.tracks, [
     { slug: "brian", label: "Brian", audio_url: "/media/tracks/brian-abc123.mp3", duration_ms: 60000, likes: 0, comments: 0 },
     { slug: "caleb", label: "Caleb", audio_url: "/media/tracks/caleb-abc123.mp3", duration_ms: 60000, likes: 0, comments: 0 },

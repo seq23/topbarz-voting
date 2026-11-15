@@ -2,7 +2,7 @@
 // Without `liked` it toggles; with it, it sets that state (safe to retry: asking for the state a
 // voter is already in changes nothing). One active like per voter per track; any number of tracks.
 // Returns { track, liked, likes }. Rejected with 403 voting_closed after the end time (server clock).
-import { END_SETTING_SQL, LIMITS, votingEndsAtMs } from "../_lib/config.js";
+import { END_SETTING_SQL, LIMITS, START_SETTING_SQL, votingPhase } from "../_lib/config.js";
 import { HttpError, ipHash, json, readJson, route } from "../_lib/http.js";
 import { assertUnderLimit, limitStatement, maybePrune } from "../_lib/ratelimit.js";
 import { requireVoter } from "../_lib/token.js";
@@ -29,14 +29,17 @@ export const onRequest = route({
     const db = env.DB;
     const now = Date.now();
     const ip = await ipHash(request, env);
-    const [ipLimit, voterLimit, trackRes, voterRes, settingRes] = await db.batch([
+    const [ipLimit, voterLimit, trackRes, voterRes, settingRes, startRes] = await db.batch([
       limitStatement(db, `likes:ip:${ip}`, LIMITS.likesPerIp, now),
       limitStatement(db, `likes:voter:${voterId}`, LIMITS.likesPerVoter, now),
       db.prepare("SELECT id FROM tracks WHERE slug = ?1 AND active = 1").bind(slug),
       db.prepare("SELECT id FROM voters WHERE id = ?1").bind(voterId),
       db.prepare(END_SETTING_SQL),
+      db.prepare(START_SETTING_SQL),
     ]);
-    if (now >= votingEndsAtMs(env, settingRes.results[0]?.value ?? null)) throw new HttpError(403, "voting_closed", "Voting has closed.");
+    const phase = votingPhase(env, now, startRes.results[0]?.value ?? null, settingRes.results[0]?.value ?? null);
+    if (phase.closed) throw new HttpError(403, "voting_closed", "Voting has closed.");
+    if (phase.notOpen) throw new HttpError(403, "voting_not_open", "Voting opens Sunday, October 11, at 10 AM ET.");
     if (!voterRes.results[0]) throw new HttpError(401, "invalid_token", "Sign in again to continue.");
     assertUnderLimit(ipLimit, LIMITS.likesPerIp, "likes");
     assertUnderLimit(voterLimit, LIMITS.likesPerVoter, "likes");

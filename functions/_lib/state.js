@@ -1,5 +1,5 @@
 // Everything /api/state returns, built from D1 and the R2 photo manifest.
-import { END_SETTING_SQL, giphyStatus, gateStatus, verificationStatus, votingEndsAtMs } from "./config.js";
+import { END_SETTING_SQL, START_SETTING_SQL, giphyStatus, gateStatus, verificationStatus, votingPhase } from "./config.js";
 
 export const PHOTO_MANIFEST_KEY = "manifest/photos.json";
 
@@ -24,13 +24,15 @@ export async function readPhotoManifest(env) {
 }
 
 export async function buildState(env, now = Date.now()) {
-  const [tracksRes, settingRes] = await env.DB.batch([env.DB.prepare(TRACKS_WITH_COUNTS_SQL), env.DB.prepare(END_SETTING_SQL)]);
-  const endsAt = votingEndsAtMs(env, settingRes.results?.[0]?.value ?? null);
+  const [tracksRes, settingRes, startRes] = await env.DB.batch([env.DB.prepare(TRACKS_WITH_COUNTS_SQL), env.DB.prepare(END_SETTING_SQL), env.DB.prepare(START_SETTING_SQL)]);
+  const { startsAt, endsAt, closed, notOpen } = votingPhase(env, now, startRes.results?.[0]?.value ?? null, settingRes.results?.[0]?.value ?? null);
   const photos = await readPhotoManifest(env);
   return {
     now: new Date(now).toISOString(),
     voting_ends_at: new Date(endsAt).toISOString(),
-    closed: now >= endsAt,
+    closed,
+    voting_starts_at: new Date(startsAt).toISOString(),
+    open: !closed && !notOpen,
     tracks: (tracksRes.results ?? []).map((t) => ({
       slug: t.slug,
       label: t.label,

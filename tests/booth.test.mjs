@@ -452,7 +452,7 @@ test("a booth track is never in the vote: not in /api/state, /api/beats, the tal
   const { code } = up.body;
   state._resetStateMemo();
   const s = await call(state.onRequest, env, { path: "/api/state" });
-  assert.deepEqual(Object.keys(s.body).sort(), ["closed", "gate", "giphy", "now", "photos", "tracks", "verification", "voting_ends_at"], "the shape of /api/state has not changed");
+  assert.deepEqual(Object.keys(s.body).sort(), ["closed", "gate", "giphy", "now", "open", "photos", "tracks", "verification", "voting_ends_at", "voting_starts_at"], "the shape of /api/state has not changed");
   assert.deepEqual(s.body.tracks.map((t) => t.slug), ["brian"]);
   assert.ok(!/booth|SECRET-BOOTH/.test(JSON.stringify(s.body.tracks)) && !JSON.stringify(s.body.tracks).includes(code), "no booth track, by code, name or key, is anywhere in the tracks");
   assert.ok(!/booth/i.test(s.text));

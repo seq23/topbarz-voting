@@ -4,7 +4,7 @@
 //      pages back ("show more"). Only a first name is ever returned; hidden comments never are.
 // POST /api/comments — Authorization: Bearer <token>. Body: { track, text?, gif?: { id, url? } }
 //      (text, a GIF, or both) → { comment, comments: <new count> }. 403 voting_closed after the end.
-import { COMMENT_MAX_CHARS, END_SETTING_SQL, LIMITS, votingEndsAtMs } from "../_lib/config.js";
+import { COMMENT_MAX_CHARS, END_SETTING_SQL, LIMITS, START_SETTING_SQL, votingPhase } from "../_lib/config.js";
 import { HttpError, ipHash, json, readJson, route } from "../_lib/http.js";
 import { assertUnderLimit, limitStatement, maybePrune } from "../_lib/ratelimit.js";
 import { requireVoter } from "../_lib/token.js";
@@ -59,14 +59,17 @@ export const onRequest = route({
     const db = env.DB;
     const now = Date.now();
     const ip = await ipHash(request, env);
-    const [ipLimit, voterLimit, trackRes, voterRes, settingRes] = await db.batch([
+    const [ipLimit, voterLimit, trackRes, voterRes, settingRes, startRes] = await db.batch([
       limitStatement(db, `comments:ip:${ip}`, LIMITS.commentsPerIp, now),
       limitStatement(db, `comments:voter:${voterId}`, LIMITS.commentsPerVoter, now),
       db.prepare("SELECT id FROM tracks WHERE slug = ?1 AND active = 1").bind(slug),
       db.prepare("SELECT id, name FROM voters WHERE id = ?1").bind(voterId),
       db.prepare(END_SETTING_SQL),
+      db.prepare(START_SETTING_SQL),
     ]);
-    if (now >= votingEndsAtMs(env, settingRes.results[0]?.value ?? null)) throw new HttpError(403, "voting_closed", "Voting has closed.");
+    const phase = votingPhase(env, now, startRes.results[0]?.value ?? null, settingRes.results[0]?.value ?? null);
+    if (phase.closed) throw new HttpError(403, "voting_closed", "Voting has closed.");
+    if (phase.notOpen) throw new HttpError(403, "voting_not_open", "Voting opens Sunday, October 11, at 10 AM ET.");
     const voter = voterRes.results[0];
     if (!voter) throw new HttpError(401, "invalid_token", "Sign in again to continue.");
     assertUnderLimit(ipLimit, LIMITS.commentsPerIp, "comments");

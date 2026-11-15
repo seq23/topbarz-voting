@@ -40,6 +40,11 @@ for (let attempt = 1; attempt <= 12; attempt++) {
     if (nf.status !== 404 || !(nf.headers.get("content-type") ?? "").includes("json")) problems.push("unknown /api paths are not answered by the Functions");
     const select = await fetch(`${base}/select?smoke=${Date.now()}`);
     if (select.status !== 200 || !(await select.text()).includes('id="tbz-beats-list"')) problems.push(`/select is not serving the select page (${select.status})`);
+    const entry = await fetch(`${base}/entry?smoke=${Date.now()}`);
+    if (entry.status !== 200 || !(await entry.text()).includes('id="tbz-entry-form"')) problems.push(`/entry is not serving the entry page (${entry.status})`);
+    const entriesGet = await fetch(`${base}/api/entries?smoke=${Date.now()}`);
+    if (entriesGet.status !== 405) problems.push(`GET /api/entries should answer 405, it answered ${entriesGet.status}`);
+    if (!body.voting_starts_at || typeof body.open !== "boolean") problems.push("no voting start in /api/state");
     const beatsRes = await fetch(`${base}/api/beats?smoke=${Date.now()}`, { headers: { accept: "application/json" } });
     const beats = (await beatsRes.json().catch(() => null))?.beats;
     if (beatsRes.status !== 200 || !Array.isArray(beats)) problems.push(`/api/beats answered ${beatsRes.status} with no list of beats`);

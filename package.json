@@ -21,6 +21,7 @@
     "export": "node scripts/export.mjs",
     "booth-log": "node scripts/booth-log.mjs",
     "promote-booth": "node scripts/promote-booth.mjs",
+    "promote-entry": "node scripts/promote-entry.mjs",
     "make-track-qr": "node scripts/make-track-qr.mjs"
   },
   "devDependencies": {

@@ -14,6 +14,11 @@ export const COPY = {
     "Top Barz is hosting a contest. The song voted best from CultureCon wins the prize below.",
     "Voting starts Sunday, October 11, at 10 AM ET.",
   ],
+  // Once /api/state says voting has ended: the date line in the past tense, and the closed state
+  // that takes the form's place (entryView in entry-rules.js).
+  contestClosedLine: "Voting ran Sunday, October 11, from 10 AM ET to 11:59 PM PT.",
+  closedTitle: "Entries for this round are closed.",
+  closedLink: { text: "Back to the vote", href: "/" },
   // The prize, as Scooter wrote it (9 Oct 2026, after the preview).
   prizeTitle: "The prize",
   // One paragraph (Scooter, 9 Oct 2026, second preview); "Studio 404" links to the studio's Instagram.

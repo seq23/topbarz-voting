@@ -20,7 +20,7 @@
 <script type="module" src="/js/entry.js"></script>
 </head>
 <body>
-<a class="skip" href="#tbz-entry-form">Skip to the form</a>
+<a id="tbz-entry-skip" class="skip" href="#tbz-entry-form" hidden>Skip to the form</a>
 
 <header class="top">
   <a class="logo" href="https://www.topbarz.xyz/"><img src="/img/logo.png" width="212" height="186" alt="Top Barz"></a>
@@ -40,7 +40,7 @@
     <div id="tbz-entry-prize"></div>
   </section>
 
-  <form id="tbz-entry-form" class="booth" novalidate aria-labelledby="tbz-entry-form-title">
+  <form id="tbz-entry-form" class="booth" hidden novalidate aria-labelledby="tbz-entry-form-title">
     <h2 id="tbz-entry-form-title" class="page-title"></h2>
     <div class="field-pair">
       <div class="field"><label for="tbz-entry-first" id="tbz-entry-first-label"></label><input id="tbz-entry-first" type="text" autocomplete="given-name" maxlength="80" aria-describedby="tbz-entry-error"></div>
@@ -86,6 +86,11 @@
     </div>
     <button type="submit" id="tbz-entry-submit" class="btn btn-gate" disabled></button>
   </form>
+
+  <section id="tbz-entry-closed" class="done" aria-labelledby="tbz-entry-closed-title" hidden>
+    <p id="tbz-entry-closed-title" class="done-title" tabindex="-1"></p>
+    <p><a id="tbz-entry-closed-link" class="btn btn-gate"></a></p>
+  </section>
 
   <section id="tbz-entry-done" class="done" aria-labelledby="tbz-entry-done-title" hidden>
     <p id="tbz-entry-done-title" class="done-title" tabindex="-1"></p>

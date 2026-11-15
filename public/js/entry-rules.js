@@ -82,3 +82,18 @@ export function failureWords(copy, { code, status, message } = {}) {
   if (typeof message === "string" && message.trim()) return message.trim();
   return copy.failed;
 }
+
+// Open or closed, from GET /api/state: closed when the server says so or its clock is past
+// voting_ends_at. state null (the read failed) → open: the server still refuses a late entry.
+// → { closed, contest: the contest lines, faq: the FAQ, with the date lines in the past tense when closed }.
+export function entryView(state, copy) {
+  const ends = Date.parse(state?.voting_ends_at ?? "");
+  const now = Date.parse(state?.now ?? "") || Date.now();
+  const closed = state?.closed === true || (Number.isFinite(ends) && now >= ends);
+  if (!closed) return { closed, contest: copy.contest, faq: copy.faq };
+  return {
+    closed,
+    contest: [...copy.contest.slice(0, -1), copy.contestClosedLine],
+    faq: copy.faq.map((item, i) => (i === 0 ? { ...item, a: copy.contestClosedLine } : item)),
+  };
+}

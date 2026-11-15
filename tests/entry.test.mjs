@@ -17,7 +17,7 @@ import { LIMITS } from "../functions/_lib/config.js";
 import { ENTRY_MAX_MEMBERS, cleanPhone, cleanText, entryKey, entryLabel, isUploadId, parseEntry, promoteVerdict, uploadId } from "../functions/_lib/entries.js";
 import { computeTally } from "../functions/_lib/tally.js";
 import { COPY } from "../public/js/entry-copy.js";
-import { MAX_MEMBERS, checkEntry, cleanPhone as pagePhone, cleanText as pageText, entryBody, failureWords } from "../public/js/entry-rules.js";
+import { MAX_MEMBERS, checkEntry, cleanPhone as pagePhone, cleanText as pageText, entryBody, entryView, failureWords } from "../public/js/entry-rules.js";
 import { MAX_UPLOAD_BYTES, UPLOAD_EXTENSIONS, cleanEmail as pageEmail } from "../public/js/booth-rules.js";
 import { entriesCsv, entryMembersCsv } from "../scripts/export.mjs";
 import { ROOT, acceptedBeforeLimit, call, freshIp, makeEnv } from "./helpers.mjs";
@@ -447,4 +447,28 @@ test("the rules page (/rules): the official rules in the site's own page, no dra
   assert.ok(html.includes("2 (two) free hours of studio time") && html.includes("provided by Top Barz Inc.") && html.includes("info@topbarz.xyz"));
   assert.ok(!/NOT FOR PUBLICATION|DRAFT|\[(?:OPEN|VERIFY|TOP BARZ|LEGAL|INSERT|Studio 404 comment)|docs\.google|authuser/.test(html), "no review notes, no private Google link");
   assert.ok(!/spit your bars/i.test(html));
+});
+
+test("the page: when /api/state says closed (or its clock is past the end) the form is hidden and nothing says voting is upcoming; open shows it", async () => {
+  const pastEnd = { ...env, VOTING_ENDS_AT: new Date(Date.now() - 60_000).toISOString() };
+  state._resetStateMemo();
+  const closedState = (await call(state.onRequest, pastEnd, { path: "/api/state" })).body;
+  state._resetStateMemo();
+  const openState = (await call(state.onRequest, env, { path: "/api/state" })).body;
+  state._resetStateMemo();
+  assert.equal(closedState.closed, true);
+  assert.equal(openState.closed, false);
+  const clockPast = { ...openState, closed: false, now: new Date(Date.parse(openState.voting_ends_at) + 1000).toISOString() };
+  for (const s of [closedState, clockPast]) {
+    const view = entryView(s, COPY);
+    assert.equal(view.closed, true, "closed: the form is hidden and the closed state shown");
+    const words = [...view.contest, ...view.faq.map((f) => f.a)].join(" ");
+    assert.ok(!/\bstarts\b/i.test(words), "closed: no line claims voting is upcoming");
+  }
+  const open = entryView(openState, COPY);
+  assert.equal(open.closed, false, "open: the form is shown");
+  assert.deepEqual(open.contest, COPY.contest);
+  assert.equal(entryView(null, COPY).closed, false, "the read failed: the form, and the server still refuses a late entry");
+  assert.match(src("public/entry.html"), /<form id="tbz-entry-form"[^>]*\shidden\b/, "the form starts hidden: never a working-looking form before the state is read");
+  assert.match(src("public/js/entry.js"), /els\.form\.hidden = view\.closed;\n  els\.skip\.hidden = view\.closed;\n  els\.closed\.hidden = !view\.closed;/);
 });

@@ -143,9 +143,9 @@ test("the partners: white marks made from the files Scooter sent, one row under 
     assert.ok(fs.existsSync(path.join(ROOT, "public", p.src)), p.src);
   }
   assert.ok(new Set(HOLIDAY.partners.map((p) => p.desktop)).size > 1, "by visual weight, not one matching height");
-  // White marks: every pixel white (no inverted image), the mark carried by transparency; and the committed files are what the script makes.
+  // White marks: every pixel white (no inverted image), the mark carried by transparency.
   const sharp = (await import("sharp")).default;
-  const { LOGOS, whiteMark } = await import("../scripts/make-partner-logos.mjs");
+  const { LOGOS } = await import("../scripts/make-partner-logos.mjs");
   for (const l of LOGOS) {
     const file = path.join(ROOT, "public/img/partners", `${l.name}.png`);
     const { data, info } = await sharp(file).raw().toBuffer({ resolveWithObject: true });
@@ -153,8 +153,6 @@ test("the partners: white marks made from the files Scooter sent, one row under 
     let opaque = 0;
     for (let i = 0; i < data.length; i += 4) { assert.ok(data[i] === 255 && data[i + 1] === 255 && data[i + 2] === 255, `${l.name}: white only`); if (data[i + 3] > 128) opaque++; }
     assert.ok(opaque > 1000, `${l.name}: the mark is there`);
-    const made = await sharp(await whiteMark(path.join(ROOT, "design/partner-logos", l.src), l)).raw().toBuffer();
-    assert.ok(made.equals(data), `${l.name}: the committed logo is what npm run make-partner-logos makes`);
   }
   const festive = read("public/js/festive.js");
   assert.match(festive, /top\.querySelector\("\.logo"\)\?\.after\(partnerRow\(\)\);/, "the row sits under the Top Barz logo");

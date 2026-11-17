@@ -5,6 +5,8 @@
 // coverage against the source's own background) becomes its alpha. Nothing is inverted: a dark mark
 // on a light ground and a light mark on a dark ground both come out as the same white mark. The
 // result is trimmed to the mark and written to public/img/partners/<name>.png.
+// The sources are Scooter's attachments (17 Nov 2026), kept on the Mac in design/partner-logos/
+// (git-ignored: only the white marks are committed, tests/loaders.test.mjs). Another folder: --from <dir>.
 // Run: npm run make-partner-logos (committed output; re-run only when a source changes).
 import sharp from "sharp";
 import { fileURLToPath } from "node:url";
@@ -15,7 +17,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // cut-off line at the edge is not part of it. ink: is the mark lighter or darker than its ground.
 export const LOGOS = [
   { name: "flow-music", src: "flow-music.png", crop: { left: 200, top: 95, width: 625, height: 280 }, ink: "light", lo: 70, hi: 230 },
-  { name: "dick-and-janes", src: "dick-and-janes.gif", crop: { left: 30, top: 230, width: 600, height: 290 }, ink: "dark", lo: 25, hi: 200 },
+  { name: "dick-and-janes", src: "dick-and-janes.png", crop: { left: 30, top: 230, width: 600, height: 290 }, ink: "dark", lo: 25, hi: 200 },
   { name: "blitz-and-bubbles", src: "blitz-and-bubbles.png", crop: { left: 40, top: 22, width: 590, height: 340 }, ink: "dark", lo: 30, hi: 180 },
 ];
 
@@ -33,7 +35,8 @@ export async function whiteMark(input, { crop, ink, lo, hi }) {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   for (const l of LOGOS) {
-    const buf = await whiteMark(path.join(root, "design/partner-logos", l.src), l);
+    const from = process.argv.includes("--from") ? process.argv[process.argv.indexOf("--from") + 1] : path.join(root, "design/partner-logos");
+    const buf = await whiteMark(path.join(from, l.src), l);
     const file = path.join(root, "public/img/partners", `${l.name}.png`);
     await sharp(buf).toFile(file);
     const m = await sharp(buf).metadata();

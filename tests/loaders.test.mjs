@@ -166,14 +166,19 @@ test("contacts CSV: one row per voter, quoted properly, formulas defused", () =>
 
 // The only pictures in the repo are the page's four brand images, each at its fixed size.
 // Contest photos and tracks live in R2, never here.
+// With the white partner marks npm run make-partner-logos makes from Scooter's attachments
+// (17 Nov 2026; the sources stay out of the repo, in design/, git-ignored).
 const BRAND_IMAGES = {
   "public/img/apple-touch-icon.png": [180, 180],
   "public/img/favicon.png": [64, 64],
   "public/img/logo.png": [212, 186],
   "public/img/og.png": [1200, 630],
+  "public/img/partners/blitz-and-bubbles.png": [577, 340],
+  "public/img/partners/dick-and-janes.png": [578, 270],
+  "public/img/partners/flow-music.png": [601, 270],
 };
 
-test("voter data, secrets and loader work files cannot be committed; the only media in the repo are the four brand images", async () => {
+test("voter data, secrets and loader work files cannot be committed; the only media in the repo are the brand images (the Top Barz four and the partner marks)", async () => {
   for (const p of ["exports/production-x/contacts.csv", "exports/tally.csv", ".dev.vars", ".work/preview/tracks/a.mp3"]) {
     const out = execFileSync("git", ["-C", ROOT, "check-ignore", p], { encoding: "utf8" }).trim();
     assert.equal(out, p);

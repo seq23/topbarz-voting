@@ -15,11 +15,13 @@
 //   POST /api/party/team/sessions/<id>/texted  → { texted_at }
 //   GET  /api/party/team/members     → { members: [{ id, email, you }] };  POST { email } adds;  POST …/members/<id>/remove
 //   GET  /api/party/team/gifs        → { gifs };  POST { id, url, width, height, title } adds;  POST …/gifs/<giphy id>/remove
-//   GET  /api/party/team/songs       → { songs: [{ code, label, entered, pulled, pulled_at, people, ticked }] }   every song that has been in the vote
+//   GET  /api/party/team/songs       → { songs: [{ code, label, entered, pulled, pulled_at, people, ticked, members: [{ id, first_name, signed_up, in, attached_at }] }] }   every contest song, entered or not (never an email)
 //   POST /api/party/team/songs/<booth code>/pull  { pulled: true|false } → { song }   "Take out of the vote" / "Put back": the team's
 //                                    safety valve on auto-entry; a pulled song stays out even if everyone ticks again; likes are kept
+//   POST /api/party/team/songs/<booth code>/people/<id>/remove → { song }   takes off the song someone who has not ticked
+//                                    (409 ticked for someone who has); the song is judged again on the people left
 import { cleanEmail, isCode } from "../../_lib/booth.js";
-import { PULL_SQL, TEAM_SONGS_SQL, contestClosed, readSong, syncEntry, teamSong } from "../../_lib/contest.js";
+import { CONTEST_TRACK_SQL, DETACH_SQL, PERSON_ON_SONG_SQL, PULL_SQL, contestClosed, readSong, syncEntry, teamSongs } from "../../_lib/contest.js";
 import { LIMITS, VERIFICATION, verificationStatus } from "../../_lib/config.js";
 import { HttpError, fail, ipHash, json, readJson, route } from "../../_lib/http.js";
 import {
@@ -214,8 +216,9 @@ async function removeGif(context, id) {
 
 // ── The team's contest songs: take one out of the vote, or put it back ─────────────────────────
 async function songs(context) {
-  return json({ songs: ((await context.env.DB.prepare(TEAM_SONGS_SQL).all()).results ?? []).map(teamSong) });
+  return json({ songs: await teamSongs(context.env.DB) });
 }
+const songOf = async (db, code, fallback) => (await teamSongs(db)).find((s) => s.code === code) ?? fallback;
 async function pull(context, code, m) {
   const body = await readJson(context.request);
   if (typeof body.pulled !== "boolean") throw new HttpError(400, "bad_pull", "Send { pulled: true } or { pulled: false }.");
@@ -225,8 +228,26 @@ async function pull(context, code, m) {
   const row = await env.DB.prepare(PULL_SQL).bind(code, body.pulled ? now : null, body.pulled ? m.id : null).first();
   if (!row) throw new HttpError(404, "no_song", "That song has not been in the vote.");
   await syncEntry(env, await readSong(env.DB, code), now);
-  const fresh = ((await env.DB.prepare(TEAM_SONGS_SQL).all()).results ?? []).find((r) => r.code === code);
-  return json({ song: fresh ? teamSong(fresh) : { code, pulled: body.pulled } });
+  return json({ song: await songOf(env.DB, code, { code, pulled: body.pulled }) });
+}
+// "Remove from this song": someone on a song who has not ticked (a plus-one who only wanted to
+// hear it, an engineer testing the code, a mistyped code) would hold it out of the vote for good.
+// The team takes them off; the song is then judged again on the people left. A person who ticked
+// is refused: their tick is their own consent, and only they untick it.
+async function detach(context, code, personId) {
+  const { env } = context;
+  const now = Date.now();
+  if (await contestClosed(env, now)) throw new HttpError(403, "voting_closed", "Voting has closed, so songs can no longer go in or come out.");
+  const track = await env.DB.prepare(CONTEST_TRACK_SQL).bind(code).first();
+  if (!track) throw new HttpError(404, "no_song", "No booth song has that code.");
+  const row = await env.DB.prepare(DETACH_SQL).bind(track.id, personId).first();
+  if (!row) {
+    const there = await env.DB.prepare(PERSON_ON_SONG_SQL).bind(track.id, personId).first();
+    if (there) throw new HttpError(409, "ticked", "This person ticked the box themselves, so only they can take their tick back. To keep the song out, use Take out of the vote.");
+    throw new HttpError(404, "no_person", "That person is no longer on this song. The list has been refreshed.");
+  }
+  await syncEntry(env, await readSong(env.DB, code), now);
+  return json({ song: await songOf(env.DB, code, { code }) });
 }
 
 const idOf = (s) => (/^[1-9][0-9]{0,9}$/.test(s ?? "") ? Number(s) : null);
@@ -260,6 +281,7 @@ export const onRequest = route({
     if (parts.length === 4 && parts[1] === "members" && idOf(parts[2]) && parts[3] === "remove") return removeMember(context, idOf(parts[2]), m);
     if (parts.length === 2 && parts[1] === "gifs") return addGif(context);
     if (parts.length === 4 && parts[1] === "songs" && isCode(parts[2]) && parts[3] === "pull") return pull(context, parts[2], m);
+    if (parts.length === 6 && parts[1] === "songs" && isCode(parts[2]) && parts[3] === "people" && idOf(parts[4]) && parts[5] === "remove") return detach(context, parts[2], idOf(parts[4]));
     if (parts.length === 4 && parts[1] === "gifs" && /^[A-Za-z0-9]{1,64}$/.test(parts[2]) && parts[3] === "remove") return removeGif(context, parts[2]);
     return fail(404, "not_found", "No such API route.");
   },

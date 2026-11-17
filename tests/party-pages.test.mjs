@@ -108,7 +108,9 @@ test("the team's page: every status change asks first and can be undone; no swip
   const team = read("public/js/team.js");
   assert.ok(!/touchstart|touchend|touchmove|pointerdown|swipe/i.test(team), "no gestures on the team's page");
   assert.match(team, /onclick: \(\) => ask\(s, to\)/, "a status button only asks");
-  assert.match(team, /els\.confirmYes\.addEventListener\("click", \(\) => \{\s*const p = app\.pending;\s*closeModal\(els\.confirm\);\s*if \(p\?\.song\) pullSong\(p\.song, p\.pulled, \{ undoable: true \}\);\s*else if \(p\) change\(p\.s, p\.s\.status, p\.to, \{ undoable: true \}\);\s*\}\);/, "Yes makes the change (a group's status, or a song in or out of the vote), with Undo");
+  assert.match(team, /els\.confirmYes\.addEventListener\("click", \(\) => \{\s*const p = app\.pending;\s*closeModal\(els\.confirm\);\s*if \(p\?\.person\) removePerson\(p\.song, p\.person\);\s*else if \(p\?\.song\) pullSong\(p\.song, p\.pulled, \{ undoable: true \}\);\s*else if \(p\) change\(p\.s, p\.s\.status, p\.to, \{ undoable: true \}\);\s*\}\);/, "Yes makes the change (a group's status, a song in or out of the vote with Undo, or a person off a song)");
+  assert.match(team, /onclick: \(\) => askRemove\(song, p\)/, "Remove from this song only asks");
+  assert.match(team, /p\.in \? null : h\("button"/, "no Remove button for a person who ticked");
   assert.match(team, /els\.undo\.addEventListener\("click", \(\) => \{\s*const u = app\.undo;\s*if \(u\?\.song\) pullSong\(u\.song, u\.pulled, \{ undoable: false \}\);\s*else if \(u\) change\(u\.s, u\.from, u\.to, \{ undoable: false \}\);\s*\}\);/);
   assert.match(team, /onclick: \(\) => askSong\(s, true\)/, "Take out of the vote only asks");
   assert.match(team, /onclick: \(\) => askSong\(s, false\)/, "Put back only asks");

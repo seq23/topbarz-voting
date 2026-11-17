@@ -66,12 +66,25 @@ export function freshSlug(label, taken) {
 export const CONTEST_TRACK_SQL = "SELECT id, code, file_name, media_key, title, vote_track_id, party_session_id, pulled_at FROM booth_tracks WHERE code = ?1";
 // The email a guest key signed up with: a tick is taken only from that guest's own phone.
 export const GUEST_EMAIL_BY_KEY_SQL = "SELECT email FROM party_guests WHERE guest_key = ?1";
-// The team's list of contest songs: every song that has been in the vote (in now, or pulled),
-// with counts only (never an email) and the first names come from CONTEST_PEOPLE_SQL per song.
-export const TEAM_SONGS_SQL = `SELECT b.code, b.title, b.pulled_at, t.label, t.active,
+// The team's list of contest songs: every song that is or could be in the contest (in the vote
+// now or pulled, tagged with a session at upload, or with anyone on it who signed up at /join),
+// entered or not, so a song stuck waiting is in front of the team. Counts only (never an email);
+// the people come from TEAM_SONG_PEOPLE_SQL per song.
+export const TEAM_SONGS_SQL = `SELECT b.id, b.code, b.title, b.file_name, b.pulled_at, t.label, t.active,
   (SELECT COUNT(*) FROM booth_people p WHERE p.track_id = b.id) AS people,
   (SELECT COUNT(*) FROM booth_people p WHERE p.track_id = b.id AND p.contest_opt_in = 1) AS ticked
-  FROM booth_tracks b JOIN tracks t ON t.id = b.vote_track_id ORDER BY b.uploaded_at DESC, b.id DESC LIMIT 200`;
+  FROM booth_tracks b LEFT JOIN tracks t ON t.id = b.vote_track_id
+  WHERE b.vote_track_id IS NOT NULL OR b.party_session_id IS NOT NULL
+     OR EXISTS (SELECT 1 FROM booth_people p JOIN party_guests g ON g.email = p.email WHERE p.track_id = b.id)
+  ORDER BY b.uploaded_at DESC, b.id DESC LIMIT 200`;
+// One song's people for the team: the row id (what Remove names), the box, and the sign-up name
+// (NULL when not signed up). Never the email: a booth email is shown to its owner only.
+export const TEAM_SONG_PEOPLE_SQL = "SELECT p.id, p.contest_opt_in, p.attached_at, g.name FROM booth_people p LEFT JOIN party_guests g ON g.email = p.email WHERE p.track_id = ?1 ORDER BY p.attached_at, p.id";
+// The team takes someone off a song: only a person who has NOT ticked (a tick is that person's own
+// consent, and removing it is theirs to do). One person of one track. They can enter the code
+// again; they are then a late joiner as before.
+export const PERSON_ON_SONG_SQL = "SELECT contest_opt_in FROM booth_people WHERE track_id = ?1 AND id = ?2";
+export const DETACH_SQL = "DELETE FROM booth_people WHERE track_id = ?1 AND id = ?2 AND contest_opt_in = 0 RETURNING id";
 // Take out (pulled_at set, with who) or put back (NULL). Likes are kept either way.
 export const PULL_SQL = "UPDATE booth_tracks SET pulled_at = ?2, pulled_by = ?3 WHERE code = ?1 AND vote_track_id IS NOT NULL RETURNING code";
 // The people of a song with what the contest needs: their sign-up name (NULL when not signed up)
@@ -155,13 +168,23 @@ export function contestView(song, email, { entered, closed, production }) {
 }
 export { holidayOn };
 
-// The team's view of one song on /team: its name in the vote, in or out, and who it waits on.
-export const teamSong = (row) => ({
+// The team's view of one song on /team: its name in the vote (or, never entered, its title, its
+// people's first names, or its file), in or out, who is on it and who it waits on.
+export const teamSong = (row, people = []) => ({
   code: row.code,
-  label: row.label,
+  label: row.label || cleanTitle(row.title ?? "") || groupLabel(people.filter((p) => p.name).map((p) => firstOf(p.name))) || String(row.file_name ?? "").replace(/\.[^.]+$/, "") || row.code,
   entered: row.active === 1,
   pulled: Boolean(row.pulled_at),
   pulled_at: row.pulled_at ? new Date(row.pulled_at).toISOString() : null,
   people: row.people,
   ticked: row.ticked,
+  members: people.map((p) => ({ id: p.id, first_name: p.name ? firstOf(p.name) : null, signed_up: Boolean(p.name), in: p.contest_opt_in === 1, attached_at: new Date(p.attached_at).toISOString() })),
 });
+
+// The team's songs with their people, in one round trip for the people.
+export async function teamSongs(db) {
+  const rows = (await db.prepare(TEAM_SONGS_SQL).all()).results ?? [];
+  if (rows.length === 0) return [];
+  const people = await db.batch(rows.map((r) => db.prepare(TEAM_SONG_PEOPLE_SQL).bind(r.id)));
+  return rows.map((r, i) => teamSong(r, people[i].results ?? []));
+}

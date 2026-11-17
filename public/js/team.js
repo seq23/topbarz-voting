@@ -219,10 +219,43 @@ function drawSongs() {
         h("span", { class: "line-size", text: s.code })),
       h("p", { class: "next-names", text: s.label }),
       h("p", { class: "line-meta", text: songLine(s) }),
+      h("ul", { class: "song-people", "aria-label": COPY.songPeople }, ...(s.members ?? []).map((p) => songPerson(s, p))),
       h("div", { class: "line-actions" }, s.pulled
         ? h("button", { type: "button", class: "btn btn-small btn-ghost", text: COPY.putBack, onclick: () => askSong(s, false) })
         : h("button", { type: "button", class: "btn btn-status btn-stop", text: COPY.pullOut, onclick: () => askSong(s, true) })));
   }));
+}
+// One person on a song: first name (or "Not signed up" with when they entered the code), their box,
+// and Remove for anyone who has not ticked: a plus-one or a mistyped code would hold the song out.
+const clock = (iso) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+const personName = (p) => p.first_name || COPY.notSignedUp.replace("{time}", clock(p.attached_at));
+function songPerson(song, p) {
+  return h("li", { class: "song-person" },
+    h("span", { text: `${personName(p)} · ${p.in ? COPY.personIn : p.signed_up ? COPY.personWaiting : COPY.personNoSignUp}` }),
+    p.in ? null : h("button", { type: "button", class: "btn btn-small btn-ghost", text: COPY.removePerson, "aria-label": `${COPY.removePerson}: ${personName(p)}`, onclick: () => askRemove(song, p) }));
+}
+function askRemove(song, person) {
+  app.pending = { song, person };
+  els.confirmTitle.textContent = COPY.confirmRemovePerson.replace("{name}", person.first_name || personName(person).replace(/^\p{Lu}/u, (c) => c.toLowerCase())).replace("{label}", song.label);
+  els.confirmYes.className = "btn btn-status btn-stop";
+  showModal(els.confirm, cancel);
+  els.confirmNo.focus();
+}
+async function removePerson(song, person) {
+  try {
+    await call(`/api/party/team/songs/${song.code}/people/${person.id}/remove`, { method: "POST", body: {} });
+    els.toastText.textContent = COPY.removedPerson.replace("{name}", personName(person)).replace("{label}", song.label);
+  } catch (err) {
+    if (signedOut(err)) { signOut(); return; }
+    els.toastText.textContent = err?.message || COPY.failed;
+  }
+  app.undo = null;
+  els.undo.hidden = true;
+  els.toast.hidden = false;
+  clearTimeout(app.undoTimer);
+  app.undoTimer = setTimeout(() => { els.toast.hidden = true; }, UNDO_MS);
+  app.pending = null;
+  poll();
 }
 function askSong(song, pulled) {
   app.pending = { song, pulled };
@@ -280,7 +313,8 @@ async function change(s, from, to, { undoable }) {
 els.confirmYes.addEventListener("click", () => {
   const p = app.pending;
   closeModal(els.confirm);
-  if (p?.song) pullSong(p.song, p.pulled, { undoable: true });
+  if (p?.person) removePerson(p.song, p.person);
+  else if (p?.song) pullSong(p.song, p.pulled, { undoable: true });
   else if (p) change(p.s, p.s.status, p.to, { undoable: true });
 });
 els.confirmNo.addEventListener("click", cancel);

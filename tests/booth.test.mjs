@@ -491,7 +491,9 @@ test("a booth track is never in the vote: not in /api/state, /api/beats, the tal
   // The contest reads the booth's two tables and the guests' sign-ups, and writes the vote's tracks: nothing else.
   const contestSql = src("functions/_lib/contest.js");
   assert.deepEqual([...new Set([...contestSql.matchAll(/(?:FROM|INTO|UPDATE|JOIN) ([a-z_]+)/g)].map((m) => m[1]))].sort(), ["booth_people", "booth_tracks", "party_guests", "party_sessions", "tracks"], "the contest reads booth_tracks, booth_people, party_guests and party_sessions, and writes tracks");
-  assert.ok(!/DELETE FROM/.test(contestSql), "and deletes nothing: a song leaves the vote by active = 0, likes kept");
+  // It deletes nothing of the vote: a song leaves it by active = 0, likes kept. The one DELETE is the
+  // team taking off a song one person who has NOT ticked, one row of one track.
+  assert.deepEqual([...contestSql.matchAll(/DELETE FROM[^"`;]*/g)].map((m) => m[0]), ["DELETE FROM booth_people WHERE track_id = ?1 AND id = ?2 AND contest_opt_in = 0 RETURNING id"], "and deletes nothing of the vote: only one unticked person off one song");
   assert.ok(!/booth_tracks|booth_people|\/api\/booth|share_id|ASSETS/.test(src("public/js/app.js") + src("public/js/select.js")), "the vote's pages know nothing of the share or the people");
   assert.ok(!/booth_tracks|booth_people|DB\.|MEDIA\.|prepare\(/.test(src("functions/listen/[[path]].js")), "the listen page's function reads no table and no bucket: it serves the page, the page asks the API");
   const boothSql = [src("functions/_lib/booth.js"), src("scripts/booth-log.mjs"), src("functions/api/booth/[[path]].js")].join(" ");

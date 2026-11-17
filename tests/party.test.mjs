@@ -299,6 +299,43 @@ test("a late joiner takes the song out: a solo song in the vote leaves it when a
   assert.equal((await B(code, "enter", { email: "first@example.com" })).body.contest.entered, true, "someone already on it re-entering the code keeps it in");
 });
 
+test("a stranger on a song is not a lock: the team sees a song stuck waiting (never entered too), removes someone who has not ticked, and it enters; a tick is never removed", async () => {
+  const token = await teamToken();
+  const up = await upload("Stranger Jingle.mp3");
+  const code = up.body.code;
+  await B(code, "enter", { email: "owner.s@example.com" });
+  const k = (await guest("Sam Owner", "owner.s@example.com")).body.guest_key;
+  assert.equal((await B(code, "contest", { email: "owner.s@example.com", enter: true, agree: true, guest_key: k })).body.contest.entered, true);
+  // A plus-one types the code to hear it and never signs up: the song leaves the vote.
+  await B(code, "enter", { email: "plusone@example.com" });
+  assert.equal((await B(code, "contest-status", { email: "owner.s@example.com" })).body.contest.entered, false);
+  const listed = (await get("team/songs", { token })).body.songs.find((s) => s.code === code);
+  assert.ok(listed, "the stuck song is in front of the team");
+  assert.equal(listed.entered, false);
+  const stranger = listed.members.find((m) => !m.signed_up);
+  const owner = listed.members.find((m) => m.first_name === "Sam");
+  assert.ok(stranger && stranger.first_name === null && !JSON.stringify(listed).includes("plusone@"), "shown as not signed up, never by email");
+  assert.equal((await post(`team/songs/${code}/people/${stranger.id}/remove`, {})).body.error, "team_sign_in", "only the team removes");
+  const ticked = await post(`team/songs/${code}/people/${owner.id}/remove`, {}, { token });
+  assert.equal(ticked.status, 409, ticked.text);
+  assert.equal(ticked.body.error, "ticked", "a person who ticked is never removed by the team");
+  const closedEnv = { ...env, VOTING_ENDS_AT: "2020-06-01T00:00:00Z" };
+  assert.equal((await post(`team/songs/${code}/people/${stranger.id}/remove`, {}, { token, e: closedEnv })).body.error, "voting_closed");
+  const removed = await post(`team/songs/${code}/people/${stranger.id}/remove`, {}, { token });
+  assert.equal(removed.status, 200, removed.text);
+  assert.equal(removed.body.song.entered, true, "judged again on the people left: back in the vote");
+  assert.equal(removed.body.song.people, 1);
+  assert.ok((await stateNow()).tracks.some((t) => /Sam/.test(t.label)), "in the vote again");
+  assert.equal((await B(code, "contest-status", { email: "owner.s@example.com" })).body.contest.entered, true, "everyone on it sees Entered");
+  assert.equal((await post(`team/songs/${code}/people/${stranger.id}/remove`, {}, { token })).status, 404, "removing twice says they are gone");
+  // A song that never entered is listed too: a session-less song with a signed-up person on it.
+  const up2 = await upload("Never Entered.mp3");
+  await B(up2.body.code, "enter", { email: "owner.s@example.com" });
+  await B(up2.body.code, "enter", { email: "typo@example.com" });
+  const stuck = (await get("team/songs", { token })).body.songs.find((s) => s.code === up2.body.code);
+  assert.ok(stuck && stuck.entered === false && stuck.members.length === 2, "a song that has never been in the vote is listed with its people");
+});
+
 test("after voting ends nothing moves: the box and the title answer 403 voting_closed", async () => {
   const closedEnv = { ...env, VOTING_ENDS_AT: "2020-06-01T00:00:00Z" };
   const up = await upload("Late.mp3");
@@ -321,7 +358,11 @@ test("the team's safety valve: Take out of the vote from /team holds even if eve
   await env.DB.prepare("INSERT INTO like_events (track_id, voter_id, action, created_at) VALUES (?1, ?2, 'like', ?3)").bind(voteId, voter.id, iso).run();
   const likesBefore = 1;
   const listed = (await get("team/songs", { token })).body.songs.find((s) => s.code === code);
-  assert.deepEqual({ ...listed }, { code, label: "Val", entered: true, pulled: false, pulled_at: null, people: 1, ticked: 1 }, "the team sees the song, in, with counts and no email");
+  const { members, ...rest } = listed;
+  assert.deepEqual(rest, { code, label: "Val", entered: true, pulled: false, pulled_at: null, people: 1, ticked: 1 }, "the team sees the song, in, with counts");
+  assert.equal(members.length, 1);
+  assert.deepEqual(Object.keys(members[0]).sort(), ["attached_at", "first_name", "id", "in", "signed_up"], "first names and boxes, never an email");
+  assert.equal(members[0].first_name, "Val");
   assert.equal((await post(`team/songs/${code}/pull`, { pulled: true })).body.error, "team_sign_in", "only the team pulls a song");
   assert.equal((await post(`team/songs/${code}/pull`, {}, { token })).body.error, "bad_pull");
   assert.equal((await post("team/songs/9999/pull", { pulled: true }, { token })).status, 404);

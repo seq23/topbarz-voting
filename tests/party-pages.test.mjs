@@ -74,7 +74,8 @@ test("the contest box: first names with in or waiting, one line everyone sees th
   assert.equal(c.blocked, null);
   assert.ok(!JSON.stringify(c).includes("@"), "no email gets through");
   assert.equal(contestLine(TRACK, c), "Not entered yet: waiting on Kim");
-  assert.equal(contestLine(TRACK, { ...c, entered: true }), TRACK.contestEntered);
+  assert.equal(contestLine(TRACK, { ...c, entered: true }), "Not entered yet: waiting on Kim", "a song still waiting on someone never reads Entered");
+  assert.equal(contestLine(TRACK, { ...c, entered: true, waiting_on: [] }), TRACK.contestEntered);
   assert.equal(contestLine(TRACK, { ...c, blocked: "scooter_taylor" }), TRACK.contestBlocked);
   assert.deepEqual(c.people.map((p) => contestPerson(TRACK, p)), ["Jay (you): in ✓", "Kim: waiting", "Someone not signed up yet: waiting"]);
   assert.equal(cleanContest({ on: false }), null, "no contest, no box");

@@ -134,12 +134,20 @@ async function enter(context, code) {
   assertUnderLimit(hour, LIMITS.boothLookupPerHour, "tries");
   const row = isCode(code) ? (await db.prepare(OPEN_SQL).bind(code, now).all()).results?.[0] : null;
   if (!row) throw new HttpError(404, "not_found", NOT_FOUND);
-  const [, people] = await db.batch([
+  const [attached, people] = await db.batch([
     db.prepare(ATTACH_SQL).bind(row.id, email, now),
     db.prepare(PEOPLE_SQL).bind(row.id),
   ]);
   maybePrune(context);
-  return json({ ...toTrack(row), ...youAnd(people.results ?? [], email), ...(holidayOn(env) ? { contest: await contestFor(env, code, email, now) } : {}) });
+  if (!holidayOn(env)) return json({ ...toTrack(row), ...youAnd(people.results ?? [], email) });
+  // A new person on a song already in the vote: the song is everyone's, so it leaves the vote
+  // until they tick too (one box never speaks for someone who joined later).
+  let song = await readSong(db, code);
+  let entered;
+  if ((attached.meta?.changes ?? 0) > 0 && song.track.vote_track_id) ({ entered } = await syncEntry(env, song, now));
+  else entered = await isEntered(db, song.track);
+  const contest = contestView(song, email, { entered, closed: await contestClosed(env, now), production: env.APP_ENV === "production" });
+  return json({ ...toTrack(row), ...youAnd(people.results ?? [], email), contest });
 }
 
 // ── The holiday contest ────────────────────────────────────────────────────────────────────────

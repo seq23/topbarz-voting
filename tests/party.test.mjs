@@ -273,6 +273,28 @@ test("the solo walk-up: enters the code, must sign up before the box counts; a s
   assert.equal(t.body.contest.blocked, "test_file_in_production");
 });
 
+test("a late joiner takes the song out: a solo song in the vote leaves it when a second email enters the code, and comes back when they tick", async () => {
+  const up = await upload("Late Joiner Jingle.mp3");
+  const code = up.body.code;
+  await B(code, "enter", { email: "first@example.com" });
+  const k1 = (await guest("Fay First", "first@example.com")).body.guest_key;
+  assert.equal((await B(code, "contest", { email: "first@example.com", enter: true, agree: true, guest_key: k1 })).body.contest.entered, true);
+  const inVote = async () => (await stateNow()).tracks.some((t) => /Fay/.test(t.label));
+  assert.equal(await inVote(), true, "the solo song is in the vote");
+  const late = await B(code, "enter", { email: "late@example.com" });
+  assert.equal(late.status, 200);
+  assert.equal(late.body.contest.entered, false, "the newcomer is not spoken for by the first tick");
+  assert.equal(await inVote(), false, "the song left the vote the moment someone new joined it");
+  const k2 = (await guest("Lee Late", "late@example.com")).body.guest_key;
+  const firstView = await B(code, "contest-status", { email: "first@example.com" });
+  assert.equal(firstView.body.contest.entered, false);
+  assert.deepEqual(firstView.body.contest.waiting_on, ["Lee"], "everyone sees who it waits on");
+  assert.equal((await B(code, "enter", { email: "late@example.com" })).body.contest.entered, false, "entering the code again changes nothing");
+  assert.equal((await B(code, "contest", { email: "late@example.com", enter: true, agree: true, guest_key: k2 })).body.contest.entered, true);
+  assert.equal(await inVote(), true, "both ticked: back in");
+  assert.equal((await B(code, "enter", { email: "first@example.com" })).body.contest.entered, true, "someone already on it re-entering the code keeps it in");
+});
+
 test("after voting ends nothing moves: the box and the title answer 403 voting_closed", async () => {
   const closedEnv = { ...env, VOTING_ENDS_AT: "2020-06-01T00:00:00Z" };
   const up = await upload("Late.mp3");

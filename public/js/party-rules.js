@@ -110,6 +110,8 @@ export function contestLine(COPY, c) {
   if (!c) return "";
   if (c.blocked === "pulled_by_team") return COPY.contestPulled;
   if (c.blocked) return COPY.contestBlocked;
+  // Who it waits on comes before "Entered": the two can never show together as if it were in.
+  if (c.waiting_on.length && !c.closed) return COPY.contestWaiting.replace("{names}", groupLabel(c.waiting_on));
   if (c.entered) return COPY.contestEntered;
   if (c.closed) return COPY.contestClosed;
   if (c.waiting_on.length) return COPY.contestWaiting.replace("{names}", groupLabel(c.waiting_on));

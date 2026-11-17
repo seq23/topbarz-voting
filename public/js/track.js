@@ -14,7 +14,9 @@ import { artworkFor, cleanEmail, cleanPeople, cleanTrack, codeDigits, codeFromSe
 import { createControls, createPlayer } from "./player.js";
 import { COPY } from "./track-copy.js";
 import { festive } from "./festive.js";
-import { LINE_POLL_MS, cleanContest, contestLine, contestPerson } from "./party-rules.js";
+import { GUEST_KEY, LINE_POLL_MS, cleanContest, contestLine, contestPerson, isGuestKey } from "./party-rules.js";
+// The guest key /join kept on this phone: a tick is taken only from the phone that signed up.
+const ownKey = () => { try { const k = localStorage.getItem(GUEST_KEY); return isGuestKey(k) ? k : null; } catch { return null; } };
 
 const els = {
   headline: $("tbz-track-headline"),
@@ -302,13 +304,13 @@ async function flipContest() {
   els.contestMsg.hidden = true;
   els.contestBox.disabled = true;
   try {
-    const { data } = await api(`/api/booth/tracks/${track.code}/contest`, { method: "POST", body: { email: track.you.email, enter, agree: enter }, timeout: 10000 });
+    const { data } = await api(`/api/booth/tracks/${track.code}/contest`, { method: "POST", body: { email: track.you.email, enter, agree: enter, ...(enter ? { guest_key: ownKey() } : {}) }, timeout: 10000 });
     if (app.track !== track) return;
     track.contest = cleanContest(data?.contest) ?? track.contest;
   } catch (err) {
     if (app.track !== track) return;
     els.contestBox.checked = !enter;
-    els.contestMsg.textContent = err?.code === "not_signed_up" ? COPY.contestSignUp : err?.code === "voting_closed" ? COPY.contestClosed : refusal(err, err?.message || COPY.contestFailed);
+    els.contestMsg.textContent = err?.code === "not_signed_up" ? COPY.contestSignUp : err?.code === "not_your_sign_up" ? COPY.contestOwnPhone : err?.code === "voting_closed" ? COPY.contestClosed : refusal(err, err?.message || COPY.contestFailed);
     els.contestMsg.hidden = false;
   } finally {
     app.entering = false;

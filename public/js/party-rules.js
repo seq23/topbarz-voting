@@ -90,7 +90,7 @@ export function joinPayload(f) {
 // ── The contest box on /track ────────────────────────────────────────────────────────────────
 // The server's contest view → what the page draws, or null (no contest here). First names only;
 // a person who has not signed up yet has none.
-const BLOCKS = ["scooter_taylor", "test_file_in_production"];
+const BLOCKS = ["scooter_taylor", "test_file_in_production", "pulled_by_team"];
 export function cleanContest(c) {
   if (!c || typeof c !== "object" || c.on !== true) return null;
   const name = (v) => (typeof v === "string" && v.trim() ? v.trim().slice(0, 30) : null);
@@ -108,6 +108,7 @@ export function cleanContest(c) {
 // The one line under the box that everyone on the song sees the same way.
 export function contestLine(COPY, c) {
   if (!c) return "";
+  if (c.blocked === "pulled_by_team") return COPY.contestPulled;
   if (c.blocked) return COPY.contestBlocked;
   if (c.entered) return COPY.contestEntered;
   if (c.closed) return COPY.contestClosed;

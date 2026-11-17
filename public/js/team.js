@@ -2,7 +2,8 @@
 // live (every 5 s): who is next and after that, each group with its people, big status buttons
 // (green "In the booth", red "Out / done") that always ask first and can be undone for 10 s, a
 // "Text them" button that opens Messages on this phone with every number in the group, and each
-// person's details on a tap. Buttons only, no gestures. Below: the gallery's GIFs and who is on the team.
+// person's details on a tap. Buttons only, no gestures. Below: the contest songs (each with "Take
+// out of the vote", asked first and undoable), the gallery's GIFs and who is on the team.
 // The phone keeps the team token and the member's own email (localStorage tbz.team), nothing else.
 import { ApiError, api } from "./api.js";
 import { $, closeModal, h, showModal } from "./dom.js";
@@ -15,16 +16,17 @@ import { COPY } from "./team-copy.js";
 const els = Object.fromEntries([
   "headline", "intro", "loading", "off", "off-title", "off-note", "signin", "signin-title", "signin-intro", "email-form", "email", "email-label", "send", "code-form", "code-sent", "code", "code-label", "check", "resend", "change", "signin-error",
   "board", "who", "signout", "next-label", "next", "after-label", "after", "line-note", "line", "done-title", "done",
+  "songs-title", "songs-intro", "songs-none", "songs",
   "gifs-title", "gifs-intro", "gifs-chosen-title", "gifs-chosen", "gifs-none", "gif-search", "gif-search-label", "gif-status", "gif-results", "gif-by",
   "members-title", "members-intro", "members", "add-form", "add", "add-label", "add-go", "add-msg",
   "person", "person-title", "person-list", "person-close", "confirm", "confirm-title", "confirm-yes", "confirm-no", "toast", "toast-text", "undo",
 ].map((id) => [id.replace(/-([a-z])/g, (_, c) => c.toUpperCase()), $(`tbz-team-${id}`)]));
 
-const app = { token: null, me: "", sessions: [], timer: null, pending: null, undo: null, undoTimer: null, resendTimer: null, platform: detectPlatform(navigator), gifs: [], gifTimer: null };
+const app = { token: null, me: "", sessions: [], timer: null, pending: null, undo: null, undoTimer: null, resendTimer: null, platform: detectPlatform(navigator), gifs: [], gifTimer: null, songs: [] };
 
 // ── The words
 document.title = `${COPY.headline} | Top Barz`;
-const words = { headline: "headline", intro: "intro", offNote: null, signinTitle: "signInTitle", signinIntro: "signInIntro", emailLabel: "emailLabel", send: "sendCode", codeLabel: "codeLabel", check: "check", change: "changeEmail", signout: "signOut", nextLabel: "nextUp", afterLabel: "afterThat", doneTitle: "doneTitle", gifsTitle: "gifsTitle", gifsIntro: "gifsIntro", gifsChosenTitle: "gifsChosen", gifsNone: "gifsNone", gifSearchLabel: "gifsSearch", gifBy: "poweredBy", membersTitle: "teamTitle", membersIntro: "teamIntro", addLabel: "addLabel", addGo: "add", personClose: "close", confirmYes: "yes", confirmNo: "cancel", undo: "undo" };
+const words = { headline: "headline", intro: "intro", offNote: null, signinTitle: "signInTitle", signinIntro: "signInIntro", emailLabel: "emailLabel", send: "sendCode", codeLabel: "codeLabel", check: "check", change: "changeEmail", signout: "signOut", nextLabel: "nextUp", afterLabel: "afterThat", doneTitle: "doneTitle", songsTitle: "songsTitle", songsIntro: "songsIntro", songsNone: "songsNone", gifsTitle: "gifsTitle", gifsIntro: "gifsIntro", gifsChosenTitle: "gifsChosen", gifsNone: "gifsNone", gifSearchLabel: "gifsSearch", gifBy: "poweredBy", membersTitle: "teamTitle", membersIntro: "teamIntro", addLabel: "addLabel", addGo: "add", personClose: "close", confirmYes: "yes", confirmNo: "cancel", undo: "undo" };
 for (const [el, key] of Object.entries(words)) if (key) els[el].textContent = COPY[key];
 els.offTitle.textContent = HOLIDAY.off;
 els.offNote.textContent = HOLIDAY.offNote;
@@ -177,8 +179,10 @@ async function poll() {
   if (!app.token) return;
   if (!document.hidden && !app.pending) {
     try {
-      const { data } = await call("/api/party/team/line");
+      const [{ data }, songs] = await Promise.all([call("/api/party/team/line"), call("/api/party/team/songs")]);
       app.sessions = data.sessions ?? [];
+      app.songs = songs.data?.songs ?? [];
+      drawSongs();
       if (els.lineNote.textContent === COPY.unreachable) els.lineNote.hidden = true;
       draw();
     } catch (err) {
@@ -200,6 +204,53 @@ function ask(s, to) {
   els.confirmNo.focus();
 }
 function cancel() { app.pending = null; closeModal(els.confirm); }
+// ── A contest song: "Take out of the vote" / "Put back", asked first, then Undo for 10 s
+function songLine(s) {
+  if (s.pulled) return COPY.songPulledNote.replace("{ticked}", s.ticked).replace("{people}", s.people);
+  return COPY.songTicks.replace("{ticked}", s.ticked).replace("{people}", s.people);
+}
+function drawSongs() {
+  els.songsNone.hidden = app.songs.length > 0;
+  els.songs.replaceChildren(...app.songs.map((s) => {
+    const tone = s.pulled ? "stop" : s.entered ? "go" : "wait";
+    return h("li", { class: `line-item is-${tone}` },
+      h("div", { class: "line-head" },
+        h("span", { class: `pill pill-${tone}`, text: s.pulled ? COPY.songPulled : s.entered ? COPY.inVote : COPY.notInVote }),
+        h("span", { class: "line-size", text: s.code })),
+      h("p", { class: "next-names", text: s.label }),
+      h("p", { class: "line-meta", text: songLine(s) }),
+      h("div", { class: "line-actions" }, s.pulled
+        ? h("button", { type: "button", class: "btn btn-small btn-ghost", text: COPY.putBack, onclick: () => askSong(s, false) })
+        : h("button", { type: "button", class: "btn btn-status btn-stop", text: COPY.pullOut, onclick: () => askSong(s, true) })));
+  }));
+}
+function askSong(song, pulled) {
+  app.pending = { song, pulled };
+  els.confirmTitle.textContent = (pulled ? COPY.confirmPull : COPY.confirmPutBack).replace("{label}", song.label);
+  els.confirmYes.className = `btn btn-status btn-${pulled ? "stop" : "go"}`;
+  showModal(els.confirm, cancel);
+  els.confirmNo.focus();
+}
+async function pullSong(song, pulled, { undoable }) {
+  try {
+    await call(`/api/party/team/songs/${song.code}/pull`, { method: "POST", body: { pulled } });
+    clearTimeout(app.undoTimer);
+    els.toastText.textContent = (pulled ? COPY.pulledDone : COPY.putBackDone).replace("{label}", song.label);
+    app.undo = undoable ? { song, pulled: !pulled } : null;
+    els.undo.hidden = !undoable;
+    els.toast.hidden = false;
+    app.undoTimer = setTimeout(() => { els.toast.hidden = true; app.undo = null; }, UNDO_MS);
+  } catch (err) {
+    if (signedOut(err)) { signOut(); return; }
+    els.toastText.textContent = err?.message || COPY.failed;
+    els.undo.hidden = true;
+    els.toast.hidden = false;
+    clearTimeout(app.undoTimer);
+    app.undoTimer = setTimeout(() => { els.toast.hidden = true; }, UNDO_MS);
+  }
+  app.pending = null;
+  poll();
+}
 async function change(s, from, to, { undoable }) {
   try {
     await call(`/api/party/team/sessions/${s.id}/status`, { method: "POST", body: { status: to, from } });
@@ -226,9 +277,18 @@ async function change(s, from, to, { undoable }) {
   app.pending = null;
   poll();
 }
-els.confirmYes.addEventListener("click", () => { const p = app.pending; closeModal(els.confirm); if (p) change(p.s, p.s.status, p.to, { undoable: true }); });
+els.confirmYes.addEventListener("click", () => {
+  const p = app.pending;
+  closeModal(els.confirm);
+  if (p?.song) pullSong(p.song, p.pulled, { undoable: true });
+  else if (p) change(p.s, p.s.status, p.to, { undoable: true });
+});
 els.confirmNo.addEventListener("click", cancel);
-els.undo.addEventListener("click", () => { const u = app.undo; if (u) change(u.s, u.from, u.to, { undoable: false }); });
+els.undo.addEventListener("click", () => {
+  const u = app.undo;
+  if (u?.song) pullSong(u.song, u.pulled, { undoable: false });
+  else if (u) change(u.s, u.from, u.to, { undoable: false });
+});
 
 // ── Gallery GIFs
 function gifTile(g, onclick, label) {

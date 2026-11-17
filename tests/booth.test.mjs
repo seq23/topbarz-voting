@@ -486,7 +486,7 @@ test("a booth track is never in the vote: not in /api/state, /api/beats, the tal
   };
   // The holiday contest (17 Nov 2026) is the second door from the booth onto the vote: its rules are
   // functions/_lib/contest.js, its columns migrations/0009_party.sql, its tests tests/party.test.mjs.
-  assert.deepEqual(mentions("booth_tracks"), ["CLAUDE.md", "RUNBOOK.md", "functions/_lib/booth.js", "functions/_lib/contest.js", "functions/api/booth/[[path]].js", "migrations/0004_booth_tracks.sql", "migrations/0005_booth_share.sql", "migrations/0006_booth_people.sql", "migrations/0009_party.sql", "scripts/booth-log.mjs", "scripts/promote-booth.mjs", "tests/booth.test.mjs", "tests/party.test.mjs"], "booth_tracks is named only by the booth's own code, the contest's, their migrations, the two scripts, the tests and the two docs");
+  assert.deepEqual(mentions("booth_tracks"), ["CLAUDE.md", "RUNBOOK.md", "functions/_lib/booth.js", "functions/_lib/contest.js", "functions/api/booth/[[path]].js", "migrations/0004_booth_tracks.sql", "migrations/0005_booth_share.sql", "migrations/0006_booth_people.sql", "migrations/0009_party.sql", "migrations/0010_party_pull.sql", "scripts/booth-log.mjs", "scripts/promote-booth.mjs", "tests/booth.test.mjs", "tests/party.test.mjs"], "booth_tracks is named only by the booth's own code, the contest's, their migrations, the two scripts, the tests and the two docs");
   assert.deepEqual(mentions("booth_people"), ["CLAUDE.md", "RUNBOOK.md", "functions/_lib/booth.js", "functions/_lib/contest.js", "functions/api/booth/[[path]].js", "migrations/0006_booth_people.sql", "migrations/0009_party.sql", "scripts/booth-log.mjs", "scripts/promote-booth.mjs", "tests/booth.test.mjs", "tests/party.test.mjs"], "booth_people (the emails) is read by the booth's routes, the contest, its log script and its promotion script only: never /api/state, the tally, the export or /api/beats");
   // The contest reads the booth's two tables and the guests' sign-ups, and writes the vote's tracks: nothing else.
   const contestSql = src("functions/_lib/contest.js");
@@ -517,7 +517,7 @@ test("a booth track is never in the vote: not in /api/state, /api/beats, the tal
     "CREATE UNIQUE INDEX booth_tracks_share_id ON booth_tracks (share_id)",
   ], "exactly these four statements: public off by default for every track, a unique share id, an artwork key");
   const cols = (await env.DB.prepare("PRAGMA table_info(booth_tracks)").all()).results.map((c) => c.name);
-  assert.deepEqual(cols, ["id", "code", "file_name", "content_type", "size", "media_key", "uploaded_at", "opened", "last_opened_at", "public", "share_id", "art_key", "party_session_id", "title", "vote_track_id"], "and the holiday contest's three (migrations/0009_party.sql): the group tagged at upload, the title, the vote track it became");
+  assert.deepEqual(cols, ["id", "code", "file_name", "content_type", "size", "media_key", "uploaded_at", "opened", "last_opened_at", "public", "share_id", "art_key", "party_session_id", "title", "vote_track_id", "pulled_at", "pulled_by"], "and the holiday contest's three (migrations/0009_party.sql): the group tagged at upload, the title, the vote track it became; and the team's pull (migrations/0010_party_pull.sql)");
   // The people's migration (4 Oct 2026): one table hanging off booth_tracks, one index, nothing else.
   const peopleSql = src("migrations/0006_booth_people.sql").replace(/--.*$/gm, "");
   assert.match(peopleSql, /CREATE TABLE booth_people \(/);
@@ -623,7 +623,7 @@ test("today's log: today's rows only, newest first, well-formed only; sizes, tim
 // ── The pages ────────────────────────────────────────────────────────────────────────────────
 test("the copy of each page is one object with exactly these keys, and the page's elements are empty until it is read", () => {
   assert.deepEqual(Object.keys(BOOTH_COPY), ["headline", "intro", "zone", "zoneHint", "uploading", "doneTitle", "next", "retry", "failed", "notAudio", "tooBig", "empty", "dailyLimit", "rateLimited", "logTitle", "logEmpty", "logFailed", "nobody", "onePerson", "people", "allIn", "groupsTitle", "groupsNone", "walkUp", "groupsNote", "sessionGone"]);
-  assert.deepEqual(Object.keys(TRACK_COPY), ["headline", "intro", "codeLabel", "emailLabel", "go", "looking", "found", "download", "another", "notFound", "tooMany", "needCode", "needEmail", "badEmail", "notAttached", "you", "audioNone", "audioFailed", "publicLabel", "publicOff", "publicOn", "publicFailed", "publicNote", "share", "shareMessage", "copied", "copyFailed", "addArt", "changeArt", "artWorking", "artUnreadable", "artFailed", "voteLabel", "voteWaiting", "voteAll", "voteOnlyYou", "voteFailed", "contestTitle", "contestHelp", "contestBox", "contestRules", "titleLabel", "titleSave", "titleSaved", "contestEntered", "contestWaiting", "contestNotYet", "contestBlocked", "contestClosed", "contestIn", "contestOut", "contestYou", "contestUnknown", "contestSignUp", "contestFailed"]);
+  assert.deepEqual(Object.keys(TRACK_COPY), ["headline", "intro", "codeLabel", "emailLabel", "go", "looking", "found", "download", "another", "notFound", "tooMany", "needCode", "needEmail", "badEmail", "notAttached", "you", "audioNone", "audioFailed", "publicLabel", "publicOff", "publicOn", "publicFailed", "publicNote", "share", "shareMessage", "copied", "copyFailed", "addArt", "changeArt", "artWorking", "artUnreadable", "artFailed", "voteLabel", "voteWaiting", "voteAll", "voteOnlyYou", "voteFailed", "contestTitle", "contestHelp", "contestBox", "contestRules", "titleLabel", "titleSave", "titleSaved", "contestEntered", "contestWaiting", "contestNotYet", "contestBlocked", "contestClosed", "contestIn", "contestOut", "contestYou", "contestUnknown", "contestSignUp", "contestFailed", "contestOwnPhone", "contestPulled"]);
   assert.deepEqual(Object.keys(LISTEN_COPY), ["title", "loading", "line", "private", "instagram", "artAlt", "audioNone", "audioFailed"]);
   for (const copy of [BOOTH_COPY, TRACK_COPY, LISTEN_COPY]) for (const [k, v] of Object.entries(copy)) assert.ok(typeof v === "string" && v.trim(), `${k} is a sentence`);
   // The share's words, as the client asked for them (4 Oct 2026).
@@ -670,7 +670,9 @@ test("the copy of each page is one object with exactly these keys, and the page'
     const found = [...new Set([...js.matchAll(/[\w$-]*email[\w$-]*/gi)].map((m) => m[0]))].sort();
     assert.deepEqual(found, (EMAIL_MENTIONS[file] ?? []).slice().sort(), `${file}: every mention of an email is one of the named ones (${found.join(", ")})`);
     const stored = [...js.matchAll(/localStorage\.(\w+)\(([^)]*)\)/g)].map((m) => `${m[1]}(${m[2]})`);
-    assert.deepEqual(stored, file === "track.js" ? ["getItem(EMAIL_KEY)", "setItem(EMAIL_KEY, email)"] : [], `${file}: ${file === "track.js" ? "the device keeps the email and nothing else" : "nothing is kept on the device"}`);
+    // track.js writes only its email; it may READ the guest key /join kept (the contest tick proves
+    // the phone that signed up), and never writes it.
+    assert.deepEqual(stored, file === "track.js" ? ["getItem(GUEST_KEY)", "getItem(EMAIL_KEY)", "setItem(EMAIL_KEY, email)"] : [], `${file}: ${file === "track.js" ? "the device keeps the email and nothing else (and only reads the sign-up key)" : "nothing is kept on the device"}`);
     assert.ok(!/sessionStorage|document\.cookie|indexedDB/.test(js), `${file}: no cookie, no session store, no database`);
   }
   const track = src("public/js/track.js");

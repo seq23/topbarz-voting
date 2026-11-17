@@ -4,7 +4,12 @@
 //
 //   · every person attached to the song has ticked their OWN box, agreeing to the linked rules
 //     (one person's box never speaks for the group, even if the others never open the page);
-//   · every person attached signed up at /join (the contest needs a name and a number to reach).
+//   · every person attached signed up at /join (the contest needs a name and a number to reach);
+//   · the team has not taken it out from /team (pulled_at; it stays out until the team puts it back).
+//
+// A tick counts only from the phone that signed up: it carries that guest's own key (localStorage
+// tbz.party.guest), and the key's email must be the email being ticked. Knowing the code and a
+// friend's email is not enough to tick their box.
 //
 // The people of a song: the session the engineer tagged at upload (attached at once, so a friend
 // who never opens /track still counts as "waiting"), plus anyone who enters the code with their
@@ -37,6 +42,7 @@ export function contestVerdict({ track, people, production } = {}) {
   const names = [file.replace(/\.[^.]+$/, ""), String(track.title ?? ""), ...rows.map((r) => String(r.name ?? ""))];
   if (names.some((n) => n && isScooterTaylor(n))) return no("scooter_taylor", "Scooter Taylor's track is never in the vote");
   if (production && isTestName(file)) return no("test_file_in_production", "test files go to preview only, never production");
+  if (track.pulled_at) return no("pulled_by_team", "the team took this song out of the vote");
   if (rows.length === 0) return no("nobody_attached", "nobody is attached to this song yet");
   const unsigned = rows.filter((r) => !r.name);
   if (unsigned.length) return no("not_signed_up", `${unsigned.length} ${unsigned.length === 1 ? "person on this song has" : "people on this song have"} not signed up at /join`, { waiting_on: rows.filter((r) => r.contest_opt_in !== 1).map((r) => (r.name ? firstOf(r.name) : "someone")) });
@@ -57,7 +63,17 @@ export function freshSlug(label, taken) {
 }
 
 // ── I/O ──────────────────────────────────────────────────────────────────────────────────────
-export const CONTEST_TRACK_SQL = "SELECT id, code, file_name, media_key, title, vote_track_id, party_session_id FROM booth_tracks WHERE code = ?1";
+export const CONTEST_TRACK_SQL = "SELECT id, code, file_name, media_key, title, vote_track_id, party_session_id, pulled_at FROM booth_tracks WHERE code = ?1";
+// The email a guest key signed up with: a tick is taken only from that guest's own phone.
+export const GUEST_EMAIL_BY_KEY_SQL = "SELECT email FROM party_guests WHERE guest_key = ?1";
+// The team's list of contest songs: every song that has been in the vote (in now, or pulled),
+// with counts only (never an email) and the first names come from CONTEST_PEOPLE_SQL per song.
+export const TEAM_SONGS_SQL = `SELECT b.code, b.title, b.pulled_at, t.label, t.active,
+  (SELECT COUNT(*) FROM booth_people p WHERE p.track_id = b.id) AS people,
+  (SELECT COUNT(*) FROM booth_people p WHERE p.track_id = b.id AND p.contest_opt_in = 1) AS ticked
+  FROM booth_tracks b JOIN tracks t ON t.id = b.vote_track_id ORDER BY b.uploaded_at DESC, b.id DESC LIMIT 200`;
+// Take out (pulled_at set, with who) or put back (NULL). Likes are kept either way.
+export const PULL_SQL = "UPDATE booth_tracks SET pulled_at = ?2, pulled_by = ?3 WHERE code = ?1 AND vote_track_id IS NOT NULL RETURNING code";
 // The people of a song with what the contest needs: their sign-up name (NULL when not signed up)
 // and their own box. Their emails stay here: only `you` is ever answered with one.
 export const CONTEST_PEOPLE_SQL = `SELECT p.email, p.contest_opt_in, p.attached_at, g.name FROM booth_people p LEFT JOIN party_guests g ON g.email = p.email WHERE p.track_id = ?1 ORDER BY p.attached_at, p.id`;
@@ -134,7 +150,18 @@ export function contestView(song, email, { entered, closed, production }) {
     you: { in: people.find((p) => p.email === email)?.contest_opt_in === 1, signed_up: Boolean(people.find((p) => p.email === email)?.name) },
     people: people.map((p) => ({ first_name: p.name ? firstOf(p.name) : null, in: p.contest_opt_in === 1, you: p.email === email })),
     waiting_on: verdict.waiting_on,
-    blocked: ["scooter_taylor", "test_file_in_production"].includes(verdict.reason) ? verdict.reason : null,
+    blocked: ["scooter_taylor", "test_file_in_production", "pulled_by_team"].includes(verdict.reason) ? verdict.reason : null,
   };
 }
 export { holidayOn };
+
+// The team's view of one song on /team: its name in the vote, in or out, and who it waits on.
+export const teamSong = (row) => ({
+  code: row.code,
+  label: row.label,
+  entered: row.active === 1,
+  pulled: Boolean(row.pulled_at),
+  pulled_at: row.pulled_at ? new Date(row.pulled_at).toISOString() : null,
+  people: row.people,
+  ticked: row.ticked,
+});

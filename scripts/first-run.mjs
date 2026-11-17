@@ -70,7 +70,10 @@ for (const g of [guestA, guestB]) {
   if (e.json.contest.you.in !== false) fail("the contest box did not start unticked");
 }
 ok("both entered the code with their emails, and the contest box starts unticked for each");
-const tickA = await req(`/api/booth/tracks/${code}/contest`, { method: "POST", body: { email: guestA.email, enter: true, agree: true } });
+const forB = await req(`/api/booth/tracks/${code}/contest`, { method: "POST", body: { email: guestB.email, enter: true, agree: true, guest_key: a.json.guest_key } });
+if (forB.status !== 403 || forB.json?.error !== "not_your_sign_up") fail(`A's phone ticking B's box answered ${forB.status} ${forB.text.slice(0, 120)}`);
+ok("one person cannot tick a friend's box: A's phone with B's email is refused (403 not_your_sign_up)");
+const tickA = await req(`/api/booth/tracks/${code}/contest`, { method: "POST", body: { email: guestA.email, enter: true, agree: true, guest_key: a.json.guest_key } });
 if (tickA.json?.error === "voting_closed") fail("the preview's voting window is closed: run npm run party-window -- --env preview --starts <ISO> --ends <ISO>");
 if (tickA.status !== 200 || tickA.json.contest.entered !== false || !tickA.json.contest.waiting_on.includes("Test")) fail(`one tick: ${tickA.status} ${tickA.text.slice(0, 160)}`);
 ok(`one of two ticked: not entered, "waiting on ${tickA.json.contest.waiting_on.join(", ")}"`);
@@ -84,7 +87,7 @@ const inVote = async (want) => {
   return false;
 };
 if (!(await inVote(false))) fail("the song is in the vote after only one of two ticked");
-const tickB = await req(`/api/booth/tracks/${code}/contest`, { method: "POST", body: { email: guestB.email, enter: true, agree: true } });
+const tickB = await req(`/api/booth/tracks/${code}/contest`, { method: "POST", body: { email: guestB.email, enter: true, agree: true, guest_key: b.json.guest_key } });
 if (tickB.json?.contest?.entered !== true) fail(`both ticked but not entered: ${tickB.text.slice(0, 160)}`);
 if (!(await inVote(true))) fail("both ticked, but the song did not show in /api/state within 12 s");
 ok("both ticked: the song is in the vote (/api/state) with no script run");

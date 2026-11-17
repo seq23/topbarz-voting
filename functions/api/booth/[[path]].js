@@ -9,7 +9,8 @@
 //   The holiday contest (17 Nov 2026; only while HOLIDAY_EVENT is on, else 404 party_off):
 //   GET  /api/booth/sessions              the groups the team marked "in the booth" → { sessions: [{ id, names, size }] } (first names)
 //   POST /api/booth/tracks  + x-party-session: <id>   tags the upload with that group: its people are attached at once
-//   POST /api/booth/tracks/<code>/contest        { email, enter: true|false, agree: true } → this person's own box; the song enters the vote by itself when everyone is in
+//   POST /api/booth/tracks/<code>/contest        { email, enter: true|false, agree: true, guest_key } → this person's own box; a tick needs
+//                                                the guest_key kept by the device that signed up with that email; the song enters the vote by itself when everyone is in
 //   POST /api/booth/tracks/<code>/contest-status { email } → the same view, for the page's 5 s refresh
 //   POST /api/booth/tracks/<code>/title          { email, title } → the song's title (its name in the vote)
 //   GET  /api/booth/listen/<share_id>     the listen page's read → { file_name, audio_url, art_url }; 404 private | not_found (the same status for both)
@@ -27,8 +28,8 @@ import {
   ACCESS_SQL, ART_SQL, ATTACH_SQL, BOOTH_DAY_KEY, DROP_SQL, LISTEN_SQL, LOG_SQL, OPEN_SQL, PEOPLE_SQL, PUBLIC_SQL, VOTE_SQL, allIn, artKey, artMagic, artSize, artType, artUrl, audioExtension, audioType, cleanEmail, cleanFileName, countPeople, fileBody, isCode, isShareId, reserveCode, shareId, toTrack, uploadSize,
 } from "../../_lib/booth.js";
 import { LIMITS } from "../../_lib/config.js";
-import { ATTACH_TAGGED_SQL, BOOTH_SESSION_SQL, CONTEST_SET_SQL, IN_BOOTH_SQL, SESSION_EMAILS_SQL, TAG_SQL, TITLE_SQL, cleanTitle, contestClosed, contestView, holidayOn, isEntered, readSong, syncEntry } from "../../_lib/contest.js";
-import { RULES_VERSION, firstOf, groupLabel } from "../../_lib/party.js";
+import { ATTACH_TAGGED_SQL, BOOTH_SESSION_SQL, CONTEST_SET_SQL, GUEST_EMAIL_BY_KEY_SQL, IN_BOOTH_SQL, SESSION_EMAILS_SQL, TAG_SQL, TITLE_SQL, cleanTitle, contestClosed, contestView, holidayOn, isEntered, readSong, syncEntry } from "../../_lib/contest.js";
+import { RULES_VERSION, firstOf, groupLabel, isGuestKey } from "../../_lib/party.js";
 import { HttpError, fail, ipHash, json, readJson, route } from "../../_lib/http.js";
 import { assertUnderLimit, limitStatement, maybePrune } from "../../_lib/ratelimit.js";
 
@@ -149,8 +150,11 @@ async function contestFor(env, code, email, now, song) {
 }
 // This person's own box. Ticking it records that they agreed to the linked rules (and which
 // rules, and when); the song enters the vote by itself the moment everyone on it has. Only a
-// person who signed up at /join can enter (the contest needs a name and a number). Unticking takes
-// the song back out for everyone. Nothing moves after voting ends.
+// person who signed up at /join can enter (the contest needs a name and a number), and only from
+// the device they signed up on: the tick carries that device's guest key, whose email must be the
+// one being ticked, so a friend who knows the code and your email cannot tick your box (403
+// not_your_sign_up). Unticking stays open to anyone on the song (stepping out never needs proof)
+// and takes the song back out for everyone. Nothing moves after voting ends.
 async function contest(context, code) {
   const { request, env } = context;
   if (!holidayOn(env)) partyOff();
@@ -165,6 +169,10 @@ async function contest(context, code) {
   const db = env.DB;
   let song = await readSong(db, code);
   if (body.enter && !song.people.find((p) => p.email === email)?.name) throw new HttpError(409, "not_signed_up", "Sign up at the QR code with this same email first, then tick the box.");
+  if (body.enter) {
+    const own = isGuestKey(body.guest_key) ? await db.prepare(GUEST_EMAIL_BY_KEY_SQL).bind(body.guest_key).first() : null;
+    if (own?.email !== email) throw new HttpError(403, "not_your_sign_up", "Tick your box on the device you signed up on, with the email you signed up with. Each person ticks their own box.");
+  }
   await db.prepare(CONTEST_SET_SQL).bind(trackId, email, body.enter ? 1 : 0, now, body.enter ? RULES_VERSION : null).run();
   song = await readSong(db, code);
   const { entered } = await syncEntry(env, song, now);

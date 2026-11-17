@@ -184,8 +184,9 @@ test("the group song: tagged at upload; two of three ticked is NOT in the vote, 
   const token = await teamToken();
   const jay = await guest("Jay Holly", "jay.h@example.com");
   const code = jay.body.session.code;
-  await guest("Mo Ivy", "mo.i@example.com", { session_code: code });
-  await guest("Kim Fir", "kim.f@example.com", { session_code: code });
+  const mo = await guest("Mo Ivy", "mo.i@example.com", { session_code: code });
+  const kim = await guest("Kim Fir", "kim.f@example.com", { session_code: code });
+  const key = { "jay.h@example.com": jay.body.guest_key, "mo.i@example.com": mo.body.guest_key, "kim.f@example.com": kim.body.guest_key };
   assert.equal((await markBooth(code, token)).status, 200);
   const groups = (await call(booth.onRequest, env, { path: "/api/booth/sessions", params: { path: ["sessions"] } })).body.sessions;
   const g = groups.find((x) => x.names === "Jay, Mo & Kim");
@@ -202,14 +203,24 @@ test("the group song: tagged at upload; two of three ticked is NOT in the vote, 
   assert.ok(!/@/.test(JSON.stringify(view.body.contest.people)), "no email for anyone");
   // The box starts unticked; ticking needs the rules agreement.
   assert.equal((await B(songCode, "contest", { email: "jay.h@example.com", enter: true })).body.error, "agree_required");
-  await B(songCode, "contest", { email: "jay.h@example.com", enter: true, agree: true });
-  const two = await B(songCode, "contest", { email: "mo.i@example.com", enter: true, agree: true });
+  // One phone cannot tick a friend's box: Jay's key with Mo's email, or no key at all, is refused.
+  for (const tick of [{ email: "mo.i@example.com", guest_key: key["jay.h@example.com"] }, { email: "mo.i@example.com" }, { email: "kim.f@example.com", guest_key: "0".repeat(24) }]) {
+    const r = await B(songCode, "contest", { ...tick, enter: true, agree: true });
+    assert.equal(r.status, 403, JSON.stringify(tick));
+    assert.equal(r.body.error, "not_your_sign_up");
+  }
+  assert.deepEqual((await B(songCode, "contest-status", { email: "mo.i@example.com" })).body.contest.people.map((p) => p.in), [false, false, false], "a refused tick changes nobody's box");
+  await B(songCode, "contest", { email: "jay.h@example.com", enter: true, agree: true, guest_key: key["jay.h@example.com"] });
+  const two = await B(songCode, "contest", { email: "mo.i@example.com", enter: true, agree: true, guest_key: key["mo.i@example.com"] });
   assert.equal(two.body.contest.entered, false);
   assert.deepEqual(two.body.contest.waiting_on, ["Kim"]);
   const label = () => env.DB.prepare("SELECT t.label, t.active FROM tracks t JOIN booth_tracks b ON b.vote_track_id = t.id WHERE b.code = ?1").bind(songCode).first();
   assert.equal(await label(), null, "two of three: not in the vote");
   assert.ok(!(await stateNow()).tracks.some((t) => t.label === "Jay, Mo & Kim"));
-  const three = await B(songCode, "contest", { email: "kim.f@example.com", enter: true, agree: true });
+  // Even with two of the three ticked, Jay's phone cannot tick for Kim.
+  assert.equal((await B(songCode, "contest", { email: "kim.f@example.com", enter: true, agree: true, guest_key: key["jay.h@example.com"] })).body.error, "not_your_sign_up");
+  assert.equal(await label(), null, "still out");
+  const three = await B(songCode, "contest", { email: "kim.f@example.com", enter: true, agree: true, guest_key: key["kim.f@example.com"] });
   assert.equal(three.body.contest.entered, true);
   assert.deepEqual(await label(), { label: "Jay, Mo & Kim", active: 1 });
   assert.ok((await stateNow()).tracks.some((t) => t.label === "Jay, Mo & Kim"), "it shows in the vote, with no script run");
@@ -226,7 +237,7 @@ test("the group song: tagged at upload; two of three ticked is NOT in the vote, 
   assert.ok(!(await stateNow()).tracks.some((t) => t.label === "Sleigh Bars"));
   // Back in: the same track, the same slug.
   const slug = (await env.DB.prepare("SELECT t.slug FROM tracks t JOIN booth_tracks b ON b.vote_track_id = t.id WHERE b.code = ?1").bind(songCode).first()).slug;
-  await B(songCode, "contest", { email: "mo.i@example.com", enter: true, agree: true });
+  await B(songCode, "contest", { email: "mo.i@example.com", enter: true, agree: true, guest_key: key["mo.i@example.com"] });
   assert.equal((await env.DB.prepare("SELECT t.slug, t.active FROM tracks t JOIN booth_tracks b ON b.vote_track_id = t.id WHERE b.code = ?1").bind(songCode).first()).slug, slug);
   // Someone not on the song cannot tick or read it.
   assert.equal((await B(songCode, "contest", { email: "stranger@example.com", enter: true, agree: true })).body.error, "not_attached");
@@ -242,13 +253,14 @@ test("the solo walk-up: enters the code, must sign up before the box counts; a s
   assert.equal(entered.body.contest.you.in, false, "the box starts unticked");
   assert.equal(entered.body.contest.you.signed_up, false);
   assert.equal((await B(code, "contest", { email: "walkup@example.com", enter: true, agree: true })).body.error, "not_signed_up");
-  await guest("Walk Up", "walkup@example.com");
-  const ok = await B(code, "contest", { email: "walkup@example.com", enter: true, agree: true });
+  const walk = (await guest("Walk Up", "walkup@example.com")).body.guest_key;
+  assert.equal((await B(code, "contest", { email: "walkup@example.com", enter: true, agree: true })).body.error, "not_your_sign_up", "signed up, but the tick must come from the phone that signed up");
+  const ok = await B(code, "contest", { email: "walkup@example.com", enter: true, agree: true, guest_key: walk });
   assert.equal(ok.body.contest.entered, true, "a solo artist enters with one tick");
   assert.equal((await upload("Other.mp3", { "x-party-session": "999999" })).body.error, "session_not_in_booth");
   const scooter = await upload("Scooter Taylor - Jingle.mp3");
   await B(scooter.body.code, "enter", { email: "walkup@example.com" });
-  const refused = await B(scooter.body.code, "contest", { email: "walkup@example.com", enter: true, agree: true });
+  const refused = await B(scooter.body.code, "contest", { email: "walkup@example.com", enter: true, agree: true, guest_key: walk });
   assert.equal(refused.body.contest.entered, false);
   assert.equal(refused.body.contest.blocked, "scooter_taylor");
   assert.ok(!(await stateNow()).tracks.some((t) => /scooter/i.test(t.label)));
@@ -256,7 +268,7 @@ test("the solo walk-up: enters the code, must sign up before the box counts; a s
   const prodEnv = { ...env, APP_ENV: "production" };
   const test1 = await upload("Test - Jingle.mp3", {}, prodEnv);
   await B(test1.body.code, "enter", { email: "walkup@example.com" }, freshIp(), prodEnv);
-  const t = await B(test1.body.code, "contest", { email: "walkup@example.com", enter: true, agree: true }, freshIp(), prodEnv);
+  const t = await B(test1.body.code, "contest", { email: "walkup@example.com", enter: true, agree: true, guest_key: walk }, freshIp(), prodEnv);
   assert.equal(t.body.contest.entered, false);
   assert.equal(t.body.contest.blocked, "test_file_in_production");
 });
@@ -265,9 +277,44 @@ test("after voting ends nothing moves: the box and the title answer 403 voting_c
   const closedEnv = { ...env, VOTING_ENDS_AT: "2020-06-01T00:00:00Z" };
   const up = await upload("Late.mp3");
   await B(up.body.code, "enter", { email: "late@example.com" });
-  await guest("Late Comer", "late@example.com");
-  assert.equal((await B(up.body.code, "contest", { email: "late@example.com", enter: true, agree: true }, freshIp(), closedEnv)).body.error, "voting_closed");
+  const lateKey = (await guest("Late Comer", "late@example.com")).body.guest_key;
+  assert.equal((await B(up.body.code, "contest", { email: "late@example.com", enter: true, agree: true, guest_key: lateKey }, freshIp(), closedEnv)).body.error, "voting_closed");
   assert.equal((await B(up.body.code, "title", { email: "late@example.com", title: "x" }, freshIp(), closedEnv)).body.error, "voting_closed");
+});
+
+test("the team's safety valve: Take out of the vote from /team holds even if everyone ticks again; Put back re-enters; likes kept; team only", async () => {
+  const token = await teamToken();
+  const up = await upload("Valve Jingle.mp3");
+  const code = up.body.code;
+  await B(code, "enter", { email: "valve@example.com" });
+  const k = (await guest("Val Ve", "valve@example.com")).body.guest_key;
+  assert.equal((await B(code, "contest", { email: "valve@example.com", enter: true, agree: true, guest_key: k })).body.contest.entered, true);
+  const voteId = (await env.DB.prepare("SELECT vote_track_id FROM booth_tracks WHERE code = ?1").bind(code).first()).vote_track_id;
+  const iso = new Date().toISOString();
+  const voter = await env.DB.prepare("INSERT INTO voters (name, email, email_key, city, created_at) VALUES ('Liker', 'liker.valve@example.com', 'liker.valve@example.com', 'Bronx', ?1) RETURNING id").bind(iso).first();
+  await env.DB.prepare("INSERT INTO like_events (track_id, voter_id, action, created_at) VALUES (?1, ?2, 'like', ?3)").bind(voteId, voter.id, iso).run();
+  const likesBefore = 1;
+  const listed = (await get("team/songs", { token })).body.songs.find((s) => s.code === code);
+  assert.deepEqual({ ...listed }, { code, label: "Val", entered: true, pulled: false, pulled_at: null, people: 1, ticked: 1 }, "the team sees the song, in, with counts and no email");
+  assert.equal((await post(`team/songs/${code}/pull`, { pulled: true })).body.error, "team_sign_in", "only the team pulls a song");
+  assert.equal((await post(`team/songs/${code}/pull`, {}, { token })).body.error, "bad_pull");
+  assert.equal((await post("team/songs/9999/pull", { pulled: true }, { token })).status, 404);
+  const pulled = await post(`team/songs/${code}/pull`, { pulled: true }, { token });
+  assert.equal(pulled.status, 200, pulled.text);
+  assert.equal(pulled.body.song.entered, false);
+  assert.equal(pulled.body.song.pulled, true);
+  assert.ok(!(await stateNow()).tracks.some((t) => t.label === "Val"), "out of the vote at once");
+  // Everyone ticking again does not put it back: only the team does.
+  await B(code, "contest", { email: "valve@example.com", enter: false });
+  const again = await B(code, "contest", { email: "valve@example.com", enter: true, agree: true, guest_key: k });
+  assert.equal(again.body.contest.entered, false);
+  assert.equal(again.body.contest.blocked, "pulled_by_team", "the person on the song sees that the team took it out");
+  assert.equal((await env.DB.prepare("SELECT active FROM tracks WHERE id = ?1").bind(voteId).first()).active, 0);
+  const back = await post(`team/songs/${code}/pull`, { pulled: false }, { token });
+  assert.equal(back.body.song.entered, true, "put back: in again, since everyone still has the box ticked");
+  assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM like_events WHERE track_id = ?1").bind(voteId).first()).n, likesBefore, "likes kept");
+  const closedEnv = { ...env, VOTING_ENDS_AT: "2020-06-01T00:00:00Z" };
+  assert.equal((await post(`team/songs/${code}/pull`, { pulled: true }, { token, e: closedEnv })).body.error, "voting_closed");
 });
 
 test("gallery GIFs: the team adds and removes; /api/state carries them while the party is on", async () => {

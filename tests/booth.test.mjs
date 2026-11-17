@@ -484,8 +484,14 @@ test("a booth track is never in the vote: not in /api/state, /api/beats, the tal
     walk(ROOT);
     return found.sort();
   };
-  assert.deepEqual(mentions("booth_tracks"), ["CLAUDE.md", "RUNBOOK.md", "functions/_lib/booth.js", "functions/api/booth/[[path]].js", "migrations/0004_booth_tracks.sql", "migrations/0005_booth_share.sql", "migrations/0006_booth_people.sql", "scripts/booth-log.mjs", "scripts/promote-booth.mjs", "tests/booth.test.mjs"], "booth_tracks is named only by the booth's own code, its three migrations, its two scripts, this test and the two docs");
-  assert.deepEqual(mentions("booth_people"), ["CLAUDE.md", "RUNBOOK.md", "functions/_lib/booth.js", "functions/api/booth/[[path]].js", "migrations/0006_booth_people.sql", "scripts/booth-log.mjs", "scripts/promote-booth.mjs", "tests/booth.test.mjs"], "booth_people (the emails) is read by the booth's routes, its log script and its promotion script only: never /api/state, the tally, the export or /api/beats");
+  // The holiday contest (17 Nov 2026) is the second door from the booth onto the vote: its rules are
+  // functions/_lib/contest.js, its columns migrations/0009_party.sql, its tests tests/party.test.mjs.
+  assert.deepEqual(mentions("booth_tracks"), ["CLAUDE.md", "RUNBOOK.md", "functions/_lib/booth.js", "functions/_lib/contest.js", "functions/api/booth/[[path]].js", "migrations/0004_booth_tracks.sql", "migrations/0005_booth_share.sql", "migrations/0006_booth_people.sql", "migrations/0009_party.sql", "scripts/booth-log.mjs", "scripts/promote-booth.mjs", "tests/booth.test.mjs", "tests/party.test.mjs"], "booth_tracks is named only by the booth's own code, the contest's, their migrations, the two scripts, the tests and the two docs");
+  assert.deepEqual(mentions("booth_people"), ["CLAUDE.md", "RUNBOOK.md", "functions/_lib/booth.js", "functions/_lib/contest.js", "functions/api/booth/[[path]].js", "migrations/0006_booth_people.sql", "migrations/0009_party.sql", "scripts/booth-log.mjs", "scripts/promote-booth.mjs", "tests/booth.test.mjs", "tests/party.test.mjs"], "booth_people (the emails) is read by the booth's routes, the contest, its log script and its promotion script only: never /api/state, the tally, the export or /api/beats");
+  // The contest reads the booth's two tables and the guests' sign-ups, and writes the vote's tracks: nothing else.
+  const contestSql = src("functions/_lib/contest.js");
+  assert.deepEqual([...new Set([...contestSql.matchAll(/(?:FROM|INTO|UPDATE|JOIN) ([a-z_]+)/g)].map((m) => m[1]))].sort(), ["booth_people", "booth_tracks", "party_guests", "party_sessions", "tracks"], "the contest reads booth_tracks, booth_people, party_guests and party_sessions, and writes tracks");
+  assert.ok(!/DELETE FROM/.test(contestSql), "and deletes nothing: a song leaves the vote by active = 0, likes kept");
   assert.ok(!/booth_tracks|booth_people|\/api\/booth|share_id|ASSETS/.test(src("public/js/app.js") + src("public/js/select.js")), "the vote's pages know nothing of the share or the people");
   assert.ok(!/booth_tracks|booth_people|DB\.|MEDIA\.|prepare\(/.test(src("functions/listen/[[path]].js")), "the listen page's function reads no table and no bucket: it serves the page, the page asks the API");
   const boothSql = [src("functions/_lib/booth.js"), src("scripts/booth-log.mjs"), src("functions/api/booth/[[path]].js")].join(" ");
@@ -493,7 +499,8 @@ test("a booth track is never in the vote: not in /api/state, /api/beats, the tal
   assert.deepEqual([...new Set(tables)].sort(), ["booth_people", "booth_tracks"], "the booth reads and writes its two tables only (the counters go through ratelimit.js)");
   assert.deepEqual([...new Set([...src("scripts/promote-booth.mjs").matchAll(/(?:FROM|INTO|UPDATE|JOIN) ([a-z_]+)/g)].map((m) => m[1]))].sort(), ["booth_people", "booth_tracks", "tracks"], "the promotion reads the booth's two tables and writes the vote's tracks");
   assert.ok(!/(?:UPDATE|DELETE FROM|INSERT INTO) booth_/.test(src("scripts/promote-booth.mjs")), "and never changes a booth row");
-  assert.ok(!/config\.js.*VOTING|votingWindow|votingEndsAtMs|END_SETTING/.test(src("functions/api/booth/[[path]].js")), "the booth does not read the voting window");
+  assert.ok(!/config\.js.*VOTING|votingWindow|votingEndsAtMs|END_SETTING/.test(src("functions/api/booth/[[path]].js")), "the booth route does not read the voting window itself");
+  assert.match(src("functions/_lib/contest.js"), /votingPhase\(env, now, start/, "only the contest box does (through contest.js): after voting ends a song neither enters nor leaves");
   const migration = src("migrations/0004_booth_tracks.sql").replace(/--.*$/gm, "");
   assert.match(migration, /CREATE TABLE booth_tracks \(/);
   assert.ok(!/\b(tracks|like_events|voters|comments|beats|settings)\b/.test(migration) && !/ALTER TABLE|DROP /.test(migration), "the migration adds the booth table and touches nothing else");
@@ -510,7 +517,7 @@ test("a booth track is never in the vote: not in /api/state, /api/beats, the tal
     "CREATE UNIQUE INDEX booth_tracks_share_id ON booth_tracks (share_id)",
   ], "exactly these four statements: public off by default for every track, a unique share id, an artwork key");
   const cols = (await env.DB.prepare("PRAGMA table_info(booth_tracks)").all()).results.map((c) => c.name);
-  assert.deepEqual(cols, ["id", "code", "file_name", "content_type", "size", "media_key", "uploaded_at", "opened", "last_opened_at", "public", "share_id", "art_key"]);
+  assert.deepEqual(cols, ["id", "code", "file_name", "content_type", "size", "media_key", "uploaded_at", "opened", "last_opened_at", "public", "share_id", "art_key", "party_session_id", "title", "vote_track_id"], "and the holiday contest's three (migrations/0009_party.sql): the group tagged at upload, the title, the vote track it became");
   // The people's migration (4 Oct 2026): one table hanging off booth_tracks, one index, nothing else.
   const peopleSql = src("migrations/0006_booth_people.sql").replace(/--.*$/gm, "");
   assert.match(peopleSql, /CREATE TABLE booth_people \(/);
@@ -520,7 +527,10 @@ test("a booth track is never in the vote: not in /api/state, /api/beats, the tal
     "CREATE INDEX booth_people_track ON booth_people (track_id)",
   ], "exactly these two statements");
   const peopleCols = (await env.DB.prepare("PRAGMA table_info(booth_people)").all()).results.map((c) => c.name);
-  assert.deepEqual(peopleCols, ["id", "track_id", "email", "attached_at", "vote_opt_in", "opted_at"]);
+  assert.deepEqual(peopleCols, ["id", "track_id", "email", "attached_at", "vote_opt_in", "opted_at", "contest_opt_in", "contest_at", "rules_version"], "and each person's own contest box (migrations/0009_party.sql)");
+  await assert.rejects(env.DB.prepare("INSERT INTO booth_people (track_id, email, attached_at, contest_opt_in) VALUES (1, 'x@y.co', 1, 2)").run(), /CHECK|constraint/i, "contest_opt_in is 0 or 1");
+  const party = src("migrations/0009_party.sql").replace(/--.*$/gm, "");
+  assert.ok(!/DROP |DELETE |UPDATE /.test(party) && [...party.matchAll(/ALTER TABLE (\w+) ADD COLUMN/g)].every((m) => ["booth_tracks", "booth_people"].includes(m[1])), "the party's migration is additive: new tables, new columns on the booth's two, nothing dropped or changed");
   await assert.rejects(env.DB.prepare("INSERT INTO booth_people (track_id, email, attached_at, vote_opt_in) VALUES (1, 'x@y.co', 1, 2)").run(), /CHECK|constraint/i, "vote_opt_in is 0 or 1");
   // The people are never in the vote's data: no vote-side file names them, and the vote's email
   // (voters.email) and the booth's (booth_people.email) are never joined or compared anywhere.
@@ -612,8 +622,8 @@ test("today's log: today's rows only, newest first, well-formed only; sizes, tim
 
 // ── The pages ────────────────────────────────────────────────────────────────────────────────
 test("the copy of each page is one object with exactly these keys, and the page's elements are empty until it is read", () => {
-  assert.deepEqual(Object.keys(BOOTH_COPY), ["headline", "intro", "zone", "zoneHint", "uploading", "doneTitle", "next", "retry", "failed", "notAudio", "tooBig", "empty", "dailyLimit", "rateLimited", "logTitle", "logEmpty", "logFailed", "nobody", "onePerson", "people", "allIn"]);
-  assert.deepEqual(Object.keys(TRACK_COPY), ["headline", "intro", "codeLabel", "emailLabel", "go", "looking", "found", "download", "another", "notFound", "tooMany", "needCode", "needEmail", "badEmail", "notAttached", "you", "audioNone", "audioFailed", "publicLabel", "publicOff", "publicOn", "publicFailed", "publicNote", "share", "shareMessage", "copied", "copyFailed", "addArt", "changeArt", "artWorking", "artUnreadable", "artFailed", "voteLabel", "voteWaiting", "voteAll", "voteOnlyYou", "voteFailed"]);
+  assert.deepEqual(Object.keys(BOOTH_COPY), ["headline", "intro", "zone", "zoneHint", "uploading", "doneTitle", "next", "retry", "failed", "notAudio", "tooBig", "empty", "dailyLimit", "rateLimited", "logTitle", "logEmpty", "logFailed", "nobody", "onePerson", "people", "allIn", "groupsTitle", "groupsNone", "walkUp", "groupsNote", "sessionGone"]);
+  assert.deepEqual(Object.keys(TRACK_COPY), ["headline", "intro", "codeLabel", "emailLabel", "go", "looking", "found", "download", "another", "notFound", "tooMany", "needCode", "needEmail", "badEmail", "notAttached", "you", "audioNone", "audioFailed", "publicLabel", "publicOff", "publicOn", "publicFailed", "publicNote", "share", "shareMessage", "copied", "copyFailed", "addArt", "changeArt", "artWorking", "artUnreadable", "artFailed", "voteLabel", "voteWaiting", "voteAll", "voteOnlyYou", "voteFailed", "contestTitle", "contestHelp", "contestBox", "contestRules", "titleLabel", "titleSave", "titleSaved", "contestEntered", "contestWaiting", "contestNotYet", "contestBlocked", "contestClosed", "contestIn", "contestOut", "contestYou", "contestUnknown", "contestSignUp", "contestFailed"]);
   assert.deepEqual(Object.keys(LISTEN_COPY), ["title", "loading", "line", "private", "instagram", "artAlt", "audioNone", "audioFailed"]);
   for (const copy of [BOOTH_COPY, TRACK_COPY, LISTEN_COPY]) for (const [k, v] of Object.entries(copy)) assert.ok(typeof v === "string" && v.trim(), `${k} is a sentence`);
   // The share's words, as the client asked for them (4 Oct 2026).

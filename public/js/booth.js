@@ -29,9 +29,13 @@ const els = {
   logTitle: $("tbz-log-title"),
   logNote: $("tbz-log-note"),
   logList: $("tbz-log-list"),
+  groups: $("tbz-groups"),
+  groupsTitle: $("tbz-groups-title"),
+  groupsList: $("tbz-groups-list"),
+  groupsNote: $("tbz-groups-note"),
 };
 
-const app = { busy: false, lastFile: null };
+const app = { busy: false, lastFile: null, group: "", groups: [] };
 
 // ── The words (booth-copy.js)
 document.title = `${COPY.headline} | Top Barz`;
@@ -43,6 +47,28 @@ els.doneTitle.textContent = COPY.doneTitle;
 els.next.textContent = COPY.next;
 els.retry.textContent = COPY.retry;
 els.logTitle.textContent = COPY.logTitle;
+els.groupsTitle.textContent = COPY.groupsTitle;
+
+// ── The holiday party: which group is in the booth (the team marks it green on /team). The
+// pick goes with the upload, so the song's people are that group from the start.
+function renderGroups() {
+  const ids = app.groups.map((g) => String(g.id));
+  if (app.group && !ids.includes(app.group)) app.group = "";
+  if (!app.group && app.groups.length === 1) app.group = ids[0];
+  const option = (value, text) => h("label", { class: "check" }, h("input", { type: "radio", name: "tbz-group", value, checked: app.group === value, onchange: () => { app.group = value; } }), h("span", { text }));
+  els.groupsList.replaceChildren(...app.groups.map((g) => option(String(g.id), `${g.names} · ${g.size}`)), option("", COPY.walkUp));
+  els.groupsNote.textContent = app.groups.length ? COPY.groupsNote : `${COPY.groupsNone} ${COPY.groupsNote}`;
+}
+async function loadGroups() {
+  try {
+    const res = await fetch("/api/booth/sessions", { headers: { accept: "application/json" }, credentials: "same-origin" });
+    const data = await res.json();
+    els.groups.hidden = data?.on !== true;
+    if (data?.on !== true) return;
+    app.groups = Array.isArray(data.sessions) ? data.sessions : [];
+    renderGroups();
+  } catch {}
+}
 
 // ── States: ready (the zone), uploading (the bar), done (the code), failed (the line + retry) ──
 function show(state) {
@@ -88,12 +114,14 @@ function upload(file) {
   xhr.setRequestHeader("x-file-name", encodeURIComponent(file.name));
   xhr.setRequestHeader("content-type", file.type || "application/octet-stream");
   xhr.setRequestHeader("accept", "application/json");
+  if (!els.groups.hidden && app.group) xhr.setRequestHeader("x-party-session", app.group);
   xhr.responseType = "json";
   xhr.timeout = 10 * 60 * 1000;
   xhr.upload.addEventListener("progress", (ev) => { if (ev.lengthComputable) setProgress(ev.loaded / ev.total); });
   xhr.addEventListener("load", () => {
     const body = xhr.response && typeof xhr.response === "object" ? xhr.response : {};
     if (xhr.status === 200 && /^\d{4}$/.test(body.code ?? "") && typeof body.file_name === "string") done(body);
+    else if (body.error === "session_not_in_booth") { failed(COPY.sessionGone); loadGroups(); }
     else failed(uploadFailure(COPY, { code: body.error, status: xhr.status, message: body.message }));
   });
   xhr.addEventListener("error", () => failed(uploadFailure(COPY, {})));
@@ -144,7 +172,9 @@ async function loadLog() {
     els.logNote.hidden = false;
   }
 }
-document.addEventListener("visibilitychange", () => { if (!document.hidden) loadLog(); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { loadLog(); loadGroups(); } });
 
 show("ready");
 loadLog();
+loadGroups();
+setInterval(() => { if (!document.hidden && !app.busy) loadGroups(); }, 10000);

@@ -1,7 +1,7 @@
 // The photo slider: a strip that swipes on a phone, with arrows and arrow keys on a desktop.
 // Thumbnails load lazily; a tap opens the full-size photo. With no photos the section is hidden.
 import { $, closeModal, h, reducedMotion, showModal } from "./dom.js";
-import { safeMediaUrl, stripTarget } from "./logic.js";
+import { safeGifUrl, safeMediaUrl, stripTarget } from "./logic.js";
 
 export function createGallery() {
   const section = $("tbz-gallery");
@@ -12,6 +12,7 @@ export function createGallery() {
   const boxImg = $("tbz-lb-img");
   const boxCap = $("tbz-lb-cap");
   const nav = $("tbz-lb-nav");
+  const by = $("tbz-gallery-by");
   let photos = [];
   let signature = null;
   let index = 0;
@@ -111,14 +112,21 @@ export function createGallery() {
 
   return {
     // Called with the manifest from every /api/state. Rebuilds only when the manifest changed.
-    update(manifest) {
-      const list = (Array.isArray(manifest) ? manifest : [])
+    // The holiday party (17 Nov 2026): until there are event photos, the GIFs the team picked
+    // show in their place (Giphy's own images, with "Powered by GIPHY" as its terms ask).
+    update(manifest, gifs = []) {
+      const photoList = (Array.isArray(manifest) ? manifest : [])
         .map((p, i) => ({
           url: safeMediaUrl(p?.url), thumb_url: safeMediaUrl(p?.thumb_url),
           width: Number(p?.thumb_width) || null, height: Number(p?.thumb_height) || null,
           alt: typeof p?.alt === "string" && p.alt.trim() ? p.alt.trim() : `Top Barz at CultureCon, photo ${i + 1}`,
         }))
         .filter((p) => p.url && p.thumb_url);
+      const gifList = photoList.length ? [] : (Array.isArray(gifs) ? gifs : [])
+        .map((g) => ({ url: safeGifUrl(g?.url), thumb_url: safeGifUrl(g?.url), width: Number(g?.width) || null, height: Number(g?.height) || null, alt: typeof g?.title === "string" && g.title.trim() ? g.title.trim().slice(0, 120) : "Holiday GIF" }))
+        .filter((p) => p.url);
+      const list = photoList.length ? photoList : gifList;
+      by.hidden = gifList.length === 0;
       const sig = list.map((p) => p.thumb_url).join("|");
       if (sig === signature) return;
       signature = sig;

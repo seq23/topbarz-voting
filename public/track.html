@@ -18,6 +18,9 @@
 <link rel="modulepreload" href="/js/player.js">
 <link rel="modulepreload" href="/js/booth-rules.js">
 <link rel="modulepreload" href="/js/track-copy.js">
+<link rel="modulepreload" href="/js/festive.js">
+<link rel="modulepreload" href="/js/party-copy.js">
+<link rel="modulepreload" href="/js/party-rules.js">
 <script type="module" src="/js/track.js"></script>
 </head>
 <body>
@@ -69,6 +72,19 @@
       <button type="button" id="tbz-vote" class="switch" role="switch" aria-checked="false" aria-labelledby="tbz-vote-label"><span class="switch-knob" aria-hidden="true"></span></button>
     </div>
     <p id="tbz-vote-note" class="switch-note" role="status"></p>
+    <section id="tbz-contest" class="contest" aria-labelledby="tbz-contest-title" hidden>
+      <h3 id="tbz-contest-title" class="done-title"></h3>
+      <form id="tbz-title-form" class="code-form" novalidate>
+        <div class="field"><label for="tbz-title" id="tbz-title-label"></label><input id="tbz-title" type="text" autocomplete="off" maxlength="60" aria-describedby="tbz-title-msg"></div>
+        <button type="submit" id="tbz-title-save" class="btn btn-small btn-ghost"></button>
+      </form>
+      <p id="tbz-title-msg" class="switch-note" role="status" hidden></p>
+      <p id="tbz-contest-help" class="switch-note"></p>
+      <div class="check contest-check"><input type="checkbox" id="tbz-contest-box"><label for="tbz-contest-box" id="tbz-contest-label"></label></div>
+      <p id="tbz-contest-line" class="contest-line" role="status"></p>
+      <ul id="tbz-contest-people" class="contest-people"></ul>
+      <p id="tbz-contest-msg" class="field-error" role="alert" hidden></p>
+    </section>
     <div class="found-actions">
       <a id="tbz-download" class="btn" download></a>
       <button type="button" id="tbz-share" class="btn" hidden></button>

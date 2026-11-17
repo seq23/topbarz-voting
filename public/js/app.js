@@ -3,6 +3,7 @@
 import { api, forgetVoter, keepOwn, loadOwn, loadVoter, OWN_KEY, ownCounts, saveVoter, VOTER_KEY } from "./api.js";
 import { createThread } from "./comments.js";
 import { $, h, icon, reducedMotion } from "./dom.js";
+import { festive } from "./festive.js";
 import { createGallery } from "./gallery.js";
 import { createGate } from "./gate.js";
 import {
@@ -550,6 +551,7 @@ function votingClosedByServer() {
 
 // ── /api/state
 const gallery = createGallery();
+festive();
 
 function applyState(state, generatedAt) {
   app.loaded = true;
@@ -567,7 +569,7 @@ function applyState(state, generatedAt) {
     app.notOpen = notOpen;
     for (const card of app.cards.values()) { card.renderLike(); card.renderCounts(); }
   }
-  gallery.update(state.photos);
+  gallery.update(state.photos, state.gifs);
   renderTracks(Array.isArray(state.tracks) ? state.tracks : [], generatedAt);
   renderWindow();
   applyDeepLink();

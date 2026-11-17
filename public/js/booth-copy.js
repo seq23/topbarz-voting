@@ -23,4 +23,11 @@ export const COPY = {
   onePerson: "1 person",
   people: "{n} people",
   allIn: "all in",
+  // The holiday party (17 Nov 2026): the group in the booth, picked before the upload, so the
+  // song knows its people. Shown only while the party is on.
+  groupsTitle: "Who is in the booth?",
+  groupsNone: "Nobody is marked in the booth on the team page yet. Ask the team to tap In the booth, or upload as a walk-up.",
+  walkUp: "No group (a walk-up)",
+  groupsNote: "Upload an MP3 export if you can: it plays fast on phones on the bar's Wi-Fi.",
+  sessionGone: "That group is not marked in the booth any more. Pick the group again.",
 };

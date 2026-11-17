@@ -33,6 +33,14 @@ export const LIMITS = {
   entryUploadsPerIp: { window: 3600, max: 10 },
   entryUploadsPerDay: { window: 86400, max: 300 },
   entriesPerIp: { window: 3600, max: 10 },
+  // The holiday party (17 Nov 2026). A bar's Wi-Fi is one address for every guest, so the
+  // per-connection limits are wide; each guest's own actions are capped by their email or key.
+  boothStatusPerMinute: { window: 60, max: 300 },
+  partyJoinsPerIp: { window: 3600, max: 150 },
+  partyReadsPerIp: { window: 60, max: 600 },
+  teamCodesPerIp: { window: 3600, max: 20 },
+  teamVerifyPerIp: { window: 600, max: 40 },
+  teamPerMember: { window: 60, max: 240 },
 };
 export const COMMENT_MAX_CHARS = 500;
 export const NAME_MAX_CHARS = 80;

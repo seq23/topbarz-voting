@@ -6,6 +6,12 @@
 //   POST /api/booth/tracks/<code>/vote    { email, opt_in: true|false } → { code, you, people, opted, everyone_in }   this person's own consent to the public vote
 //   POST /api/booth/tracks/<code>/public  { email, public: true|false } → { code, public, share_id }   the share switch (4 Oct 2026)
 //   POST /api/booth/tracks/<code>/art     the artwork, raw (image/jpeg or image/png, ≤ 2 MB, checked by its first bytes), header x-email → { code, art_url }
+//   The holiday contest (17 Nov 2026; only while HOLIDAY_EVENT is on, else 404 party_off):
+//   GET  /api/booth/sessions              the groups the team marked "in the booth" → { sessions: [{ id, names, size }] } (first names)
+//   POST /api/booth/tracks  + x-party-session: <id>   tags the upload with that group: its people are attached at once
+//   POST /api/booth/tracks/<code>/contest        { email, enter: true|false, agree: true } → this person's own box; the song enters the vote by itself when everyone is in
+//   POST /api/booth/tracks/<code>/contest-status { email } → the same view, for the page's 5 s refresh
+//   POST /api/booth/tracks/<code>/title          { email, title } → the song's title (its name in the vote)
 //   GET  /api/booth/listen/<share_id>     the listen page's read → { file_name, audio_url, art_url }; 404 private | not_found (the same status for both)
 // Open routes (no passphrase, no token), kept safe by what they accept: audio only (the extension
 // AND the declared type), a required content-length of 1 byte to 100 MB, 60 uploads an hour per
@@ -21,6 +27,8 @@ import {
   ACCESS_SQL, ART_SQL, ATTACH_SQL, BOOTH_DAY_KEY, DROP_SQL, LISTEN_SQL, LOG_SQL, OPEN_SQL, PEOPLE_SQL, PUBLIC_SQL, VOTE_SQL, allIn, artKey, artMagic, artSize, artType, artUrl, audioExtension, audioType, cleanEmail, cleanFileName, countPeople, fileBody, isCode, isShareId, reserveCode, shareId, toTrack, uploadSize,
 } from "../../_lib/booth.js";
 import { LIMITS } from "../../_lib/config.js";
+import { ATTACH_TAGGED_SQL, BOOTH_SESSION_SQL, CONTEST_SET_SQL, IN_BOOTH_SQL, SESSION_EMAILS_SQL, TAG_SQL, TITLE_SQL, cleanTitle, contestClosed, contestView, holidayOn, isEntered, readSong, syncEntry } from "../../_lib/contest.js";
+import { RULES_VERSION, firstOf, groupLabel } from "../../_lib/party.js";
 import { HttpError, fail, ipHash, json, readJson, route } from "../../_lib/http.js";
 import { assertUnderLimit, limitStatement, maybePrune } from "../../_lib/ratelimit.js";
 
@@ -49,6 +57,14 @@ async function upload(context) {
     throw new HttpError(429, "daily_limit", "The booth has reached its upload limit for today.", { retry_after_seconds: LIMITS.boothUploadsPerDay.window });
   }
 
+  // The group in the booth, when the engineer picked one (holiday party only): checked before the
+  // file is taken, so a stale pick is refused, never silently dropped.
+  const tag = request.headers.get("x-party-session");
+  let sessionId = null;
+  if (tag && holidayOn(env)) {
+    sessionId = /^[1-9][0-9]{0,9}$/.test(tag) ? (await db.prepare(BOOTH_SESSION_SQL).bind(Number(tag)).first())?.id ?? null : null;
+    if (!sessionId) throw new HttpError(409, "session_not_in_booth", "That group is not marked in the booth any more. Pick the group again.");
+  }
   const reserved = await reserveCode(db, { fileName, contentType, size, ext, uploadedAt: now });
   if (!reserved) throw new HttpError(503, "no_code_free", "No code is free right now. Try again in a moment.");
   try {
@@ -58,8 +74,12 @@ async function upload(context) {
     await db.prepare(DROP_SQL).bind(reserved.id).run().catch(() => {});
     throw err;
   }
+  if (sessionId) {
+    const emails = (await db.prepare(SESSION_EMAILS_SQL).bind(sessionId).all()).results ?? [];
+    await db.batch([db.prepare(TAG_SQL).bind(reserved.id, sessionId), ...emails.map((r) => db.prepare(ATTACH_TAGGED_SQL).bind(reserved.id, r.email, now))]);
+  }
   maybePrune(context);
-  return json({ code: reserved.code, file_name: fileName, uploaded_at: new Date(now).toISOString() });
+  return json({ code: reserved.code, file_name: fileName, uploaded_at: new Date(now).toISOString(), ...(sessionId ? { tagged: true } : {}) });
 }
 
 async function log(context) {
@@ -118,7 +138,79 @@ async function enter(context, code) {
     db.prepare(PEOPLE_SQL).bind(row.id),
   ]);
   maybePrune(context);
-  return json({ ...toTrack(row), ...youAnd(people.results ?? [], email) });
+  return json({ ...toTrack(row), ...youAnd(people.results ?? [], email), ...(holidayOn(env) ? { contest: await contestFor(env, code, email, now) } : {}) });
+}
+
+// ── The holiday contest ────────────────────────────────────────────────────────────────────────
+const partyOff = () => { throw new HttpError(404, "party_off", "Nothing on right now."); };
+async function contestFor(env, code, email, now, song) {
+  const s = song ?? await readSong(env.DB, code);
+  return contestView(s, email, { entered: await isEntered(env.DB, s.track), closed: await contestClosed(env, now), production: env.APP_ENV === "production" });
+}
+// This person's own box. Ticking it records that they agreed to the linked rules (and which
+// rules, and when); the song enters the vote by itself the moment everyone on it has. Only a
+// person who signed up at /join can enter (the contest needs a name and a number). Unticking takes
+// the song back out for everyone. Nothing moves after voting ends.
+async function contest(context, code) {
+  const { request, env } = context;
+  if (!holidayOn(env)) partyOff();
+  const body = await readJson(request);
+  if (typeof body.enter !== "boolean") throw new HttpError(400, "bad_enter", "Send { enter: true } or { enter: false }.");
+  if (body.enter && body.agree !== true) throw new HttpError(400, "agree_required", "Tick the box to agree to the official rules.");
+  const now = Date.now();
+  const ip = await ipHash(request, env);
+  await underEditLimit(context, ip, now);
+  const { track_id: trackId, email } = await access(context, ip, now, code, body.email);
+  if (await contestClosed(env, now)) throw new HttpError(403, "voting_closed", "Voting has closed, so songs can no longer go in or come out.");
+  const db = env.DB;
+  let song = await readSong(db, code);
+  if (body.enter && !song.people.find((p) => p.email === email)?.name) throw new HttpError(409, "not_signed_up", "Sign up at the QR code with this same email first, then tick the box.");
+  await db.prepare(CONTEST_SET_SQL).bind(trackId, email, body.enter ? 1 : 0, now, body.enter ? RULES_VERSION : null).run();
+  song = await readSong(db, code);
+  const { entered } = await syncEntry(env, song, now);
+  maybePrune(context);
+  return json({ code, contest: contestView(song, email, { entered, closed: false, production: env.APP_ENV === "production" }) });
+}
+// The same view, read again: the page refreshes it every 5 s so everyone on the song sees the
+// same names, ticks and status. Its own limit (a bar's Wi-Fi is one address for everyone).
+async function contestStatus(context, code) {
+  const { request, env } = context;
+  if (!holidayOn(env)) partyOff();
+  const body = await readJson(request);
+  const now = Date.now();
+  const ip = await ipHash(request, env);
+  assertUnderLimit(await limitStatement(env.DB, `booth:status:ip:${ip}`, LIMITS.boothStatusPerMinute, now).all(), LIMITS.boothStatusPerMinute, "requests");
+  await access(context, ip, now, code, body.email);
+  return json({ code, contest: await contestFor(env, code, cleanEmail(body.email), now) });
+}
+// The song's title, set by anyone on it: it is the song's name in the vote (and follows it there).
+async function setTitle(context, code) {
+  const { request, env } = context;
+  if (!holidayOn(env)) partyOff();
+  const body = await readJson(request);
+  const title = cleanTitle(body.title);
+  if (title === null) throw new HttpError(400, "bad_title", "Send { title: \"…\" }.");
+  const now = Date.now();
+  const ip = await ipHash(request, env);
+  await underEditLimit(context, ip, now);
+  const { track_id: trackId, email } = await access(context, ip, now, code, body.email);
+  if (await contestClosed(env, now)) throw new HttpError(403, "voting_closed", "Voting has closed, so the title is final.");
+  await env.DB.prepare(TITLE_SQL).bind(trackId, title || null).run();
+  const song = await readSong(env.DB, code);
+  const { entered } = await syncEntry(env, song, now);
+  return json({ code, title, contest: contestView(song, email, { entered, closed: false, production: env.APP_ENV === "production" }) });
+}
+// The groups the team marked green, for the engineer to tag the upload: first names only.
+async function inBooth(context) {
+  const { request, env } = context;
+  if (!holidayOn(env)) return json({ on: false, sessions: [] });
+  const ip = await ipHash(request, env);
+  const db = env.DB;
+  const [limit, rows] = await db.batch([limitStatement(db, `booth:log:ip:${ip}`, LIMITS.boothLogPerIp), db.prepare(IN_BOOTH_SQL)]);
+  assertUnderLimit(limit, LIMITS.boothLogPerIp, "requests");
+  const groups = new Map();
+  for (const r of rows.results ?? []) { if (!groups.has(r.id)) groups.set(r.id, []); groups.get(r.id).push(firstOf(r.name)); }
+  return json({ on: true, sessions: [...groups].map(([id, names]) => ({ id, names: groupLabel(names), size: names.length })) });
 }
 // This person's own state and the counts: { you: { email, vote_opt_in }, people, opted, everyone_in }.
 function youAnd(rows, email) {
@@ -223,6 +315,7 @@ export const onRequest = route({
     const parts = segments(context.params);
     if (parts.length === 1 && parts[0] === "tracks") return log(context);
     if (parts.length === 2 && parts[0] === "listen") return listen(context, parts[1]);
+    if (parts.length === 1 && parts[0] === "sessions") return inBooth(context);
     // GET /api/booth/tracks/<code> was the lookup until 4 Oct 2026: there is no track without an email now.
     return fail(404, "not_found", "No such API route.");
   },
@@ -233,6 +326,9 @@ export const onRequest = route({
     if (parts.length === 3 && parts[0] === "tracks" && parts[2] === "vote") return vote(context, parts[1]);
     if (parts.length === 3 && parts[0] === "tracks" && parts[2] === "public") return setPublic(context, parts[1]);
     if (parts.length === 3 && parts[0] === "tracks" && parts[2] === "art") return setArt(context, parts[1]);
+    if (parts.length === 3 && parts[0] === "tracks" && parts[2] === "contest") return contest(context, parts[1]);
+    if (parts.length === 3 && parts[0] === "tracks" && parts[2] === "contest-status") return contestStatus(context, parts[1]);
+    if (parts.length === 3 && parts[0] === "tracks" && parts[2] === "title") return setTitle(context, parts[1]);
     return fail(404, "not_found", "No such API route.");
   },
 });

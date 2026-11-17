@@ -1,0 +1,243 @@
+// The holiday party (Scooter, 17 Nov 2026): the QR sign-up, the booth sessions, the team's line.
+// Every route answers 404 party_off while HOLIDAY_EVENT is not "on" (production, until go-live),
+// except GET /api/party, which says whether it is on.
+//
+// Guests (open routes, kept safe by what they answer: first names and places, never a phone or an email):
+//   GET  /api/party                  → { on }
+//   POST /api/party/join             { name, phone, email, city, instagram?, session_code?, website } → 201 { guest_key, you, session }
+//   POST /api/party/me               { guest_key } → { you, session }   the guest's own page refreshes this
+//   POST /api/party/move             { guest_key, session_code | null } → { you, session }   join another group, or start your own
+// The team (a team token from the emailed code; functions/_lib/team.js):
+//   POST /api/party/team/code        { email } → { sent, email, resend_in_seconds }   only an email on the team list
+//   POST /api/party/team/verify      { email, code } → { token, member: { email } }
+//   GET  /api/party/team/line        → { now, sessions: [{ id, code, status, place, …, guests: [{ name, phone, email, city, instagram, joined_at }] }] }
+//   POST /api/party/team/sessions/<id>/status  { status, from } → { session }   waiting | booth (green) | out (red); undo is the same call back
+//   POST /api/party/team/sessions/<id>/texted  → { texted_at }
+//   GET  /api/party/team/members     → { members: [{ id, email, you }] };  POST { email } adds;  POST …/members/<id>/remove
+//   GET  /api/party/team/gifs        → { gifs };  POST { id, url, width, height, title } adds;  POST …/gifs/<giphy id>/remove
+import { cleanEmail } from "../../_lib/booth.js";
+import { LIMITS, VERIFICATION, verificationStatus } from "../../_lib/config.js";
+import { HttpError, fail, ipHash, json, readJson, route } from "../../_lib/http.js";
+import {
+  ADD_GIF_SQL, GIFS_SQL, GUEST_BY_EMAIL_SQL, GUEST_BY_KEY_SQL, INSERT_GUEST_SQL, LINE_GUESTS_SQL, LINE_SESSIONS_SQL, MOVE_GUEST_SQL, NEW_SESSION_SQL, REMOVE_GIF_SQL, SESSION_BY_CODE_SQL, SESSION_CODE_TRIES, SESSION_NAMES_SQL, SET_STATUS_SQL, STATUS_EVENT_SQL, TEXTED_SQL,
+  firstOf, guestKey, holidayOn, isGuestKey, isSessionCode, lineOrder, parsePartyGif, parseSignUp, parseStatusChange, randomSessionCode, sessionCodeFrom, toGif,
+} from "../../_lib/party.js";
+import { assertUnderLimit, limitStatement, maybePrune } from "../../_lib/ratelimit.js";
+import { MEMBER_BY_EMAIL_SQL, STORE_TEAM_CODE_SQL, newCode, releaseTeamSlot, requireMember, signTeamToken, takeTeamSlot, teamCodeEmail, teamCodeHmac, teamCodeMatches } from "../../_lib/team.js";
+import { sendMail } from "../../_lib/verify.js";
+
+const segments = (params) => (Array.isArray(params?.path) ? params.path : [params?.path]).filter((s) => typeof s === "string" && s !== "");
+const off = () => { throw new HttpError(404, "party_off", "Nothing on right now."); };
+const limited = async (db, key, limit, what) => assertUnderLimit(await limitStatement(db, key, limit).all(), limit, what);
+
+// ── Guests ─────────────────────────────────────────────────────────────────────────────────────
+// A new session with a fresh 4-letter code (the UNIQUE constraint settles a collision; retried).
+async function newSession(db, now) {
+  for (let i = 0; i < SESSION_CODE_TRIES; i++) {
+    const row = await db.prepare(NEW_SESSION_SQL).bind(randomSessionCode(), now).first();
+    if (row) return row;
+  }
+  throw new HttpError(503, "no_code_free", "No group code is free right now. Try again in a moment.");
+}
+// The session a code names, for joining: unknown → 404; already out of the booth → 409.
+async function joinable(db, rawCode) {
+  const code = sessionCodeFrom(rawCode);
+  const row = isSessionCode(code) ? await db.prepare(SESSION_BY_CODE_SQL).bind(code).first() : null;
+  if (!row) throw new HttpError(404, "no_session", "No group with that code. Check the 4 letters with your friend.", { field: "session_code" });
+  if (row.status === "out") throw new HttpError(409, "session_done", "That group has already been in the booth. Leave the code empty to get your own place in line.", { field: "session_code" });
+  return row;
+}
+// What a guest sees of themselves and their group: first names, the code to share, the place.
+async function guestView(db, guest) {
+  const [names, sessions, guests] = await db.batch([db.prepare(SESSION_NAMES_SQL).bind(guest.session_id), db.prepare(LINE_SESSIONS_SQL), db.prepare("SELECT session_id FROM party_guests")]);
+  const bySession = new Map();
+  for (const g of guests.results ?? []) bySession.set(g.session_id, [...(bySession.get(g.session_id) ?? []), g]);
+  const line = lineOrder((sessions.results ?? []).map((s) => ({ ...s, guests: bySession.get(s.id) ?? [] })));
+  const mine = line.find((s) => s.id === guest.session_id);
+  return {
+    you: { first_name: firstOf(guest.name) },
+    session: { code: mine?.code ?? guest.code, status: mine?.status ?? guest.status, place: mine?.place ?? null, names: (names.results ?? []).map((r) => firstOf(r.name)), size: (names.results ?? []).length },
+  };
+}
+
+async function join(context) {
+  const { request, env } = context;
+  const parsed = parseSignUp(await readJson(request));
+  if (!parsed.ok) throw new HttpError(400, parsed.error, parsed.message, { field: parsed.field });
+  const v = parsed.value;
+  const db = env.DB;
+  const now = Date.now();
+  const ip = await ipHash(request, env);
+  await limited(db, `party:join:ip:${ip}`, LIMITS.partyJoinsPerIp, "sign-ups");
+  if (await db.prepare(GUEST_BY_EMAIL_SQL).bind(v.email).first()) {
+    throw new HttpError(409, "already_signed_up", "You're already in line with this email. Use the phone you signed up on, or ask the team at the booth.", { field: "email" });
+  }
+  const session = v.session_code ? await joinable(db, v.session_code) : await newSession(db, now);
+  const key = guestKey();
+  await db.prepare(INSERT_GUEST_SQL).bind(session.id, v.name, v.phone, v.email, v.city, v.instagram, key, now, ip).run();
+  maybePrune(context);
+  return json({ guest_key: key, ...(await guestView(db, { name: v.name, session_id: session.id, code: session.code, status: session.status })) }, 201);
+}
+async function guestFrom(context, rawKey) {
+  const { request, env } = context;
+  await limited(env.DB, `party:read:ip:${await ipHash(request, env)}`, LIMITS.partyReadsPerIp, "requests");
+  const guest = isGuestKey(rawKey) ? await env.DB.prepare(GUEST_BY_KEY_SQL).bind(rawKey).first() : null;
+  if (!guest) throw new HttpError(404, "no_guest", "We could not find your sign-up on this phone. Sign up again.");
+  return guest;
+}
+async function me(context) {
+  const body = await readJson(context.request);
+  return json(await guestView(context.env.DB, await guestFrom(context, body.guest_key)));
+}
+// Join another group (its code), or leave the group for a place of your own (session_code null).
+// Only from the phone that signed up (its key), and only while the guest has not been in the booth.
+async function move(context) {
+  const body = await readJson(context.request);
+  const db = context.env.DB;
+  const guest = await guestFrom(context, body.guest_key);
+  if (guest.status !== "waiting") throw new HttpError(409, "not_waiting", "Your group is already at the booth, so it cannot change now. Ask the team.");
+  const target = body.session_code ? await joinable(db, body.session_code) : await newSession(db, Date.now());
+  if (target.id !== guest.session_id) await db.prepare(MOVE_GUEST_SQL).bind(guest.id, target.id).run();
+  return json(await guestView(db, { ...guest, session_id: target.id, code: target.code, status: target.status }));
+}
+
+// ── The team's sign-in ───────────────────────────────────────────────────────────────────────
+async function teamCode(context) {
+  const { request, env } = context;
+  const body = await readJson(request);
+  const email = cleanEmail(body.email);
+  if (!email) throw new HttpError(400, "bad_email", "Enter your email.", { field: "email" });
+  const db = env.DB;
+  const nowS = Math.floor(Date.now() / 1000);
+  await limited(db, `team:code:ip:${await ipHash(request, env)}`, LIMITS.teamCodesPerIp, "codes");
+  const member = await db.prepare(MEMBER_BY_EMAIL_SQL).bind(email).first();
+  if (!member) throw new HttpError(403, "not_team", "That email is not on the team list. Ask a team member to add you.", { field: "email" });
+  if (!verificationStatus(env).available) throw new HttpError(503, "code_unavailable", "We could not send your code right now. Try again in a little while.");
+  const slot = await takeTeamSlot(env, member.id, nowS);
+  if (slot.refused === "cooldown") return json({ sent: false, email, resend_in_seconds: slot.wait });
+  if (slot.refused === "hourly") throw new HttpError(429, "code_limit", "That is 3 codes this hour. Use the last one, or try again later.", { retry_after_seconds: slot.wait });
+  if (slot.refused) throw new HttpError(503, "code_unavailable", "We could not send your code right now. Try again in a little while.");
+  const code = newCode();
+  await db.prepare(STORE_TEAM_CODE_SQL).bind(member.id, await teamCodeHmac(env, member.id, code), nowS + VERIFICATION.codeTtl).run();
+  const sent = await sendMail(env, email, teamCodeEmail(code));
+  if (!sent.ok) {
+    if (sent.sent === "no") await releaseTeamSlot(db, slot.slot);
+    throw new HttpError(503, "code_unavailable", "We could not send your code right now. Try again in a little while.");
+  }
+  return json({ sent: true, email, resend_in_seconds: VERIFICATION.resendCooldown, expires_in_seconds: VERIFICATION.codeTtl });
+}
+async function teamVerify(context) {
+  const { request, env } = context;
+  const body = await readJson(request);
+  const email = cleanEmail(body.email);
+  const code = String(body.code ?? "").replace(/[\s-]/g, "");
+  if (!email || !/^\d{6}$/.test(code)) throw new HttpError(400, "invalid_code", "Enter the 6 digits from the email.");
+  const db = env.DB;
+  const nowS = Math.floor(Date.now() / 1000);
+  await limited(db, `team:verify:ip:${await ipHash(request, env)}`, LIMITS.teamVerifyPerIp, "tries");
+  const member = await db.prepare(MEMBER_BY_EMAIL_SQL).bind(email).first();
+  const stored = member ? await db.prepare("UPDATE team_codes SET attempts = attempts + 1 WHERE member_id = ?1 RETURNING code_hmac, expires_at, attempts").bind(member.id).first() : null;
+  if (!stored || stored.expires_at <= nowS) throw new HttpError(410, "code_expired", "That code has run out. Send a new one.");
+  if (stored.attempts > VERIFICATION.maxTries) throw new HttpError(410, "code_exhausted", "Too many wrong tries for that code. Send a new one.");
+  if (!(await teamCodeMatches(env, member.id, code, stored.code_hmac))) throw new HttpError(400, "wrong_code", `That code is not right. ${VERIFICATION.maxTries - stored.attempts} tries left.`, { tries_left: VERIFICATION.maxTries - stored.attempts });
+  await db.prepare("DELETE FROM team_codes WHERE member_id = ?1").bind(member.id).run();
+  return json({ token: await signTeamToken(env, member.id, nowS), member: { email: member.email } });
+}
+
+// ── The team's line ──────────────────────────────────────────────────────────────────────────
+async function member(context) {
+  const m = await requireMember(context.request, context.env);
+  await limited(context.env.DB, `team:member:${m.id}`, LIMITS.teamPerMember, "requests");
+  return m;
+}
+async function line(context) {
+  const db = context.env.DB;
+  const [sessions, guests] = await db.batch([db.prepare(LINE_SESSIONS_SQL), db.prepare(LINE_GUESTS_SQL)]);
+  const bySession = new Map();
+  for (const g of guests.results ?? []) bySession.set(g.session_id, [...(bySession.get(g.session_id) ?? []), { id: g.id, name: g.name, first_name: firstOf(g.name), phone: g.phone, email: g.email, city: g.city, instagram: g.instagram, joined_at: new Date(g.joined_at).toISOString() }]);
+  const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
+  return json({
+    now: new Date().toISOString(),
+    sessions: lineOrder((sessions.results ?? []).map((s) => ({ ...s, guests: bySession.get(s.id) ?? [] }))).map((s) => ({ id: s.id, code: s.code, status: s.status, place: s.place, created_at: iso(s.created_at), status_at: iso(s.status_at), texted_at: iso(s.texted_at), guests: s.guests })),
+  });
+}
+async function setStatus(context, id, m) {
+  const parsed = parseStatusChange(await readJson(context.request));
+  if (!parsed.ok) throw new HttpError(400, parsed.error, parsed.message);
+  const db = context.env.DB;
+  const now = Date.now();
+  const row = await db.prepare(SET_STATUS_SQL).bind(id, parsed.value.status, parsed.value.from, now).first();
+  if (!row) {
+    const current = await db.prepare("SELECT status FROM party_sessions WHERE id = ?1").bind(id).first();
+    if (!current) throw new HttpError(404, "no_session", "That group is not in the line.");
+    throw new HttpError(409, "changed", "Someone else changed this group a moment ago. The line has been refreshed.", { status: current.status });
+  }
+  await db.prepare(STATUS_EVENT_SQL).bind(id, parsed.value.from, parsed.value.status, m.id, now).run();
+  return json({ session: { id, status: row.status, status_at: new Date(row.status_at).toISOString() } });
+}
+async function texted(context, id) {
+  const row = await context.env.DB.prepare(TEXTED_SQL).bind(id, Date.now()).first();
+  if (!row) throw new HttpError(404, "no_session", "That group is not in the line.");
+  return json({ texted_at: new Date(row.texted_at).toISOString() });
+}
+async function members(context, m) {
+  const rows = (await context.env.DB.prepare("SELECT id, email, added_at FROM team_members WHERE removed_at IS NULL ORDER BY added_at, id").all()).results ?? [];
+  return json({ members: rows.map((r) => ({ id: r.id, email: r.email, you: r.id === m.id })) });
+}
+async function addMember(context, m) {
+  const email = cleanEmail((await readJson(context.request)).email);
+  if (!email) throw new HttpError(400, "bad_email", "Enter an email address that works.");
+  await context.env.DB.prepare("INSERT INTO team_members (email, added_at, added_by) VALUES (?1, ?2, ?3) ON CONFLICT (email) DO UPDATE SET removed_at = NULL").bind(email, Date.now(), m.id).run();
+  return members(context, m);
+}
+async function removeMember(context, id, m) {
+  if (id === m.id) throw new HttpError(409, "not_yourself", "You cannot take yourself off the team. Ask another team member.");
+  await context.env.DB.prepare("UPDATE team_members SET removed_at = ?2 WHERE id = ?1 AND removed_at IS NULL").bind(id, Date.now()).run();
+  return members(context, m);
+}
+const gifs = async (context) => json({ gifs: ((await context.env.DB.prepare(GIFS_SQL).all()).results ?? []).map(toGif) });
+async function addGif(context) {
+  const parsed = parsePartyGif(await readJson(context.request));
+  if (!parsed.ok) throw new HttpError(400, parsed.error, parsed.message);
+  const g = parsed.value;
+  await context.env.DB.prepare(ADD_GIF_SQL).bind(g.id, g.url, g.width, g.height, g.title, Date.now()).run();
+  return gifs(context);
+}
+async function removeGif(context, id) {
+  await context.env.DB.prepare(REMOVE_GIF_SQL).bind(id, Date.now()).run();
+  return gifs(context);
+}
+
+const idOf = (s) => (/^[1-9][0-9]{0,9}$/.test(s ?? "") ? Number(s) : null);
+export const onRequest = route({
+  async GET(context) {
+    const parts = segments(context.params);
+    // GET /api/party (this catch-all also takes the bare path): whether the party is on here.
+    if (parts.length === 0) return json({ on: holidayOn(context.env) }, 200, { "cache-control": "public, max-age=30" });
+    if (!holidayOn(context.env)) off();
+    if (parts[0] !== "team") return fail(404, "not_found", "No such API route.");
+    const m = await member(context);
+    if (parts.length === 2 && parts[1] === "line") return line(context);
+    if (parts.length === 2 && parts[1] === "members") return members(context, m);
+    if (parts.length === 2 && parts[1] === "gifs") return gifs(context);
+    return fail(404, "not_found", "No such API route.");
+  },
+  async POST(context) {
+    const parts = segments(context.params);
+    if (!holidayOn(context.env)) off();
+    if (parts.length === 1 && parts[0] === "join") return join(context);
+    if (parts.length === 1 && parts[0] === "me") return me(context);
+    if (parts.length === 1 && parts[0] === "move") return move(context);
+    if (parts[0] !== "team") return fail(404, "not_found", "No such API route.");
+    if (parts.length === 2 && parts[1] === "code") return teamCode(context);
+    if (parts.length === 2 && parts[1] === "verify") return teamVerify(context);
+    const m = await member(context);
+    if (parts.length === 4 && parts[1] === "sessions" && idOf(parts[2]) && parts[3] === "status") return setStatus(context, idOf(parts[2]), m);
+    if (parts.length === 4 && parts[1] === "sessions" && idOf(parts[2]) && parts[3] === "texted") return texted(context, idOf(parts[2]));
+    if (parts.length === 2 && parts[1] === "members") return addMember(context, m);
+    if (parts.length === 4 && parts[1] === "members" && idOf(parts[2]) && parts[3] === "remove") return removeMember(context, idOf(parts[2]), m);
+    if (parts.length === 2 && parts[1] === "gifs") return addGif(context);
+    if (parts.length === 4 && parts[1] === "gifs" && /^[A-Za-z0-9]{1,64}$/.test(parts[2]) && parts[3] === "remove") return removeGif(context, parts[2]);
+    return fail(404, "not_found", "No such API route.");
+  },
+});

@@ -13,6 +13,8 @@ import { boothShareMessage, detectPlatform, listenLink, safeMediaUrl, smsHref } 
 import { artworkFor, cleanEmail, cleanPeople, cleanTrack, codeDigits, codeFromSearch, isCode, safeArtUrl, shareRoute, squareCrop, voteWords } from "./booth-rules.js";
 import { createControls, createPlayer } from "./player.js";
 import { COPY } from "./track-copy.js";
+import { festive } from "./festive.js";
+import { LINE_POLL_MS, cleanContest, contestLine, contestPerson } from "./party-rules.js";
 
 const els = {
   headline: $("tbz-track-headline"),
@@ -44,9 +46,23 @@ const els = {
   share: $("tbz-share"),
   shareMsg: $("tbz-share-msg"),
   another: $("tbz-another"),
+  // The holiday contest (17 Nov 2026)
+  contest: $("tbz-contest"),
+  contestTitle: $("tbz-contest-title"),
+  titleForm: $("tbz-title-form"),
+  titleLabel: $("tbz-title-label"),
+  title: $("tbz-title"),
+  titleSave: $("tbz-title-save"),
+  titleMsg: $("tbz-title-msg"),
+  contestHelp: $("tbz-contest-help"),
+  contestBox: $("tbz-contest-box"),
+  contestLabel: $("tbz-contest-label"),
+  contestLine: $("tbz-contest-line"),
+  contestPeople: $("tbz-contest-people"),
+  contestMsg: $("tbz-contest-msg"),
 };
 
-const app = { looking: null, track: null, row: null, platform: detectPlatform(navigator), flipping: false, voting: false };
+const app = { looking: null, track: null, row: null, platform: detectPlatform(navigator), flipping: false, voting: false, entering: false, contestTimer: null };
 
 // ── The remembered email: the one thing kept on the device, so the box is filled in next time.
 const EMAIL_KEY = "tbz.booth.email";
@@ -71,6 +87,11 @@ els.publicLabel.textContent = COPY.publicLabel;
 els.publicGroup.textContent = COPY.publicNote;
 els.voteLabel.textContent = COPY.voteLabel;
 els.another.textContent = COPY.another;
+els.contestTitle.textContent = COPY.contestTitle;
+els.titleLabel.textContent = COPY.titleLabel;
+els.titleSave.textContent = COPY.titleSave;
+els.contestHelp.textContent = COPY.contestHelp;
+els.contestLabel.replaceChildren(`${COPY.contestBox} `, h("a", { href: "/holiday-rules", target: "_blank", rel: "noopener", text: COPY.contestRules }), ".");
 
 // ── The player: one for the page
 const player = createPlayer((slug, audio) => {
@@ -138,6 +159,7 @@ function clearTrack() {
   drawShare();
   drawPeople();
   drawArt();
+  drawContest();
 }
 function showTrack(track) {
   clearTrack();
@@ -149,6 +171,8 @@ function showTrack(track) {
   drawShare();
   drawPeople();
   drawArt();
+  drawContest();
+  els.title.value = track.contest?.title ?? "";
   els.found.hidden = false;
   els.found.scrollIntoView({ block: "start" });
   els.foundTitle.focus({ preventScroll: true });
@@ -169,6 +193,7 @@ async function enter(code, rawEmail) {
     const { data } = await api(`/api/booth/tracks/${code}/enter`, { method: "POST", body: { email }, timeout: 10000 });
     const track = cleanTrack(data);
     if (!track) throw new Error(COPY.notFound);
+    track.contest = cleanContest(data.contest);
     rememberEmail(track.you.email);
     showTrack(track);
   } catch (err) {
@@ -236,6 +261,77 @@ async function flipVote() {
     els.voteNote.textContent = refusal(err, COPY.voteFailed);
   } finally {
     app.voting = false;
+  }
+}
+
+// ── The holiday contest: this person's own box, and the group's status, the same on every phone.
+// While the party is on, the box takes the place of the public-vote switch above.
+function drawContest() {
+  const c = app.track?.contest ?? null;
+  clearTimeout(app.contestTimer);
+  els.contest.hidden = !c;
+  const voteRow = els.voteBtn.closest(".switch-row");
+  if (voteRow) voteRow.hidden = Boolean(c);
+  els.voteNote.hidden = Boolean(c);
+  if (!c) return;
+  els.contestBox.checked = c.you.in;
+  els.contestBox.disabled = c.closed || Boolean(c.blocked) || app.entering;
+  els.title.disabled = c.closed;
+  els.titleSave.disabled = c.closed;
+  els.contestLine.textContent = contestLine(COPY, c);
+  els.contestLine.dataset.entered = c.entered ? "yes" : "no";
+  els.contestPeople.replaceChildren(...c.people.map((p) => h("li", { class: p.in ? "is-in" : "is-out", text: contestPerson(COPY, p) })));
+  app.contestTimer = setTimeout(refreshContest, LINE_POLL_MS);
+}
+async function refreshContest() {
+  const track = app.track;
+  if (!track?.contest) return;
+  if (document.hidden || app.entering) { app.contestTimer = setTimeout(refreshContest, LINE_POLL_MS); return; }
+  try {
+    const { data } = await api(`/api/booth/tracks/${track.code}/contest-status`, { method: "POST", body: { email: track.you.email }, timeout: 10000 });
+    if (app.track !== track) return;
+    track.contest = cleanContest(data?.contest) ?? track.contest;
+  } catch {}
+  if (app.track === track) drawContest();
+}
+async function flipContest() {
+  const track = app.track;
+  if (!track?.contest || app.entering) return;
+  const enter = els.contestBox.checked;
+  app.entering = true;
+  els.contestMsg.hidden = true;
+  els.contestBox.disabled = true;
+  try {
+    const { data } = await api(`/api/booth/tracks/${track.code}/contest`, { method: "POST", body: { email: track.you.email, enter, agree: enter }, timeout: 10000 });
+    if (app.track !== track) return;
+    track.contest = cleanContest(data?.contest) ?? track.contest;
+  } catch (err) {
+    if (app.track !== track) return;
+    els.contestBox.checked = !enter;
+    els.contestMsg.textContent = err?.code === "not_signed_up" ? COPY.contestSignUp : err?.code === "voting_closed" ? COPY.contestClosed : refusal(err, err?.message || COPY.contestFailed);
+    els.contestMsg.hidden = false;
+  } finally {
+    app.entering = false;
+    if (app.track === track) drawContest();
+  }
+}
+async function saveTitle() {
+  const track = app.track;
+  if (!track?.contest) return;
+  els.titleMsg.hidden = true;
+  els.titleSave.disabled = true;
+  try {
+    const { data } = await api(`/api/booth/tracks/${track.code}/title`, { method: "POST", body: { email: track.you.email, title: els.title.value }, timeout: 10000 });
+    if (app.track !== track) return;
+    track.contest = cleanContest(data?.contest) ?? track.contest;
+    els.title.value = track.contest.title;
+    els.titleMsg.textContent = COPY.titleSaved;
+  } catch (err) {
+    els.titleMsg.textContent = err?.code === "voting_closed" ? COPY.contestClosed : refusal(err, err?.message || COPY.contestFailed);
+  } finally {
+    els.titleMsg.hidden = false;
+    els.titleSave.disabled = false;
+    if (app.track === track) drawContest();
   }
 }
 
@@ -327,6 +423,10 @@ els.form.addEventListener("submit", (ev) => {
   enterFromForm();
 });
 els.publicBtn.addEventListener("click", flipPublic);
+els.contestBox.addEventListener("change", flipContest);
+els.titleForm.addEventListener("submit", (ev) => { ev.preventDefault(); saveTitle(); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden && app.track?.contest) refreshContest(); });
+festive();
 els.voteBtn.addEventListener("click", flipVote);
 els.share.addEventListener("click", share);
 els.artFile.addEventListener("change", () => addArt(els.artFile.files?.[0]));

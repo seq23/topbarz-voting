@@ -173,7 +173,7 @@ const BRAND_IMAGES = {
   "public/img/favicon.png": [64, 64],
   "public/img/logo.png": [212, 186],
   "public/img/og.png": [1200, 630],
-  "public/img/partners/blitz-and-bubbles.png": [577, 340],
+  "public/img/partners/blitz-and-bubbles.png": [782, 270],
   "public/img/partners/dick-and-janes.png": [578, 270],
   "public/img/partners/flow-music.png": [601, 270],
 };

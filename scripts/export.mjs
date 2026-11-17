@@ -55,7 +55,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   if (!args.env) { console.error("STOPPED: say which data: --env local | preview | production"); process.exit(2); }
   const target = targets(args.env);
   // --party: the holiday party's tally, its own songs only (the vote the page shows while the party is on).
-  const tracks = await d1(target, `SELECT id, slug, label FROM tracks WHERE active = 1${args.party ? ` AND source_name LIKE '${PARTY_TRACK_PREFIX}%'` : ""}`);
+  const tracks = (await d1(target, "SELECT id, slug, label, source_name FROM tracks WHERE active = 1")).filter((t) => !args.party || t.source_name.startsWith(PARTY_TRACK_PREFIX));
   const events = await d1(target, "SELECT e.id, e.track_id, e.action, e.created_at, v.verified FROM like_events e JOIN voters v ON v.id = e.voter_id WHERE v.flagged = 0 ORDER BY e.id");
   const commentRows = await d1(target, "SELECT track_id, COUNT(*) AS n FROM comments WHERE hidden = 0 GROUP BY track_id");
   const voters = await d1(target, "SELECT name, email, city, marketing_opt_in, created_at, flagged, flag_reason, verified, unverified_reason FROM voters ORDER BY created_at, id");

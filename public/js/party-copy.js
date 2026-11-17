@@ -11,7 +11,7 @@ export const HOLIDAY = {
   partners: [
     { name: "Flow Music", src: "/img/partners/flow-music.png", width: 601, height: 270, desktop: 46, mobile: 38 },
     { name: "Dick and Jane's", src: "/img/partners/dick-and-janes.png", width: 578, height: 270, desktop: 42, mobile: 36 },
-    { name: "Blitz and Bubbles", src: "/img/partners/blitz-and-bubbles.png", width: 577, height: 340, desktop: 36, mobile: 30 },
+    { name: "Blitz and Bubbles", src: "/img/partners/blitz-and-bubbles.png", width: 782, height: 270, desktop: 30, mobile: 26 },
   ],
   // The voting page while the party is on (Scooter's copy direction, 17 Nov 2026).
   home: {

@@ -14,14 +14,26 @@ import path from "node:path";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // crop: the mark's region in the source (left, top, width, height), so a background glow or a
-// cut-off line at the edge is not part of it. ink: is the mark lighter or darker than its ground.
+// cut-off line at the edge is not part of it. ink: is the mark lighter or darker than its ground, or
+// "white" for a source that is already a white mark on transparency (its alpha is kept as it is).
 export const LOGOS = [
   { name: "flow-music", src: "flow-music.png", crop: { left: 200, top: 95, width: 625, height: 280 }, ink: "light", lo: 70, hi: 230 },
   { name: "dick-and-janes", src: "dick-and-janes.png", crop: { left: 30, top: 230, width: 600, height: 290 }, ink: "dark", lo: 25, hi: 200 },
-  { name: "blitz-and-bubbles", src: "blitz-and-bubbles.png", crop: { left: 40, top: 22, width: 590, height: 340 }, ink: "dark", lo: 30, hi: 180 },
+  // Blitz and Bubbles: the file Scooter sent at 19:44Z on 17 Nov 2026 ("use this Blitz & Bubbles logo
+  // instead of the one in my last email. It's already white"), so its own transparency is the mark.
+  { name: "blitz-and-bubbles", src: "blitz-and-bubbles.png", crop: { left: 30, top: 30, width: 1617, height: 570 }, ink: "white" },
 ];
 
 export async function whiteMark(input, { crop, ink, lo, hi }) {
+  if (ink === "white") {
+    const { data, info } = await sharp(input).extract(crop).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    for (let i = 0; i < data.length; i += 4) { data[i] = 255; data[i + 1] = 255; data[i + 2] = 255; }
+    // Trimmed, then 270 px tall like the other two marks (the page shows it at 30 px at most).
+    const trimmed = await sharp(data, { raw: { width: info.width, height: info.height, channels: 4 } }).trim({ threshold: 1 }).png().toBuffer();
+    const small = await sharp(trimmed).resize({ height: 270 }).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    for (let i = 0; i < small.data.length; i += 4) { small.data[i] = 255; small.data[i + 1] = 255; small.data[i + 2] = 255; }
+    return sharp(small.data, { raw: { width: small.info.width, height: small.info.height, channels: 4 } }).png({ compressionLevel: 9 }).toBuffer();
+  }
   const { data, info } = await sharp(input, { animated: false }).extract(crop).flatten({ background: ink === "light" ? "#000" : "#fff" }).greyscale().raw().toBuffer({ resolveWithObject: true });
   const out = Buffer.alloc(info.width * info.height * 4);
   for (let i = 0; i < info.width * info.height; i++) {

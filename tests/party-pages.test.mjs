@@ -155,7 +155,13 @@ test("the partners: white marks made from the files Scooter sent, one row under 
     let opaque = 0;
     for (let i = 0; i < data.length; i += 4) { assert.ok(data[i] === 255 && data[i + 1] === 255 && data[i + 2] === 255, `${l.name}: white only`); if (data[i + 3] > 128) opaque++; }
     assert.ok(opaque > 1000, `${l.name}: the mark is there`);
+    const shown = HOLIDAY.partners.find((p) => p.src === `/img/partners/${l.name}.png`);
+    assert.deepEqual([shown.width, shown.height], [info.width, info.height], `${l.name}: the page reserves the mark's real size`);
   }
+  // Scooter, 19:44Z 17 Nov 2026: "use this Blitz & Bubbles logo instead of the one in my last email.
+  // It's already white". The committed mark is that file (wide, 782 x 270), never the first one.
+  assert.equal(LOGOS.find((l) => l.name === "blitz-and-bubbles").ink, "white");
+  assert.deepEqual((({ width, height }) => [width, height])(await sharp(path.join(ROOT, "public/img/partners/blitz-and-bubbles.png")).metadata()), [782, 270]);
   const festive = read("public/js/festive.js");
   assert.match(festive, /top\.querySelector\("\.logo"\)\?\.after\(partnerRow\(\)\);/, "the row sits under the Top Barz logo");
   assert.match(festive, /if \(on\) dressUp\(\);/, "off, the page is exactly as it was");

@@ -449,7 +449,11 @@ try {
   ok(atStation.body?.on === true && Array.isArray(atStation.body.sessions), "GET /api/booth/sessions answers while the party is on");
   const listener = await enter(up.body.code, "listener@example.com");
   ok(listener.status === 200 && listener.body.download_url && listener.body.contest?.you?.performer === false, "with the party on, a song's code hears and downloads, and a new email is not made one of its performers");
-  const holidayState = await j(`/api/state?smoke=${Date.now()}`);
+  // /api/state is cached for 5 s under one key, and the local cache outlives the restart: read it
+  // again until that window has passed (as the page's own poll would).
+  let holidayState;
+  const stateBy = Date.now() + 8_000;
+  do { holidayState = await j(`/api/state?smoke=${Date.now()}`); if (holidayState.body?.holiday) break; await new Promise((r) => setTimeout(r, 1000)); } while (Date.now() < stateBy);
   ok(holidayState.body?.holiday?.on === true && Array.isArray(holidayState.body.gifs), "/api/state carries the party and its GIFs");
   if (passed < 144) throw new Error(`only ${passed} checks ran`);
   console.log(`smoke: ${passed} checks passed`);

@@ -244,7 +244,7 @@ test("order: the most-liked track is shown first, ties keep the server's order, 
   // The source of truth for the count is unchanged: the server still orders by sort, label, id and
   // counts likes from like_events as before; the page sorts a copy of what it is sent.
   const stateSql = fs.readFileSync(path.join(ROOT, "functions/_lib/state.js"), "utf8");
-  assert.match(stateSql, /FROM tracks t WHERE t\.active = 1 ORDER BY t\.sort, t\.label, t\.id`/, "the API's own order is untouched");
+  assert.match(stateSql, /FROM tracks t WHERE t\.active = 1\$\{partyTrackClause\(env\)\} ORDER BY t\.sort, t\.label, t\.id`/, "the API's own order is untouched (the party filter only narrows which tracks)");
   assert.ok(!/likes/i.test(stateSql.split("ORDER BY")[1].split("`")[0]), "the API never orders by likes: the client does, as display only");
   const app = fs.readFileSync(path.join(PUBLIC, "js/app.js"), "utf8");
   assert.match(app, /const wanted = displayOrder\(tracks\);/, "renderTracks draws the cards in display order");

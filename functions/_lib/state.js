@@ -1,16 +1,16 @@
 // Everything /api/state returns, built from D1 and the R2 photo manifest.
 import { END_SETTING_SQL, START_SETTING_SQL, giphyStatus, gateStatus, verificationStatus, votingPhase } from "./config.js";
-import { GIFS_SQL, holidayOn, toGif } from "./party.js";
+import { GIFS_SQL, holidayOn, partyTrackClause, toGif } from "./party.js";
 
 export const PHOTO_MANIFEST_KEY = "manifest/photos.json";
 
 // Likes from flagged voters never count, live or in the export.
-export const TRACKS_WITH_COUNTS_SQL = `
+export const tracksWithCountsSql = (env) => `
 SELECT t.slug, t.label, t.audio_key, t.duration_ms, t.sort,
   (SELECT COALESCE(SUM(CASE e.action WHEN 'like' THEN 1 ELSE -1 END), 0) FROM like_events e
     WHERE e.track_id = t.id AND e.voter_id NOT IN (SELECT id FROM voters WHERE flagged = 1)) AS likes,
   (SELECT COUNT(*) FROM comments c WHERE c.track_id = t.id AND c.hidden = 0) AS comments
-FROM tracks t WHERE t.active = 1 ORDER BY t.sort, t.label, t.id`;
+FROM tracks t WHERE t.active = 1${partyTrackClause(env)} ORDER BY t.sort, t.label, t.id`;
 
 export async function readPhotoManifest(env) {
   try {
@@ -25,7 +25,7 @@ export async function readPhotoManifest(env) {
 }
 
 export async function buildState(env, now = Date.now()) {
-  const [tracksRes, settingRes, startRes] = await env.DB.batch([env.DB.prepare(TRACKS_WITH_COUNTS_SQL), env.DB.prepare(END_SETTING_SQL), env.DB.prepare(START_SETTING_SQL)]);
+  const [tracksRes, settingRes, startRes] = await env.DB.batch([env.DB.prepare(tracksWithCountsSql(env)), env.DB.prepare(END_SETTING_SQL), env.DB.prepare(START_SETTING_SQL)]);
   const { startsAt, endsAt, closed, notOpen } = votingPhase(env, now, startRes.results?.[0]?.value ?? null, settingRes.results?.[0]?.value ?? null);
   const photos = await readPhotoManifest(env);
   // The holiday party (17 Nov 2026): the GIFs the team picked show in the gallery until there are

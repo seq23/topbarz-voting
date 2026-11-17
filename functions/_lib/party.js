@@ -11,6 +11,13 @@ import { cleanPhone, cleanText } from "./entries.js";
 // Off, the party's pages say "Nothing on right now" and its routes answer 404 party_off.
 export const holidayOn = (env) => env?.HOLIDAY_EVENT === "on";
 
+// While the party is on, the vote is the party's own songs only: those a booth song put in itself
+// (syncEntry gives them source_name "booth:<id>"). The CultureCon tracks stay in the database,
+// untouched, and simply are not in /api/state, cannot be liked or commented on, and are not in
+// `npm run export -- --party`. Off (production until go-live), every active track is as before.
+export const PARTY_TRACK_PREFIX = "booth:";
+export const partyTrackClause = (env, alias = "t") => (holidayOn(env) ? ` AND ${alias}.source_name LIKE '${PARTY_TRACK_PREFIX}%'` : "");
+
 // Which rules a guest agreed to when they ticked "Enter the contest". A new text of the rules is a
 // new version, so each tick records the words that were on the page.
 export const RULES_VERSION = "holiday-2026-draft-2";

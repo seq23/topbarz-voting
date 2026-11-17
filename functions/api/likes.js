@@ -6,6 +6,7 @@ import { END_SETTING_SQL, LIMITS, START_SETTING_SQL, votingPhase } from "../_lib
 import { HttpError, ipHash, json, readJson, route } from "../_lib/http.js";
 import { assertUnderLimit, limitStatement, maybePrune } from "../_lib/ratelimit.js";
 import { requireVoter } from "../_lib/token.js";
+import { partyTrackClause } from "../_lib/party.js";
 
 const LAST_ACTION = "COALESCE((SELECT action FROM like_events WHERE voter_id = ?1 AND track_id = ?2 ORDER BY id DESC LIMIT 1), 'unlike')";
 // One statement each, so two taps racing can never leave two active likes.
@@ -32,7 +33,7 @@ export const onRequest = route({
     const [ipLimit, voterLimit, trackRes, voterRes, settingRes, startRes] = await db.batch([
       limitStatement(db, `likes:ip:${ip}`, LIMITS.likesPerIp, now),
       limitStatement(db, `likes:voter:${voterId}`, LIMITS.likesPerVoter, now),
-      db.prepare("SELECT id FROM tracks WHERE slug = ?1 AND active = 1").bind(slug),
+      db.prepare(`SELECT id FROM tracks t WHERE slug = ?1 AND active = 1${partyTrackClause(env)}`).bind(slug),
       db.prepare("SELECT id FROM voters WHERE id = ?1").bind(voterId),
       db.prepare(END_SETTING_SQL),
       db.prepare(START_SETTING_SQL),

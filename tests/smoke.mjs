@@ -100,6 +100,8 @@ try {
   ok(page.status === 200 && pageText.includes("JUMP IN THE BOOTH"), "GET / serves the page");
   ok(pageText.includes('content="Vote for your favorite CultureCon track | Top Barz"') && !pageText.includes("data-dressed"), "with the party off (production), GET / is served untouched");
   ok((page.headers.get("content-security-policy") ?? "").includes("script-src 'self'"), "the page is served with its content security policy (public/_headers)");
+  const privOff = await (await fetch(base + "/privacy")).text();
+  ok(privOff.includes("track vote for CultureCon") && !privOff.includes("data-dressed"), "with the party off (production), /privacy is served untouched");
   const assets = [...new Set([...pageText.matchAll(/(?:src|href)="(\/(?:js|css|img|fonts)\/[^"]+)"/g)].map((m) => m[1]))];
   const served = await Promise.all(assets.map(async (a) => { const r = await fetch(base + a); await r.arrayBuffer(); return r.status === 200 ? null : `${a} → ${r.status}`; }));
   ok(assets.length >= 12 && served.every((x) => x === null), `every file the page names is served (${assets.length} files${served.filter(Boolean).length ? `; missing: ${served.filter(Boolean).join(", ")}` : ""})`);
@@ -446,6 +448,9 @@ try {
   ok(dressed.status === 200 && !/culturecon|october 11/i.test(dressedText), `with the party on, GET / has no CultureCon and no October date anywhere, meta tags included${/culturecon/i.test(dressedText) ? ` (found: ${dressedText.match(/.{0,60}culturecon.{0,40}/i)[0]})` : ""}`);
   ok(dressedText.includes('<meta property="og:title" content="Vote for your favorite Christmas jingle | Top Barz">') && dressedText.includes("Dick and Jane") && dressedText.includes('class="stand-in-mark"') && dressedText.includes("JUMP IN THE BOOTH"), "the link preview and the page carry the party's words and the marked prize placeholder");
   ok((dressed.headers.get("content-security-policy") ?? "").includes("script-src 'self'"), "the dressed page keeps its content security policy");
+  const priv = await fetch(base + "/privacy");
+  const privText = await priv.text();
+  ok(priv.status === 200 && !/culturecon/i.test(privText) && privText.includes("DRAFT") && privText.includes("phone number") && privText.includes("signed-in Top Barz team"), "with the party on, /privacy is the party's DRAFT note (what /join collects, who sees it) with no CultureCon");
   const g1 = await post("/api/party/join", { guests: [{ name: "Smoke Ava", phone: "555 010 2030", email: "ava@example.com", city: "Brooklyn" }, { name: "Smoke Bo", phone: "555 010 4050", email: "bo@example.com", city: "Queens" }], website: "" });
   ok(g1.status === 201 && g1.body.session.size === 2 && !("code" in g1.body.session) && !JSON.stringify({ ...g1.body, guest_key: "" }).includes("555"), "POST /api/party/join signs up a group of two on one phone: no group code, no phone in the answer");
   ok((await post("/api/party/me", { guest_key: g1.body.guest_key })).body?.session?.size === 2, "POST /api/party/me reads it back");

@@ -9,6 +9,7 @@ import { HttpError, ipHash, json, readJson, route } from "../_lib/http.js";
 import { assertUnderLimit, limitStatement, maybePrune } from "../_lib/ratelimit.js";
 import { requireVoter } from "../_lib/token.js";
 import { cleanText, firstName, parseGif } from "../_lib/validate.js";
+import { partyTrackClause } from "../_lib/party.js";
 
 function shape(row) {
   return {
@@ -28,7 +29,7 @@ export const onRequest = route({
     const limit = Math.min(50, Math.max(1, Number.parseInt(url.searchParams.get("limit") || "20", 10) || 20));
     const before = Number.parseInt(url.searchParams.get("before") || "", 10);
     const db = env.DB;
-    const track = await db.prepare("SELECT id FROM tracks WHERE slug = ?1 AND active = 1").bind(slug).first();
+    const track = await db.prepare(`SELECT id FROM tracks t WHERE slug = ?1 AND active = 1${partyTrackClause(env)}`).bind(slug).first();
     if (!track) throw new HttpError(404, "unknown_track", "That track is not in the vote.");
     const [rowsRes, totalRes] = await db.batch([
       db.prepare(
@@ -62,7 +63,7 @@ export const onRequest = route({
     const [ipLimit, voterLimit, trackRes, voterRes, settingRes, startRes] = await db.batch([
       limitStatement(db, `comments:ip:${ip}`, LIMITS.commentsPerIp, now),
       limitStatement(db, `comments:voter:${voterId}`, LIMITS.commentsPerVoter, now),
-      db.prepare("SELECT id FROM tracks WHERE slug = ?1 AND active = 1").bind(slug),
+      db.prepare(`SELECT id FROM tracks t WHERE slug = ?1 AND active = 1${partyTrackClause(env)}`).bind(slug),
       db.prepare("SELECT id, name FROM voters WHERE id = ?1").bind(voterId),
       db.prepare(END_SETTING_SQL),
       db.prepare(START_SETTING_SQL),

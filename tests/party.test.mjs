@@ -468,3 +468,29 @@ test("privacy: no route but the team's answers a phone or an email of a guest; t
   for (const file of ["functions/_lib/state.js", "functions/api/state.js", "functions/_lib/tally.js", "scripts/export.mjs", "functions/api/beats.js"]) assert.ok(!/party_guests|team_members/.test(src(file)), `${file} never reads the guests or the team`);
   assert.ok(!/party_guests|phone/.test(src("functions/api/booth/[[path]].js")), "the booth route reads names through contest.js only, never a phone");
 });
+
+// "Remove everything CultureCon" (Scooter's preview notes, 17 Nov 2026; review finding): while the
+// party is on, the vote is the party's own songs only. A track from before the party (any source
+// other than a booth song entering itself) is not in /api/state and cannot be commented on; with
+// the party off it is exactly as before.
+test("party on: a pre-party track is not in the vote; party off: it is", async () => {
+  const { buildState } = await import("../functions/_lib/state.js");
+  const comments = await import("../functions/api/comments.js");
+  const t = new Date().toISOString();
+  await env.DB.batch([
+    env.DB.prepare("INSERT INTO tracks (slug, label, source_name, audio_key, sort, active, created_at, updated_at) VALUES ('pre-party', 'Pre Party', 'Pre Party', 'tracks/pre-party.mp3', 1, 1, ?1, ?1)").bind(t),
+    env.DB.prepare("INSERT INTO tracks (slug, label, source_name, audio_key, sort, active, created_at, updated_at) VALUES ('party-jingle', 'Party Jingle', 'booth:999999', 'booth/x.mp3', 2, 1, ?1, ?1)").bind(t),
+  ]);
+  try {
+    const on = (await buildState(env)).tracks.map((x) => x.slug);
+    assert.ok(on.includes("party-jingle"), "the party's own song is in the vote");
+    assert.ok(!on.includes("pre-party"), "a pre-party track is not in the vote while the party is on");
+    const read = (e) => call(comments.onRequest, e, { path: "/api/comments?track=pre-party" });
+    assert.equal((await read(env)).status, 404, "a pre-party track cannot be read or commented on while the party is on");
+    const off = { ...env, HOLIDAY_EVENT: "off" };
+    assert.ok((await buildState(off)).tracks.some((x) => x.slug === "pre-party"), "with the party off (production) the track is in the vote as before");
+    assert.equal((await read(off)).status, 200, "with the party off its comments read as before");
+  } finally {
+    await env.DB.prepare("DELETE FROM tracks WHERE slug IN ('pre-party', 'party-jingle')").run();
+  }
+});

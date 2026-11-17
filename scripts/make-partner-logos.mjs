@@ -11,18 +11,31 @@
 import sharp from "sharp";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // crop: the mark's region in the source (left, top, width, height), so a background glow or a
 // cut-off line at the edge is not part of it. ink: is the mark lighter or darker than its ground, or
 // "white" for a source that is already a white mark on transparency (its alpha is kept as it is).
 export const LOGOS = [
-  { name: "flow-music", src: "flow-music.png", crop: { left: 200, top: 95, width: 625, height: 280 }, ink: "light", lo: 70, hi: 230 },
-  { name: "dick-and-janes", src: "dick-and-janes.png", crop: { left: 30, top: 230, width: 600, height: 290 }, ink: "dark", lo: 25, hi: 200 },
+  { name: "flow-music", src: "flow-music.png", sha1: "70214ade6b8e81feda1f5350523c95515870a364", crop: { left: 200, top: 95, width: 625, height: 280 }, ink: "light", lo: 70, hi: 230 },
+  { name: "dick-and-janes", src: "dick-and-janes.png", sha1: "626cb2a6d81458e549acd778ae3d354499896824", crop: { left: 30, top: 230, width: 600, height: 290 }, ink: "dark", lo: 25, hi: 200 },
   // Blitz and Bubbles: the file Scooter sent at 19:44Z on 17 Nov 2026 ("use this Blitz & Bubbles logo
   // instead of the one in my last email. It's already white"), so its own transparency is the mark.
-  { name: "blitz-and-bubbles", src: "blitz-and-bubbles.png", crop: { left: 30, top: 30, width: 1617, height: 570 }, ink: "white" },
+  { name: "blitz-and-bubbles", src: "blitz-and-bubbles.png", sha1: "0007630642b891488423bb0b4d39a8a686cd16fc", crop: { left: 30, top: 30, width: 1617, height: 570 }, ink: "white" },
 ];
+
+// sha1: the exact source file each mark is made from. Scooter replaced the first Blitz and Bubbles
+// file at 19:44Z (sha1 a11f567a…, dark text on peach); a source whose bytes are not the listed file
+// is refused, so a stale copy in design/partner-logos/ can never quietly bring the old mark back.
+export const REPLACED = { "blitz-and-bubbles": ["a11f567a4d9634309c8499162b06c1abf80e7a19"] };
+
+export function checkSource(logo, bytes) {
+  const got = createHash("sha1").update(bytes).digest("hex");
+  if ((REPLACED[logo.name] || []).includes(got)) throw new Error(`REFUSED ${logo.name}: ${logo.src} is the logo Scooter replaced; use his 19:44Z file (sha1 ${logo.sha1})`);
+  if (got !== logo.sha1) throw new Error(`REFUSED ${logo.name}: ${logo.src} is not the file the marks were made from (sha1 ${got}, expected ${logo.sha1}); a new file from Scooter means a new sha1 here`);
+}
 
 export async function whiteMark(input, { crop, ink, lo, hi }) {
   if (ink === "white") {
@@ -46,9 +59,11 @@ export async function whiteMark(input, { crop, ink, lo, hi }) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  for (const l of LOGOS) {
-    const from = process.argv.includes("--from") ? process.argv[process.argv.indexOf("--from") + 1] : path.join(root, "design/partner-logos");
-    const buf = await whiteMark(path.join(from, l.src), l);
+  const from = process.argv.includes("--from") ? process.argv[process.argv.indexOf("--from") + 1] : path.join(root, "design/partner-logos");
+  // Every source is checked before any mark is written: a refusal leaves the committed marks as they were.
+  const sources = LOGOS.map((l) => { const bytes = readFileSync(path.join(from, l.src)); checkSource(l, bytes); return [l, bytes]; });
+  for (const [l, bytes] of sources) {
+    const buf = await whiteMark(bytes, l);
     const file = path.join(root, "public/img/partners", `${l.name}.png`);
     await sharp(buf).toFile(file);
     const m = await sharp(buf).metadata();

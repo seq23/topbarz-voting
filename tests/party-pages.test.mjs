@@ -161,6 +161,12 @@ test("the partners: white marks made from the files Scooter sent, one row under 
   // Scooter, 19:44Z 17 Nov 2026: "use this Blitz & Bubbles logo instead of the one in my last email.
   // It's already white". The committed mark is that file (wide, 782 x 270), never the first one.
   assert.equal(LOGOS.find((l) => l.name === "blitz-and-bubbles").ink, "white");
+  const { checkSource, REPLACED } = await import("../scripts/make-partner-logos.mjs");
+  const blitz = LOGOS.find((l) => l.name === "blitz-and-bubbles");
+  assert.equal(blitz.sha1, "0007630642b891488423bb0b4d39a8a686cd16fc", "made from the 19:44Z file");
+  assert.ok(REPLACED["blitz-and-bubbles"].includes("a11f567a4d9634309c8499162b06c1abf80e7a19"), "the first file is named as replaced");
+  for (const l of LOGOS) assert.match(l.sha1, /^[0-9a-f]{40}$/, `${l.name}: its source is pinned`);
+  assert.throws(() => checkSource(blitz, Buffer.from("not his file")), /REFUSED blitz-and-bubbles/, "any other bytes are refused");
   assert.deepEqual((({ width, height }) => [width, height])(await sharp(path.join(ROOT, "public/img/partners/blitz-and-bubbles.png")).metadata()), [782, 270]);
   const festive = read("public/js/festive.js");
   assert.match(festive, /top\.querySelector\("\.logo"\)\?\.after\(partnerRow\(\)\);/, "the row sits under the Top Barz logo");

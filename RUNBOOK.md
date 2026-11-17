@@ -71,7 +71,7 @@ Scripts a job may run on the model's request, as `npm run <name> -- <args>` in t
 - `add-team`  -  `node scripts/add-team.mjs` (puts an email on the /team list: `--env preview --email <theirs>`; `--remove` takes it off)
 - `party-window`  -  `node scripts/party-window.mjs` (the holiday round's voting window on preview only: `--env preview --starts <ISO> --ends <ISO>`, or `--clear`; refuses production)
 - `first-run`  -  `node scripts/first-run.mjs` (plays the first session on a preview: `--url <preview>`; prints `FIRST_RUN OK`)
-- `make-partner-logos`  -  `node scripts/make-partner-logos.mjs` (re-makes the white partner logos from Scooter's attachments in `design/partner-logos/`, git-ignored, or `--from <dir>`; no data, no environment)
+- `make-partner-logos`  -  `node scripts/make-partner-logos.mjs` (re-makes the white partner logos from Scooter's attachments in `design/partner-logos/`, git-ignored, or `--from <dir>`; each source is pinned by its sha1 in `LOGOS` and anything else, above all the Blitz and Bubbles file he replaced at 19:44Z on 17 Nov, is refused before a mark is written; no data, no environment)
 
 Production loads (`--env production`) put real entries in the real vote: run them only on Scooter's say-so in the email that asked, never for a "Test ..." folder (the script refuses anyway), and never for a file named for Scooter Taylor.
 

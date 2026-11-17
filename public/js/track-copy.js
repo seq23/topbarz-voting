@@ -61,6 +61,6 @@ export const COPY = {
   contestUnknown: "Someone not signed up yet",
   contestSignUp: "Sign up at the QR code first, with the same email you used here, then tick the box.",
   contestFailed: "That did not save. Try again.",
-  contestOwnPhone: "Tick this on the phone you signed up on, with the email you signed up with. Each person ticks their own box.",
+  contestOwnPhone: "Change this on the phone you signed up on, with the email you signed up with. Each person speaks only for themselves.",
   contestPulled: "The team took this song out of the vote.",
 };

@@ -86,7 +86,7 @@ test("the contest box: first names with in or waiting, one line everyone sees th
   assert.ok(!/id="tbz-contest-box"[^>]*checked/.test(html), "unticked by default");
   const js = read("public/js/track.js");
   assert.match(js, /h\("a", \{ href: "\/holiday-rules", target: "_blank", rel: "noopener", text: COPY\.contestRules \}\)/);
-  assert.match(js, /body: \{ email: track\.you\.email, enter, agree: enter, \.\.\.\(enter \? \{ guest_key: ownKey\(\) \} : \{\}\) \}/, "a tick sends the rules agreement and this phone's own sign-up key with it");
+  assert.match(js, /body: \{ email: track\.you\.email, enter, agree: enter, guest_key: ownKey\(\) \}/, "a tick and an untick both send this phone's own sign-up key (the server refuses either without it); a tick sends the rules agreement");
   assert.match(js, /const ownKey = \(\) => \{ try \{ const k = localStorage\.getItem\(GUEST_KEY\); return isGuestKey\(k\) \? k : null; \} catch \{ return null; \} \};/, "the key is read from this phone only, never written here");
   assert.match(js, /if \(voteRow\) voteRow\.hidden = Boolean\(c\);/, "while the party is on the box takes the place of the public-vote switch");
   assert.match(js, /app\.contestTimer = setTimeout\(refreshContest, LINE_POLL_MS\);/, "and the status refreshes by itself");

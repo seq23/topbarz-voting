@@ -94,7 +94,10 @@ ok("both ticked: the song is in the vote (/api/state) with no script run");
 const again = await req(`/api/booth/tracks/${code}/contest-status`, { method: "POST", body: { email: guestB.email } });
 if (again.json?.contest?.entered !== true || !again.json.contest.people.every((p) => p.in)) fail("after a reload the song no longer reads entered for everyone");
 ok("a reload (the other phone's refresh) still reads entered, both in");
-const untick = await req(`/api/booth/tracks/${code}/contest`, { method: "POST", body: { email: guestA.email, enter: false } });
+const stepOutB = await req(`/api/booth/tracks/${code}/contest`, { method: "POST", body: { email: guestB.email, enter: false, guest_key: a.json.guest_key } });
+if (stepOutB.status !== 403 || stepOutB.json?.error !== "not_your_sign_up") fail(`A's phone unticking B's box answered ${stepOutB.status} ${stepOutB.text.slice(0, 120)}`);
+ok("one person cannot step a friend out: A's phone unticking B's box is refused (403 not_your_sign_up)");
+const untick = await req(`/api/booth/tracks/${code}/contest`, { method: "POST", body: { email: guestA.email, enter: false, guest_key: a.json.guest_key } });
 if (untick.json?.contest?.entered !== false || !(await inVote(false))) fail("unticking did not take the song out of the vote");
 ok("one unticked: the song left the vote for everyone (this run leaves nothing in the preview's vote)");
 

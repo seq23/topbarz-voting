@@ -304,7 +304,7 @@ async function flipContest() {
   els.contestMsg.hidden = true;
   els.contestBox.disabled = true;
   try {
-    const { data } = await api(`/api/booth/tracks/${track.code}/contest`, { method: "POST", body: { email: track.you.email, enter, agree: enter, ...(enter ? { guest_key: ownKey() } : {}) }, timeout: 10000 });
+    const { data } = await api(`/api/booth/tracks/${track.code}/contest`, { method: "POST", body: { email: track.you.email, enter, agree: enter, guest_key: ownKey() }, timeout: 10000 });
     if (app.track !== track) return;
     track.contest = cleanContest(data?.contest) ?? track.contest;
   } catch (err) {

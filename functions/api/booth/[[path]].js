@@ -161,8 +161,8 @@ async function contestFor(env, code, email, now, song) {
 // person who signed up at /join can enter (the contest needs a name and a number), and only from
 // the device they signed up on: the tick carries that device's guest key, whose email must be the
 // one being ticked, so a friend who knows the code and your email cannot tick your box (403
-// not_your_sign_up). Unticking stays open to anyone on the song (stepping out never needs proof)
-// and takes the song back out for everyone. Nothing moves after voting ends.
+// not_your_sign_up). Unticking a ticked box needs the same key, so nobody can step a friend out;
+// a step-out takes the song back out for everyone, and the team can always pull a song on /team. Nothing moves after voting ends.
 async function contest(context, code) {
   const { request, env } = context;
   if (!holidayOn(env)) partyOff();
@@ -177,9 +177,11 @@ async function contest(context, code) {
   const db = env.DB;
   let song = await readSong(db, code);
   if (body.enter && !song.people.find((p) => p.email === email)?.name) throw new HttpError(409, "not_signed_up", "Sign up at the QR code with this same email first, then tick the box.");
-  if (body.enter) {
+  // A tick, and an untick of a box that is ticked, both need this person's own sign-up key.
+  const ticked = song.people.find((p) => p.email === email)?.contest_opt_in === 1;
+  if (body.enter || ticked) {
     const own = isGuestKey(body.guest_key) ? await db.prepare(GUEST_EMAIL_BY_KEY_SQL).bind(body.guest_key).first() : null;
-    if (own?.email !== email) throw new HttpError(403, "not_your_sign_up", "Tick your box on the device you signed up on, with the email you signed up with. Each person ticks their own box.");
+    if (own?.email !== email) throw new HttpError(403, "not_your_sign_up", "Change your box on the device you signed up on, with the email you signed up with. Each person speaks only for themselves.");
   }
   await db.prepare(CONTEST_SET_SQL).bind(trackId, email, body.enter ? 1 : 0, now, body.enter ? RULES_VERSION : null).run();
   song = await readSong(db, code);

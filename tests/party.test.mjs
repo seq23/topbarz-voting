@@ -231,7 +231,11 @@ test("the group song: tagged at upload; two of three ticked is NOT in the vote, 
   assert.equal(titled.body.title, "Sleigh Bars");
   assert.equal((await label()).label, "Sleigh Bars");
   // One steps out: it leaves the vote for everyone, likes kept.
-  const outRes = await B(songCode, "contest", { email: "mo.i@example.com", enter: false });
+  // Nobody steps a friend out: an untick without Mo's own sign-up key, or with Jay's, is refused and the song stays in.
+  assert.equal((await B(songCode, "contest", { email: "mo.i@example.com", enter: false })).body.error, "not_your_sign_up");
+  assert.equal((await B(songCode, "contest", { email: "mo.i@example.com", enter: false, guest_key: key["jay.h@example.com"] })).body.error, "not_your_sign_up");
+  assert.equal((await label()).active, 1, "a refused untick leaves the song in the vote");
+  const outRes = await B(songCode, "contest", { email: "mo.i@example.com", enter: false, guest_key: key["mo.i@example.com"] });
   assert.equal(outRes.body.contest.entered, false);
   assert.equal((await label()).active, 0);
   assert.ok(!(await stateNow()).tracks.some((t) => t.label === "Sleigh Bars"));
@@ -327,7 +331,7 @@ test("the team's safety valve: Take out of the vote from /team holds even if eve
   assert.equal(pulled.body.song.pulled, true);
   assert.ok(!(await stateNow()).tracks.some((t) => t.label === "Val"), "out of the vote at once");
   // Everyone ticking again does not put it back: only the team does.
-  await B(code, "contest", { email: "valve@example.com", enter: false });
+  await B(code, "contest", { email: "valve@example.com", enter: false, guest_key: k });
   const again = await B(code, "contest", { email: "valve@example.com", enter: true, agree: true, guest_key: k });
   assert.equal(again.body.contest.entered, false);
   assert.equal(again.body.contest.blocked, "pulled_by_team", "the person on the song sees that the team took it out");

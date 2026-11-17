@@ -44,16 +44,20 @@
   </section>
 
   <form id="tbz-join-form" class="booth" hidden novalidate>
-    <div class="field"><label for="tbz-join-name" id="tbz-join-name-label"></label><input id="tbz-join-name" type="text" autocomplete="name" maxlength="80" enterkeyhint="next" aria-describedby="tbz-join-error"></div>
-    <div class="field"><label for="tbz-join-phone" id="tbz-join-phone-label"></label><input id="tbz-join-phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="40" enterkeyhint="next" aria-describedby="tbz-join-error"></div>
-    <div class="field"><label for="tbz-join-email" id="tbz-join-email-label"></label><input id="tbz-join-email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="254" enterkeyhint="next" aria-describedby="tbz-join-error"></div>
-    <div class="field"><label for="tbz-join-city" id="tbz-join-city-label"></label><input id="tbz-join-city" type="text" autocomplete="address-level2" maxlength="80" enterkeyhint="next" aria-describedby="tbz-join-error"></div>
+    <div class="field"><label for="tbz-join-size" id="tbz-join-size-label"></label><select id="tbz-join-size"></select></div>
+    <p id="tbz-join-size-note" class="switch-note"></p>
+    <ol id="tbz-join-done-slots" class="slot-list" hidden></ol>
+    <h3 id="tbz-join-slot-title" class="done-title" tabindex="-1"></h3>
+    <p id="tbz-join-slot-note" class="switch-note"></p>
+    <div class="field"><label for="tbz-join-name" id="tbz-join-name-label"></label><input id="tbz-join-name" type="text" autocomplete="off" maxlength="80" enterkeyhint="next" aria-describedby="tbz-join-error"></div>
+    <div class="field"><label for="tbz-join-phone" id="tbz-join-phone-label"></label><input id="tbz-join-phone" type="tel" inputmode="tel" autocomplete="off" maxlength="40" enterkeyhint="next" aria-describedby="tbz-join-error"></div>
+    <div class="field"><label for="tbz-join-email" id="tbz-join-email-label"></label><input id="tbz-join-email" type="email" inputmode="email" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="254" enterkeyhint="next" aria-describedby="tbz-join-error"></div>
+    <div class="field"><label for="tbz-join-city" id="tbz-join-city-label"></label><input id="tbz-join-city" type="text" autocomplete="off" maxlength="80" enterkeyhint="next" aria-describedby="tbz-join-error"></div>
     <div class="field"><label for="tbz-join-instagram" id="tbz-join-instagram-label"></label><input id="tbz-join-instagram" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="60" aria-describedby="tbz-join-error"></div>
-    <div class="check"><input type="checkbox" id="tbz-join-with-group"><label for="tbz-join-with-group" id="tbz-join-with-group-label"></label></div>
-    <div id="tbz-join-code-row" class="field" hidden><label for="tbz-join-code" id="tbz-join-code-label"></label><input id="tbz-join-code" class="session-input" type="text" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="6" aria-describedby="tbz-join-error"></div>
     <div class="hp" aria-hidden="true"><label for="tbz-join-website">Website</label><input id="tbz-join-website" type="text" name="website" tabindex="-1" autocomplete="off"></div>
     <p id="tbz-join-error" class="field-error" role="alert" hidden></p>
     <button type="submit" id="tbz-join-send" class="btn btn-gate"></button>
+    <button type="button" id="tbz-join-back" class="btn btn-small btn-ghost" hidden></button>
   </form>
 
   <section id="tbz-join-done" class="found" aria-labelledby="tbz-join-done-title" hidden>
@@ -62,17 +66,8 @@
     <p id="tbz-join-place" class="place" role="status"></p>
     <h3 id="tbz-join-group-title" class="done-title"></h3>
     <p id="tbz-join-names" class="switch-note"></p>
-    <p id="tbz-join-code-intro" class="switch-note"></p>
-    <p id="tbz-join-session" class="booth-code session-code"></p>
-    <button type="button" id="tbz-join-share" class="btn"></button>
-    <p id="tbz-join-share-msg" class="switch-note" role="status" hidden></p>
-    <form id="tbz-join-move" class="code-form" novalidate>
-      <div class="field"><label for="tbz-join-move-code" id="tbz-join-move-label"></label><input id="tbz-join-move-code" class="session-input" type="text" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="6" aria-describedby="tbz-join-move-msg"></div>
-      <button type="submit" id="tbz-join-move-go" class="btn btn-small"></button>
-    </form>
-    <button type="button" id="tbz-join-leave" class="btn btn-small btn-ghost"></button>
-    <p id="tbz-join-move-msg" class="field-error" role="alert" hidden></p>
     <p id="tbz-join-refresh" class="list-note" role="status" hidden></p>
+    <button type="button" id="tbz-join-again" class="btn" hidden></button>
     <button type="button" id="tbz-join-forget" class="link-btn"></button>
   </section>
   <noscript><p class="list-note">This page needs JavaScript to sign you up. Turn it on and reload.</p></noscript>

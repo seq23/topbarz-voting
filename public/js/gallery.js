@@ -15,6 +15,7 @@ export function createGallery() {
   const by = $("tbz-gallery-by");
   let photos = [];
   let signature = null;
+  const galleryWhat = { photo: "Top Barz at CultureCon, photo" };
   let index = 0;
   let opener = null;
 
@@ -111,21 +112,24 @@ export function createGallery() {
   }, { passive: true });
 
   return {
+    // The words a photo's alt text starts with (the festive look renames CultureCon's).
+    rename(photo) { galleryWhat.photo = photo; signature = ""; },
     // Called with the manifest from every /api/state. Rebuilds only when the manifest changed.
-    // The holiday party (17 Nov 2026): until there are event photos, the GIFs the team picked
-    // show in their place (Giphy's own images, with "Powered by GIPHY" as its terms ask).
+    // The holiday party (17 Nov 2026; Scooter's preview notes): the GIFs the team picked replace
+    // the photos while there are any (Giphy's own images, with "Powered by GIPHY" as its terms
+    // ask). With no GIFs picked, the photos show as before. Production sends no GIFs until go-live.
     update(manifest, gifs = []) {
       const photoList = (Array.isArray(manifest) ? manifest : [])
         .map((p, i) => ({
           url: safeMediaUrl(p?.url), thumb_url: safeMediaUrl(p?.thumb_url),
           width: Number(p?.thumb_width) || null, height: Number(p?.thumb_height) || null,
-          alt: typeof p?.alt === "string" && p.alt.trim() ? p.alt.trim() : `Top Barz at CultureCon, photo ${i + 1}`,
+          alt: typeof p?.alt === "string" && p.alt.trim() ? p.alt.trim() : `${galleryWhat.photo} ${i + 1}`,
         }))
         .filter((p) => p.url && p.thumb_url);
-      const gifList = photoList.length ? [] : (Array.isArray(gifs) ? gifs : [])
+      const gifList = (Array.isArray(gifs) ? gifs : [])
         .map((g) => ({ url: safeGifUrl(g?.url), thumb_url: safeGifUrl(g?.url), width: Number(g?.width) || null, height: Number(g?.height) || null, alt: typeof g?.title === "string" && g.title.trim() ? g.title.trim().slice(0, 120) : "Holiday GIF" }))
         .filter((p) => p.url);
-      const list = photoList.length ? photoList : gifList;
+      const list = gifList.length ? gifList : photoList;
       by.hidden = gifList.length === 0;
       const sig = list.map((p) => p.thumb_url).join("|");
       if (sig === signature) return;

@@ -4,6 +4,7 @@ import { api, forgetVoter, keepOwn, loadOwn, loadVoter, OWN_KEY, ownCounts, save
 import { createThread } from "./comments.js";
 import { $, h, icon, reducedMotion } from "./dom.js";
 import { festive } from "./festive.js";
+import { HOLIDAY } from "./party-copy.js";
 import { createGallery } from "./gallery.js";
 import { createGate } from "./gate.js";
 import {
@@ -551,7 +552,7 @@ function votingClosedByServer() {
 
 // ── /api/state
 const gallery = createGallery();
-festive();
+festive().then((on) => { if (on) gallery.rename(HOLIDAY.home.photoAlt); });
 
 function applyState(state, generatedAt) {
   app.loaded = true;

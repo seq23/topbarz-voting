@@ -49,8 +49,9 @@ els.retry.textContent = COPY.retry;
 els.logTitle.textContent = COPY.logTitle;
 els.groupsTitle.textContent = COPY.groupsTitle;
 
-// ── The holiday party: which group is in the booth (the team marks it green on /team). The
-// pick goes with the upload, so the song's people are that group from the start.
+// ── The holiday party: whose song this is, from the groups at the upload station (the team marks
+// a group Out of the booth on /team). The pick goes with the upload, so the song's people are that
+// group from the start, and the group is done.
 function renderGroups() {
   const ids = app.groups.map((g) => String(g.id));
   if (app.group && !ids.includes(app.group)) app.group = "";

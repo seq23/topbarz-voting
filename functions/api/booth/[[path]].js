@@ -7,10 +7,12 @@
 //   POST /api/booth/tracks/<code>/public  { email, public: true|false } → { code, public, share_id }   the share switch (4 Oct 2026)
 //   POST /api/booth/tracks/<code>/art     the artwork, raw (image/jpeg or image/png, ≤ 2 MB, checked by its first bytes), header x-email → { code, art_url }
 //   The holiday contest (17 Nov 2026; only while HOLIDAY_EVENT is on, else 404 party_off):
-//   GET  /api/booth/sessions              the groups the team marked "in the booth" → { sessions: [{ id, names, size }] } (first names)
-//   POST /api/booth/tracks  + x-party-session: <id>   tags the upload with that group: its people are attached at once
-//   POST /api/booth/tracks/<code>/contest        { email, enter: true|false, agree: true, guest_key } → this person's own box; a tick needs
-//                                                the guest_key kept by the device that signed up with that email; the song enters the vote by itself when everyone is in
+//   GET  /api/booth/sessions              the groups at the upload station (out of the booth, song not uploaded) → { sessions: [{ id, names, size }] } (first names)
+//   POST /api/booth/tracks  + x-party-session: <id>   the song is that group's: its people are on it at once, and the group is done
+//   POST /api/booth/tracks/<code>/enter   while the party is on: hear and download only. It never puts the email on the song;
+//                                         `contest.you.performer` says whether that email is one of the song's people.
+//   POST /api/booth/tracks/<code>/contest        { email, enter: true|false, agree: true, group_confirmed?: true|false } → the song's entry,
+//                                                by someone on it; a group song goes in when someone on it also confirms with the group
 //   POST /api/booth/tracks/<code>/contest-status { email } → the same view, for the page's 5 s refresh
 //   POST /api/booth/tracks/<code>/title          { email, title } → the song's title (its name in the vote)
 //   GET  /api/booth/listen/<share_id>     the listen page's read → { file_name, audio_url, art_url }; 404 private | not_found (the same status for both)
@@ -28,8 +30,8 @@ import {
   ACCESS_SQL, ART_SQL, ATTACH_SQL, BOOTH_DAY_KEY, DROP_SQL, LISTEN_SQL, LOG_SQL, OPEN_SQL, PEOPLE_SQL, PUBLIC_SQL, VOTE_SQL, allIn, artKey, artMagic, artSize, artType, artUrl, audioExtension, audioType, cleanEmail, cleanFileName, countPeople, fileBody, isCode, isShareId, reserveCode, shareId, toTrack, uploadSize,
 } from "../../_lib/booth.js";
 import { LIMITS } from "../../_lib/config.js";
-import { ATTACH_TAGGED_SQL, BOOTH_SESSION_SQL, CONTEST_SET_SQL, GUEST_EMAIL_BY_KEY_SQL, IN_BOOTH_SQL, SESSION_EMAILS_SQL, TAG_SQL, TITLE_SQL, cleanTitle, contestClosed, contestView, holidayOn, isEntered, readSong, syncEntry } from "../../_lib/contest.js";
-import { RULES_VERSION, firstOf, groupLabel, isGuestKey } from "../../_lib/party.js";
+import { ATTACH_TAGGED_SQL, BOOTH_SESSION_SQL, CONFIRM_SQL, ENTER_SQL, IN_BOOTH_SQL, MARK_PERSON_SQL, SESSION_DONE_SQL, SESSION_EMAILS_SQL, TAG_SQL, TITLE_SQL, UNMARK_ALL_SQL, UPLOAD_EVENT_SQL, WITHDRAW_SQL, cleanTitle, contestClosed, contestView, holidayOn, isEntered, readSong, syncEntry } from "../../_lib/contest.js";
+import { RULES_VERSION, firstOf, groupLabel } from "../../_lib/party.js";
 import { HttpError, fail, ipHash, json, readJson, route } from "../../_lib/http.js";
 import { assertUnderLimit, limitStatement, maybePrune } from "../../_lib/ratelimit.js";
 
@@ -58,13 +60,13 @@ async function upload(context) {
     throw new HttpError(429, "daily_limit", "The booth has reached its upload limit for today.", { retry_after_seconds: LIMITS.boothUploadsPerDay.window });
   }
 
-  // The group in the booth, when the engineer picked one (holiday party only): checked before the
-  // file is taken, so a stale pick is refused, never silently dropped.
+  // The group whose song this is, picked from the upload station (holiday party only): checked
+  // before the file is taken, so a stale pick is refused, never silently dropped.
   const tag = request.headers.get("x-party-session");
   let sessionId = null;
   if (tag && holidayOn(env)) {
     sessionId = /^[1-9][0-9]{0,9}$/.test(tag) ? (await db.prepare(BOOTH_SESSION_SQL).bind(Number(tag)).first())?.id ?? null : null;
-    if (!sessionId) throw new HttpError(409, "session_not_in_booth", "That group is not marked in the booth any more. Pick the group again.");
+    if (!sessionId) throw new HttpError(409, "session_not_in_booth", "That group is not at the upload station any more. Pick the group again.");
   }
   const reserved = await reserveCode(db, { fileName, contentType, size, ext, uploadedAt: now });
   if (!reserved) throw new HttpError(503, "no_code_free", "No code is free right now. Try again in a moment.");
@@ -77,7 +79,12 @@ async function upload(context) {
   }
   if (sessionId) {
     const emails = (await db.prepare(SESSION_EMAILS_SQL).bind(sessionId).all()).results ?? [];
-    await db.batch([db.prepare(TAG_SQL).bind(reserved.id, sessionId), ...emails.map((r) => db.prepare(ATTACH_TAGGED_SQL).bind(reserved.id, r.email, now))]);
+    await db.batch([
+      db.prepare(TAG_SQL).bind(reserved.id, sessionId),
+      ...emails.map((r) => db.prepare(ATTACH_TAGGED_SQL).bind(reserved.id, r.email, now)),
+      db.prepare(SESSION_DONE_SQL).bind(sessionId, now),
+      db.prepare(UPLOAD_EVENT_SQL).bind(sessionId, now),
+    ]);
   }
   maybePrune(context);
   return json({ code: reserved.code, file_name: fileName, uploaded_at: new Date(now).toISOString(), ...(sessionId ? { tagged: true } : {}) });
@@ -134,20 +141,20 @@ async function enter(context, code) {
   assertUnderLimit(hour, LIMITS.boothLookupPerHour, "tries");
   const row = isCode(code) ? (await db.prepare(OPEN_SQL).bind(code, now).all()).results?.[0] : null;
   if (!row) throw new HttpError(404, "not_found", NOT_FOUND);
-  const [attached, people] = await db.batch([
+  // While the party is on, the code is for hearing and downloading only: the song's people are
+  // the group picked at the upload, and typing the code never adds anyone to it.
+  if (holidayOn(env)) {
+    const song = await readSong(db, code);
+    maybePrune(context);
+    const contest = contestView(song, email, { entered: await isEntered(db, song.track), closed: await contestClosed(env, now), production: env.APP_ENV === "production" });
+    return json({ ...toTrack(row), ...youAnd(song.people, email), contest });
+  }
+  const [, people] = await db.batch([
     db.prepare(ATTACH_SQL).bind(row.id, email, now),
     db.prepare(PEOPLE_SQL).bind(row.id),
   ]);
   maybePrune(context);
-  if (!holidayOn(env)) return json({ ...toTrack(row), ...youAnd(people.results ?? [], email) });
-  // A new person on a song already in the vote: the song is everyone's, so it leaves the vote
-  // until they tick too (one box never speaks for someone who joined later).
-  let song = await readSong(db, code);
-  let entered;
-  if ((attached.meta?.changes ?? 0) > 0 && song.track.vote_track_id) ({ entered } = await syncEntry(env, song, now));
-  else entered = await isEntered(db, song.track);
-  const contest = contestView(song, email, { entered, closed: await contestClosed(env, now), production: env.APP_ENV === "production" });
-  return json({ ...toTrack(row), ...youAnd(people.results ?? [], email), contest });
+  return json({ ...toTrack(row), ...youAnd(people.results ?? [], email) });
 }
 
 // ── The holiday contest ────────────────────────────────────────────────────────────────────────
@@ -156,19 +163,20 @@ async function contestFor(env, code, email, now, song) {
   const s = song ?? await readSong(env.DB, code);
   return contestView(s, email, { entered: await isEntered(env.DB, s.track), closed: await contestClosed(env, now), production: env.APP_ENV === "production" });
 }
-// This person's own box. Ticking it records that they agreed to the linked rules (and which
-// rules, and when); the song enters the vote by itself the moment everyone on it has. Only a
-// person who signed up at /join can enter (the contest needs a name and a number), and only from
-// the device they signed up on: the tick carries that device's guest key, whose email must be the
-// one being ticked, so a friend who knows the code and your email cannot tick your box (403
-// not_your_sign_up). Unticking a ticked box needs the same key, so nobody can step a friend out;
-// a step-out takes the song back out for everyone, and the team can always pull a song on /team. Nothing moves after voting ends.
+// The song's entry, by someone on it (preview only until Scooter settles the waiver question).
+// Ticking Enter records who agreed to the linked rules, when, and which rules; a solo song is then
+// in the vote. A group song goes in when someone on it also ticks "Confirmed with your group" (who
+// and when are kept, and everyone on the song sees both first names). Unticking Enter takes the song
+// back out for everyone; unticking the confirmation takes it out until someone confirms again.
+// Only someone on the song (403 not_attached otherwise: typing the code is not enough) who signed
+// up at /join. Nothing moves after voting ends.
 async function contest(context, code) {
   const { request, env } = context;
   if (!holidayOn(env)) partyOff();
   const body = await readJson(request);
   if (typeof body.enter !== "boolean") throw new HttpError(400, "bad_enter", "Send { enter: true } or { enter: false }.");
   if (body.enter && body.agree !== true) throw new HttpError(400, "agree_required", "Tick the box to agree to the official rules.");
+  if (body.group_confirmed !== undefined && typeof body.group_confirmed !== "boolean") throw new HttpError(400, "bad_confirm", "Send { group_confirmed: true } or { group_confirmed: false }.");
   const now = Date.now();
   const ip = await ipHash(request, env);
   await underEditLimit(context, ip, now);
@@ -177,13 +185,14 @@ async function contest(context, code) {
   const db = env.DB;
   let song = await readSong(db, code);
   if (body.enter && !song.people.find((p) => p.email === email)?.name) throw new HttpError(409, "not_signed_up", "Sign up at the QR code with this same email first, then tick the box.");
-  // A tick, and an untick of a box that is ticked, both need this person's own sign-up key.
-  const ticked = song.people.find((p) => p.email === email)?.contest_opt_in === 1;
-  if (body.enter || ticked) {
-    const own = isGuestKey(body.guest_key) ? await db.prepare(GUEST_EMAIL_BY_KEY_SQL).bind(body.guest_key).first() : null;
-    if (own?.email !== email) throw new HttpError(403, "not_your_sign_up", "Change your box on the device you signed up on, with the email you signed up with. Each person speaks only for themselves.");
+  if (!body.enter) {
+    await db.batch([db.prepare(WITHDRAW_SQL).bind(trackId), db.prepare(UNMARK_ALL_SQL).bind(trackId)]);
+  } else {
+    const writes = [db.prepare(ENTER_SQL).bind(trackId, email, now, RULES_VERSION), db.prepare(MARK_PERSON_SQL).bind(trackId, email, now, RULES_VERSION)];
+    if (body.group_confirmed === true) writes.push(db.prepare(CONFIRM_SQL).bind(trackId, email, now));
+    if (body.group_confirmed === false) writes.push(db.prepare(CONFIRM_SQL).bind(trackId, null, null));
+    await db.batch(writes);
   }
-  await db.prepare(CONTEST_SET_SQL).bind(trackId, email, body.enter ? 1 : 0, now, body.enter ? RULES_VERSION : null).run();
   song = await readSong(db, code);
   const { entered } = await syncEntry(env, song, now);
   maybePrune(context);
@@ -218,7 +227,7 @@ async function setTitle(context, code) {
   const { entered } = await syncEntry(env, song, now);
   return json({ code, title, contest: contestView(song, email, { entered, closed: false, production: env.APP_ENV === "production" }) });
 }
-// The groups the team marked green, for the engineer to tag the upload: first names only.
+// The groups at the upload station, for the engineer to pick the song's group: first names only.
 async function inBooth(context) {
   const { request, env } = context;
   if (!holidayOn(env)) return json({ on: false, sessions: [] });

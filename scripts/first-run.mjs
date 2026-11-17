@@ -1,16 +1,19 @@
 #!/usr/bin/env node
 // The partner's first session on a preview, played end to end over HTTP (the holiday party,
-// 17 Nov 2026). Exits non-zero on the first failure and prints one line starting FIRST_RUN OK
-// when every step passed.
+// 17 Nov 2026, with Scooter's preview notes). Exits non-zero on the first failure and prints one
+// line starting FIRST_RUN OK when every step passed.
 //   node scripts/first-run.mjs --url https://<branch>.topbarz-voting.pages.dev   (or FIRST_RUN_URL)
-// Steps: every changed page loads with no placeholder text or error; the party is on; two guests
-// sign up and join one group by its code; a reload (the guest's own refresh) still shows both;
-// the engineer uploads a song; both enter its code with their emails; one ticks "Enter the
-// contest" and the song is NOT in the vote ("waiting on" the other); the other ticks and it IS
-// in the vote within 10 s, with no script run; a reload still says entered; one unticks and it
-// leaves the vote (so the run leaves nothing in the preview's vote); the team's line refuses
-// anyone not signed in. With FIRST_RUN_TEAM_TOKEN (a team token from signing in on that
-// preview) it also marks the group green, checks it on a second read, and undoes it.
+// Steps: every changed page loads with no placeholder text or error (and the partner logos load);
+// the party is on; a group of two signs up on one phone (no codes) and a reload still shows both;
+// one of them cannot sign up again while the group is in line ("already in line", said, not a
+// silent block); a walk-up upload's code lets someone hear and download but never puts them on
+// the song; the team's line refuses anyone not signed in. With FIRST_RUN_TEAM_TOKEN (a team token
+// from signing in on that preview) it also plays the team's side: green, then red to the upload
+// station while the next group goes in; the engineer's list offers the group just out, not the one
+// in the booth; the upload lands the song on that group and moves it to done; Enter alone is not
+// enough for a group song; "Confirmed with your group" puts it in the vote within 12 s with no
+// script run; a reload still reads entered for both; unticking takes it out (the run leaves
+// nothing in the preview's vote); and the group can get back in line once it is done.
 // Test data only: "Test …" names, @example.com addresses; production refuses it (and the party
 // is off there).
 const arg = (name) => { const i = process.argv.indexOf(`--${name}`); return i > 0 ? process.argv[i + 1] : undefined; };
@@ -36,72 +39,43 @@ for (const page of ["/join", "/team", "/track", "/", "/booth", "/holiday-rules",
   if (r.status !== 200) fail(`${page} answered ${r.status}`);
   if (/lorem ipsum|\bTODO\b|coming soon|<title>[^<]*(error|not found)/i.test(r.text)) fail(`${page} carries placeholder or error text`);
 }
-ok("every changed page loads (join, team, track, the vote, booth, holiday rules, the QR sign, listen) with no placeholder text");
+for (const logo of ["flow-music", "dick-and-janes", "blitz-and-bubbles"]) {
+  const r = await fetch(`${base}/img/partners/${logo}.png`);
+  if (r.status !== 200 || !/image\/png/.test(r.headers.get("content-type") ?? "")) fail(`the ${logo} logo answered ${r.status}`);
+}
+ok("every changed page loads (join, team, track, the vote, booth, holiday rules, the QR sign, listen) with no placeholder text, and the three partner logos load");
 const party = await req("/api/party");
 if (party.json?.on !== true) fail(`the party is not switched on here (/api/party: ${party.text.slice(0, 80)})`);
 ok("the holiday party is on");
 
-// 2. Two guests, one group, and a reload.
+// 2. A group of two on one phone, and a reload.
 const tag = `${Date.now().toString(36)}`;
-const guestA = { name: `Test Ava ${tag}`, phone: "555 010 2030", email: `first-run-a-${tag}@example.com`, city: "Brooklyn", instagram: "", website: "" };
-const guestB = { name: `Test Bo ${tag}`, phone: "555 010 4050", email: `first-run-b-${tag}@example.com`, city: "Queens", instagram: "", website: "" };
-const a = await req("/api/party/join", { method: "POST", body: guestA });
-if (a.status !== 201 || !/^[A-Z]{4}$/.test(a.json?.session?.code ?? "")) fail(`sign-up A: ${a.status} ${a.text.slice(0, 120)}`);
-const b = await req("/api/party/join", { method: "POST", body: { ...guestB, session_code: a.json.session.code } });
-if (b.status !== 201 || b.json?.session?.code !== a.json.session.code) fail(`sign-up B with A's code: ${b.status} ${b.text.slice(0, 120)}`);
-if (/555|@example\.com|Brooklyn/.test(JSON.stringify({ ...b.json, guest_key: "" }))) fail("a guest's answer carries a phone, an email or a city");
-ok(`two guests signed up into one group (${a.json.session.code}), and neither answer carries a phone or an email`);
+const person = (n, phone, city) => ({ name: `Test ${n} ${tag}`, phone, email: `first-run-${n.toLowerCase()}-${tag}@example.com`, city, instagram: "" });
+const guestA = person("Ava", "555 010 2030", "Brooklyn");
+const guestB = person("Bo", "555 010 4050", "Queens");
+const a = await req("/api/party/join", { method: "POST", body: { guests: [guestA, guestB], website: "" } });
+if (a.status !== 201 || a.json?.session?.size !== 2) fail(`the group sign-up: ${a.status} ${a.text.slice(0, 160)}`);
+if (/555|@example\.com|Brooklyn|Queens/.test(JSON.stringify({ ...a.json, guest_key: "" }))) fail("the sign-up answer carries a phone, an email or a city");
+ok(`a group of two signed up on one phone (${a.json.session.names.join(", ")}), and the answer carries no phone or email`);
 const reload = await req("/api/party/me", { method: "POST", body: { guest_key: a.json.guest_key } });
-if (reload.json?.session?.size !== 2) fail(`after a reload the group has ${reload.json?.session?.size} people, not 2`);
-ok(`a reload still shows the group of 2 (${reload.json.session.names.join(", ")}), place ${reload.json.session.place}`);
-const wrong = await req("/api/party/join", { method: "POST", body: { ...guestA, email: `first-run-c-${tag}@example.com`, session_code: "ZZZZ" } });
-if (wrong.json?.error !== "no_session") fail(`a wrong group code answered ${wrong.status} ${wrong.text.slice(0, 80)}`);
-ok(`a wrong group code says: "${wrong.json.message}"`);
+if (reload.json?.session?.size !== 2 || reload.json.session.status !== "waiting") fail(`after a reload the group reads ${reload.text.slice(0, 120)}`);
+ok(`a reload still shows the group of 2, waiting, place ${reload.json.session.place}`);
+const twice = await req("/api/party/join", { method: "POST", body: { ...guestB, website: "" } });
+if (twice.status !== 409 || twice.json?.error !== "already_in_line") fail(`signing up again while in line answered ${twice.status} ${twice.text.slice(0, 120)}`);
+ok(`one place at a time, said out loud: "${twice.json.message}"`);
 
-// 3. The song: uploaded, entered by both, the contest box, the vote.
+// 3. A walk-up upload: the code hears and downloads, and never puts anyone on the song.
 const bytes = new Uint8Array(2048).map((_, i) => (i < 3 ? [0x49, 0x44, 0x33][i] : i % 251));
-const up = await req("/api/booth/tracks", { method: "POST", headers: { "x-file-name": encodeURIComponent(`Test - First run ${tag}.mp3`), "content-type": "audio/mpeg", "content-length": String(bytes.byteLength) }, raw: bytes });
-if (up.status !== 200 || !/^\d{4}$/.test(up.json?.code ?? "")) fail(`the booth upload: ${up.status} ${up.text.slice(0, 120)}`);
-const code = up.json.code;
-ok(`the engineer's upload gave code ${code}`);
-for (const g of [guestA, guestB]) {
-  const e = await req(`/api/booth/tracks/${code}/enter`, { method: "POST", body: { email: g.email } });
-  if (e.status !== 200 || e.json?.contest?.on !== true) fail(`entering the code: ${e.status} ${e.text.slice(0, 120)}`);
-  if (e.json.contest.you.in !== false) fail("the contest box did not start unticked");
-}
-ok("both entered the code with their emails, and the contest box starts unticked for each");
-const forB = await req(`/api/booth/tracks/${code}/contest`, { method: "POST", body: { email: guestB.email, enter: true, agree: true, guest_key: a.json.guest_key } });
-if (forB.status !== 403 || forB.json?.error !== "not_your_sign_up") fail(`A's phone ticking B's box answered ${forB.status} ${forB.text.slice(0, 120)}`);
-ok("one person cannot tick a friend's box: A's phone with B's email is refused (403 not_your_sign_up)");
-const tickA = await req(`/api/booth/tracks/${code}/contest`, { method: "POST", body: { email: guestA.email, enter: true, agree: true, guest_key: a.json.guest_key } });
-if (tickA.json?.error === "voting_closed") fail("the preview's voting window is closed: run npm run party-window -- --env preview --starts <ISO> --ends <ISO>");
-if (tickA.status !== 200 || tickA.json.contest.entered !== false || !tickA.json.contest.waiting_on.includes("Test")) fail(`one tick: ${tickA.status} ${tickA.text.slice(0, 160)}`);
-ok(`one of two ticked: not entered, "waiting on ${tickA.json.contest.waiting_on.join(", ")}"`);
-const inVote = async (want) => {
-  for (let i = 0; i < 12; i++) {
-    const s = await req(`/api/state?first-run=${Date.now()}`);
-    const has = (s.json?.tracks ?? []).some((t) => t.label === "Test & Test");
-    if (has === want) return true;
-    await sleep(1000);
-  }
-  return false;
-};
-if (!(await inVote(false))) fail("the song is in the vote after only one of two ticked");
-const tickB = await req(`/api/booth/tracks/${code}/contest`, { method: "POST", body: { email: guestB.email, enter: true, agree: true, guest_key: b.json.guest_key } });
-if (tickB.json?.contest?.entered !== true) fail(`both ticked but not entered: ${tickB.text.slice(0, 160)}`);
-if (!(await inVote(true))) fail("both ticked, but the song did not show in /api/state within 12 s");
-ok("both ticked: the song is in the vote (/api/state) with no script run");
-const again = await req(`/api/booth/tracks/${code}/contest-status`, { method: "POST", body: { email: guestB.email } });
-if (again.json?.contest?.entered !== true || !again.json.contest.people.every((p) => p.in)) fail("after a reload the song no longer reads entered for everyone");
-ok("a reload (the other phone's refresh) still reads entered, both in");
-const stepOutB = await req(`/api/booth/tracks/${code}/contest`, { method: "POST", body: { email: guestB.email, enter: false, guest_key: a.json.guest_key } });
-if (stepOutB.status !== 403 || stepOutB.json?.error !== "not_your_sign_up") fail(`A's phone unticking B's box answered ${stepOutB.status} ${stepOutB.text.slice(0, 120)}`);
-ok("one person cannot step a friend out: A's phone unticking B's box is refused (403 not_your_sign_up)");
-const untick = await req(`/api/booth/tracks/${code}/contest`, { method: "POST", body: { email: guestA.email, enter: false, guest_key: a.json.guest_key } });
-if (untick.json?.contest?.entered !== false || !(await inVote(false))) fail("unticking did not take the song out of the vote");
-ok("one unticked: the song left the vote for everyone (this run leaves nothing in the preview's vote)");
+const uploadSong = (name, headers = {}) => req("/api/booth/tracks", { method: "POST", headers: { "x-file-name": encodeURIComponent(name), "content-type": "audio/mpeg", "content-length": String(bytes.byteLength), ...headers }, raw: bytes });
+const walk = await uploadSong(`Test - Walk up ${tag}.mp3`);
+if (walk.status !== 200 || !/^\d{4}$/.test(walk.json?.code ?? "")) fail(`the booth upload: ${walk.status} ${walk.text.slice(0, 120)}`);
+const heard = await req(`/api/booth/tracks/${walk.json.code}/enter`, { method: "POST", body: { email: guestA.email } });
+if (heard.status !== 200 || !heard.json?.download_url || heard.json?.contest?.you?.performer !== false) fail(`entering a song's code: ${heard.status} ${heard.text.slice(0, 160)}`);
+const sneak = await req(`/api/booth/tracks/${walk.json.code}/contest`, { method: "POST", body: { email: guestA.email, enter: true, agree: true } });
+if (sneak.json?.error !== "not_attached") fail(`someone who only typed the code could enter the song: ${sneak.status} ${sneak.text.slice(0, 120)}`);
+ok(`the code ${walk.json.code} lets someone hear and download, and never makes them a performer (entering it is refused)`);
 
-// 4. The team's line: closed to anyone not signed in; with a team token, green and undo.
+// 4. The team's line: closed to anyone not signed in; with a team token, the whole song flow.
 const line = await req("/api/party/team/line");
 if (line.status !== 401 || line.json?.error !== "team_sign_in") fail(`the team's line without signing in answered ${line.status}`);
 ok("the team's line refuses anyone not signed in (401 team_sign_in)");
@@ -109,13 +83,48 @@ const token = process.env.FIRST_RUN_TEAM_TOKEN;
 if (token) {
   const auth = { authorization: `Bearer ${token}` };
   const l = await req("/api/party/team/line", { headers: auth });
-  const s = (l.json?.sessions ?? []).find((x) => x.code === a.json.session.code);
+  const s = (l.json?.sessions ?? []).find((x) => x.guests?.some((g) => g.email === guestA.email));
   if (!s || s.guests.length !== 2) fail("the team's line does not show the new group of 2");
-  const green = await req(`/api/party/team/sessions/${s.id}/status`, { method: "POST", headers: auth, body: { status: "booth", from: "waiting" } });
+  const lane = (status, from) => req(`/api/party/team/sessions/${s.id}/status`, { method: "POST", headers: auth, body: { status, from } });
+  if ((await lane("booth", "waiting")).json?.session?.status !== "booth") fail("green did not take");
   const second = await req("/api/party/team/line", { headers: auth });
-  if (green.json?.session?.status !== "booth" || (second.json.sessions.find((x) => x.id === s.id)?.status !== "booth")) fail("marking the group green did not hold on a second read");
-  const undo = await req(`/api/party/team/sessions/${s.id}/status`, { method: "POST", headers: auth, body: { status: "waiting", from: "booth" } });
-  if (undo.json?.session?.status !== "waiting") fail("undo did not put the group back");
-  ok("signed in as the team: the group shows with its 2 people, goes green, holds on a second read, and undo puts it back");
+  if (second.json.sessions.find((x) => x.id === s.id)?.status !== "booth") fail("green did not hold on a second read");
+  if ((await lane("upload", "booth")).json?.session?.status !== "upload") fail("red did not move the group to the upload station");
+  ok("signed in as the team: the group shows as one card of 2, goes green with one tap, holds on a second read, and red moves it to the upload station");
+  const offered = await req("/api/booth/sessions");
+  if (!offered.json?.sessions?.some((g) => g.id === s.id)) fail("the engineer's list does not offer the group just out of the booth");
+  const up = await uploadSong(`Test - First run ${tag}.mp3`, { "x-party-session": String(s.id) });
+  if (up.status !== 200 || up.json?.tagged !== true) fail(`the upload for the group: ${up.status} ${up.text.slice(0, 120)}`);
+  const code = up.json.code;
+  const done = await req("/api/party/team/line", { headers: auth });
+  if (done.json.sessions.find((x) => x.id === s.id)?.status !== "done") fail("the upload did not move the group to done");
+  ok(`the engineer picked the group from the upload station; the song (${code}) is theirs and the group is done`);
+  const tick = await req(`/api/booth/tracks/${code}/contest`, { method: "POST", body: { email: guestA.email, enter: true, agree: true } });
+  if (tick.json?.error === "voting_closed") fail("the preview's voting window is closed: run npm run party-window -- --env preview --starts <ISO> --ends <ISO>");
+  if (tick.status !== 200 || tick.json.contest.entered !== false || tick.json.contest.step !== "needs_group") fail(`Enter alone on a group song: ${tick.status} ${tick.text.slice(0, 160)}`);
+  ok("Enter alone does not put a group song in: it waits for the group's confirmation");
+  const label = `Test & Test`;
+  const inVote = async (want) => {
+    for (let i = 0; i < 12; i++) {
+      const st = await req(`/api/state?first-run=${Date.now()}`);
+      if ((st.json?.tracks ?? []).some((t) => t.label === label) === want) return true;
+      await sleep(1000);
+    }
+    return false;
+  };
+  if (!(await inVote(false))) fail("the song is in the vote before the group confirmed");
+  const confirm = await req(`/api/booth/tracks/${code}/contest`, { method: "POST", body: { email: guestB.email, enter: true, agree: true, group_confirmed: true } });
+  if (confirm.json?.contest?.entered !== true) fail(`confirmed with the group but not entered: ${confirm.text.slice(0, 160)}`);
+  if (!(await inVote(true))) fail("confirmed, but the song did not show in /api/state within 12 s");
+  ok("Confirmed with your group: the song is in the vote (/api/state) with no script run");
+  const again = await req(`/api/booth/tracks/${code}/contest-status`, { method: "POST", body: { email: guestA.email } });
+  if (again.json?.contest?.entered !== true || again.json.contest.confirmed_by !== "Test") fail("after a reload the song no longer reads entered, confirmed");
+  ok("a reload on the other phone still reads entered and who confirmed it");
+  const untick = await req(`/api/booth/tracks/${code}/contest`, { method: "POST", body: { email: guestA.email, enter: false } });
+  if (untick.json?.contest?.entered !== false || !(await inVote(false))) fail("unticking did not take the song out of the vote");
+  ok("unticked: the song left the vote for everyone (this run leaves nothing in the preview's vote)");
+  const back = await req("/api/party/join", { method: "POST", body: { ...guestB, website: "" } });
+  if (back.status !== 201) fail(`once the group is done, signing up again answered ${back.status} ${back.text.slice(0, 120)}`);
+  ok("once the group's song is uploaded, the same person gets back in line");
 }
-console.log(`FIRST_RUN OK ${base}: ${step} steps${token ? "" : " (the team's emailed-code sign-in is a person's step: set FIRST_RUN_TEAM_TOKEN to cover the team's line too)"}`);
+console.log(`FIRST_RUN OK ${base}: ${step} steps${token ? "" : " (the team's emailed-code sign-in is a person's step: set FIRST_RUN_TEAM_TOKEN to cover the team's line, the upload station and the contest entry too)"}`);

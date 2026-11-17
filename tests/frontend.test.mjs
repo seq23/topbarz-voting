@@ -1009,7 +1009,7 @@ test("Back: with a popup open, the phone's Back button closes the popup instead 
 });
 
 test("phones: the lock screen names the track, and Android and iPhone each get their own text link", () => {
-  assert.match(read("js/player.js"), /const artwork = Array\.isArray\(track\.artwork\) && track\.artwork\.length \? \{ artwork: track\.artwork \} : \{\};\s*navigator\.mediaSession\.metadata = new MediaMetadata\(\{ title: track\.title \|\| "CultureCon track", artist: track\.artist \|\| "Top Barz at CultureCon", \.\.\.artwork \}\)/, "the title, the artist, and artwork only when the track carries some (a booth track with a picture; since 4 Oct 2026)");
+  assert.match(read("js/player.js"), /const artwork = Array\.isArray\(track\.artwork\) && track\.artwork\.length \? \{ artwork: track\.artwork \} : \{\};\s*navigator\.mediaSession\.metadata = new MediaMetadata\(\{ title: track\.title \|\| \(holiday\(\) \? "Christmas jingle" : "CultureCon track"\), artist: track\.artist \|\| \(holiday\(\) \? "Top Barz" : "Top Barz at CultureCon"\), \.\.\.artwork \}\)/, "the title, the artist, and artwork only when the track carries some (a booth track with a picture; since 4 Oct 2026); no CultureCon words while the holiday party is on");
   assert.ok(!/artwork/.test(read("js/app.js")) && !/artwork/.test(read("js/select.js")), "the voting page and the select page pass no artwork");
   assert.match(read("js/app.js"), /hint: card\.audio\.duration, title: card\.track\.label \}\)/);
   assert.ok(!/\bartist\b/.test(read("js/app.js")), "the voting page names no artist of its own, so its tracks still say Top Barz at CultureCon");
@@ -1244,19 +1244,19 @@ test("weight: no libraries, and the whole page is small", () => {
   const voteJs = VOTE_SCRIPTS.reduce((n, f) => n + size(`js/${f}`), 0);
   const boothJs = BOOTH_ONLY_SCRIPTS.reduce((n, f) => n + size(`js/${f}`), 0);
   assert.ok(voteJs < 120_000, `the scripts of the voting and select pages together are ${voteJs} bytes (the same eleven files as before the booth)`);
-  assert.ok(boothJs < 45_500, `the scripts belonging only to booth/track/listen are ${boothJs} bytes together (44,5xx on 17 Nov 2026 with the holiday contest box on /track and the group picker on /booth; 36,6xx on 4 Oct 2026 with the people: the email box, the vote switch and its rules in track.js, booth-rules.js and the two copy files; 29,143 before that, with the share; was < 30_000 for booth/track alone)`);
+  assert.ok(boothJs < 49_000, `the scripts belonging only to booth/track/listen are ${boothJs} bytes together (47,9xx on 17 Nov 2026 after Scooter's preview notes: the listener line, the group confirmation and Share publishing on /track; 44,5xx earlier that day with the holiday contest box on /track and the group picker on /booth; 36,6xx on 4 Oct 2026 with the people: the email box, the vote switch and its rules in track.js, booth-rules.js and the two copy files; 29,143 before that, with the share; was < 30_000 for booth/track alone)`);
   const entryJs = ENTRY_SCRIPTS.reduce((n, f) => n + size(`js/${f}`), 0);
   assert.ok(entryJs < 24_000, `the scripts belonging only to the contest entry page are ${entryJs} bytes together`);
   const partyJs = PARTY_SCRIPTS.reduce((n, f) => n + size(`js/${f}`), 0);
-  assert.ok(partyJs < 47_500, `the holiday party's own scripts are ${partyJs} bytes together (46,8xx on 17 Nov 2026 with who is on each contest song and Remove from this song; 44,0xx with the team's Contest songs and Take out of the vote; 40,1xx before: /join, /team, the festive look and the party's rules)`);
+  assert.ok(partyJs < 54_000, `the holiday party's own scripts are ${partyJs} bytes together (52,4xx on 17 Nov 2026 after Scooter's preview notes: the hand-around group sign-up, the four lanes, the partner logo row and the party's homepage words; 46,8xx earlier with who is on each contest song and Remove from this song; 44,0xx with the team's Contest songs and Take out of the vote; 40,1xx before: /join, /team, the festive look and the party's rules)`);
   assert.equal(voteJs + boothJs + entryJs + partyJs, JS.reduce((n, f) => n + size(f), 0), "and the four together are every script in public/js");
-  assert.ok(pageJs("join.js") < 52_000, `the sign-up page's scripts are ${pageJs("join.js")} bytes before compression`);
-  assert.ok(pageJs("team.js") < 65_500, `the team's page's scripts are ${pageJs("team.js")} bytes before compression (64,2xx on 17 Nov 2026 with Remove from this song)`);
+  assert.ok(pageJs("join.js") < 56_500, `the sign-up page's scripts are ${pageJs("join.js")} bytes before compression (54,2xx on 17 Nov 2026 with the hand-around group sign-up and the partner logo row)`);
+  assert.ok(pageJs("team.js") < 71_000, `the team's page's scripts are ${pageJs("team.js")} bytes before compression (68,8xx on 17 Nov 2026 with the four lanes and the partner logo row; 64,2xx earlier with Remove from this song)`);
   assert.ok(pageJs("entry.js") < 38_000, `the contest entry page's scripts are ${pageJs("entry.js")} bytes before compression (37,2xx on 15 Nov 2026 with the closed state)`);
-  assert.ok(pageJs("track.js") < 79_000, `the rapper's page's scripts are ${pageJs("track.js")} bytes before compression (77,4xx on 17 Nov 2026 with the contest box and the festive look; 61,7xx on 4 Oct 2026 with the people; the shared api/dom/logic/player files are most of it)`);
+  assert.ok(pageJs("track.js") < 86_000, `the rapper's page's scripts are ${pageJs("track.js")} bytes before compression (83,9xx on 17 Nov 2026 after Scooter's preview notes: the group confirmation, the listener line and the partner logo row; 77,4xx earlier that day with the contest box and the festive look; 61,7xx on 4 Oct 2026 with the people; the shared api/dom/logic/player files are most of it)`);
   assert.ok(pageJs("booth.js") < 24_000, `the engineer's page's scripts are ${pageJs("booth.js")} bytes before compression (23,1xx on 17 Nov 2026 with the group picker; 20,8xx on 4 Oct 2026: the people's rules sit in the shared booth-rules.js, as the share's do)`);
   assert.ok(pageJs("listen.js") < 60_000, `the listen page's scripts are ${pageJs("listen.js")} bytes before compression`);
-  assert.ok(size("css/site.css") < 48_000, "the stylesheet stays small (47,0xx on 17 Nov 2026 with the holiday look, /join and /team; 40,7xx on 9 Oct 2026 with the prize list, FAQ and rules page)");
+  assert.ok(size("css/site.css") < 50_000, "the stylesheet stays small (48,4xx on 17 Nov 2026 with the partner logo row and the upload-station lane; 47,0xx earlier that day with the holiday look, /join and /team; 40,7xx on 9 Oct 2026 with the prize list, FAQ and rules page)");
   assert.ok(size("index.html") < 20_000);
   assert.ok(size("select.html") < 8_000);
   assert.ok(size("booth.html") < 8_000);

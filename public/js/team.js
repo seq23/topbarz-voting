@@ -1,6 +1,8 @@
-// The team's page (/team; Scooter, 17 Nov 2026): sign in with an emailed code, then the line,
-// live (every 5 s): who is next and after that, each group with its people, big status buttons
-// (green "In the booth", red "Out / done") that always ask first and can be undone for 10 s, a
+// The team's page (/team; Scooter, 17 Nov 2026, and his preview notes): sign in with an emailed
+// code, then the line, live (every 5 s): who is next and after that, each group with its people,
+// big status buttons (green "In the booth", red "Out of the booth", which moves the group to its own
+// lane, "At the upload station", apart from whoever is in the booth now, until the engineer uploads
+// its song against it) that always ask first and can be undone for 10 s, a
 // "Text them" button that opens Messages on this phone with every number in the group, and each
 // person's details on a tap. Buttons only, no gestures. Below: the contest songs (each with "Take
 // out of the vote", asked first and undoable), the gallery's GIFs and who is on the team.
@@ -15,7 +17,7 @@ import { COPY } from "./team-copy.js";
 
 const els = Object.fromEntries([
   "headline", "intro", "loading", "off", "off-title", "off-note", "signin", "signin-title", "signin-intro", "email-form", "email", "email-label", "send", "code-form", "code-sent", "code", "code-label", "check", "resend", "change", "signin-error",
-  "board", "who", "signout", "next-label", "next", "after-label", "after", "line-note", "line", "done-title", "done",
+  "board", "who", "signout", "next-label", "next", "after-label", "after", "line-note", "line", "upload-title", "upload-intro", "upload-none", "upload", "done-title", "done",
   "songs-title", "songs-intro", "songs-none", "songs",
   "gifs-title", "gifs-intro", "gifs-chosen-title", "gifs-chosen", "gifs-none", "gif-search", "gif-search-label", "gif-status", "gif-results", "gif-by",
   "members-title", "members-intro", "members", "add-form", "add", "add-label", "add-go", "add-msg",
@@ -26,7 +28,7 @@ const app = { token: null, me: "", sessions: [], timer: null, pending: null, und
 
 // ── The words
 document.title = `${COPY.headline} | Top Barz`;
-const words = { headline: "headline", intro: "intro", offNote: null, signinTitle: "signInTitle", signinIntro: "signInIntro", emailLabel: "emailLabel", send: "sendCode", codeLabel: "codeLabel", check: "check", change: "changeEmail", signout: "signOut", nextLabel: "nextUp", afterLabel: "afterThat", doneTitle: "doneTitle", songsTitle: "songsTitle", songsIntro: "songsIntro", songsNone: "songsNone", gifsTitle: "gifsTitle", gifsIntro: "gifsIntro", gifsChosenTitle: "gifsChosen", gifsNone: "gifsNone", gifSearchLabel: "gifsSearch", gifBy: "poweredBy", membersTitle: "teamTitle", membersIntro: "teamIntro", addLabel: "addLabel", addGo: "add", personClose: "close", confirmYes: "yes", confirmNo: "cancel", undo: "undo" };
+const words = { headline: "headline", intro: "intro", offNote: null, signinTitle: "signInTitle", signinIntro: "signInIntro", emailLabel: "emailLabel", send: "sendCode", codeLabel: "codeLabel", check: "check", change: "changeEmail", signout: "signOut", nextLabel: "nextUp", afterLabel: "afterThat", doneTitle: "doneTitle", uploadTitle: "uploadTitle", uploadIntro: "uploadIntro", uploadNone: "uploadNone", songsTitle: "songsTitle", songsIntro: "songsIntro", songsNone: "songsNone", gifsTitle: "gifsTitle", gifsIntro: "gifsIntro", gifsChosenTitle: "gifsChosen", gifsNone: "gifsNone", gifSearchLabel: "gifsSearch", gifBy: "poweredBy", membersTitle: "teamTitle", membersIntro: "teamIntro", addLabel: "addLabel", addGo: "add", personClose: "close", confirmYes: "yes", confirmNo: "cancel", undo: "undo" };
 for (const [el, key] of Object.entries(words)) if (key) els[el].textContent = COPY[key];
 els.offTitle.textContent = HOLIDAY.off;
 els.offNote.textContent = HOLIDAY.offNote;
@@ -130,7 +132,7 @@ function personDetails(g, s) {
   els.personList.replaceChildren(
     ...row("fName", g.name), ...row("fPhone", g.phone, `tel:${g.phone}`), ...row("fEmail", g.email, `mailto:${g.email}`), ...row("fCity", g.city),
     ...row("fInstagram", g.instagram, g.instagram ? `https://www.instagram.com/${encodeURIComponent(g.instagram.replace(/^@/, ""))}` : null),
-    ...row("fGroup", `${namesOf(s)} · ${s.code}`), ...row("fJoined", clockWords(g.joined_at)),
+    ...row("fGroup", `${namesOf(s)} · ${sizeWords(s.guests.length)}`), ...row("fJoined", clockWords(g.joined_at)),
   );
   showModal(els.person, () => closeModal(els.person));
   els.personClose.focus();
@@ -143,24 +145,32 @@ function textThem(s, note) {
   note.textContent = COPY.textNoPhone.replace("{numbers}", s.guests.map((g) => g.phone).join(", "));
   note.hidden = false;
 }
+// The button that moves a group from one lane to another, in words.
+function moveWords(from, to) {
+  if (to === "booth") return from === "upload" ? COPY.backToBooth : COPY.toBooth;
+  if (to === "upload") return from === "done" ? COPY.backToUpload : COPY.toUpload;
+  if (to === "done") return COPY.toDone;
+  return COPY.toWaiting;
+}
 function card(s) {
   const tone = STATUS[s.status].tone;
   const note = h("p", { class: "switch-note", role: "status", hidden: true });
   const actions = h("div", { class: "line-actions" },
-    ...moves(s.status).map((to) => h("button", { type: "button", class: `btn btn-status btn-${STATUS[to].tone}`, text: to === "booth" ? COPY.toBooth : to === "out" ? COPY.toOut : COPY.toWaiting, onclick: () => ask(s, to) })),
-    s.status !== "out" ? h("button", { type: "button", class: "btn btn-small btn-ghost", text: COPY.textThem, onclick: () => textThem(s, note) }) : null);
+    ...moves(s.status).map((to) => h("button", { type: "button", class: `btn btn-status btn-${STATUS[to].tone}`, text: moveWords(s.status, to), onclick: () => ask(s, to) })),
+    s.status === "waiting" || s.status === "booth" ? h("button", { type: "button", class: "btn btn-small btn-ghost", text: COPY.textThem, onclick: () => textThem(s, note) }) : null);
   const meta = [COPY.joined.replace("{time}", clockWords(s.created_at)), s.texted_at ? COPY.texted.replace("{time}", clockWords(s.texted_at)) : null].filter(Boolean).join(" · ");
   return h("li", { class: `line-item is-${tone}`, "data-status": s.status },
     h("div", { class: "line-head" },
       h("span", { class: `pill pill-${tone}`, text: STATUS[s.status].word }),
-      h("span", { class: "line-size", text: `${s.place ? `#${s.place} · ` : ""}${sizeWords(s.guests.length)} · ${s.code}` })),
+      h("span", { class: "line-size", text: `${s.place ? `#${s.place} · ` : ""}${sizeWords(s.guests.length)}` })),
     h("ul", { class: "line-people" }, ...s.guests.map((g) => h("li", {}, h("button", { type: "button", class: "person-btn", text: g.name, onclick: () => personDetails(g, s) })))),
     h("p", { class: "line-meta", text: meta }),
     actions, note);
 }
 function draw() {
-  const live = app.sessions.filter((s) => s.status !== "out");
-  const done = app.sessions.filter((s) => s.status === "out");
+  const live = app.sessions.filter((s) => s.status === "waiting" || s.status === "booth");
+  const upload = app.sessions.filter((s) => s.status === "upload");
+  const done = app.sessions.filter((s) => s.status === "done");
   const { next, after, inBooth } = nextTwo(app.sessions);
   els.nextLabel.textContent = inBooth.length ? COPY.inBooth : COPY.nextUp;
   const top = inBooth[0] ?? next;
@@ -169,6 +179,8 @@ function draw() {
   els.next.textContent = top ? `${namesOf(top)} · ${top.guests.length}` : COPY.nobodyNext;
   els.after.textContent = second ? `${namesOf(second)} · ${second.guests.length}` : COPY.nobodyNext;
   els.line.replaceChildren(...live.map(card));
+  els.upload.replaceChildren(...upload.map(card));
+  els.uploadNone.hidden = upload.length > 0;
   els.done.replaceChildren(...done.map(card));
   els.doneTitle.hidden = done.length === 0;
   if (!app.sessions.length) { els.lineNote.textContent = COPY.empty; els.lineNote.hidden = false; }
@@ -206,8 +218,11 @@ function ask(s, to) {
 function cancel() { app.pending = null; closeModal(els.confirm); }
 // ── A contest song: "Take out of the vote" / "Put back", asked first, then Undo for 10 s
 function songLine(s) {
-  if (s.pulled) return COPY.songPulledNote.replace("{ticked}", s.ticked).replace("{people}", s.people);
-  return COPY.songTicks.replace("{ticked}", s.ticked).replace("{people}", s.people);
+  const entry = !s.ticked ? COPY.songNotEntered
+    : s.people > 1 && !s.confirmed ? COPY.songNeedsGroup.replace("{ticked}", s.ticked_by || COPY.someone)
+    : s.people > 1 ? COPY.songEnteredGroup.replace("{ticked}", s.ticked_by || COPY.someone).replace("{confirmed}", s.confirmed_by || COPY.someone)
+    : COPY.songEntered.replace("{ticked}", s.ticked_by || COPY.someone);
+  return s.pulled ? `${COPY.songPulledNote} ${entry}` : entry;
 }
 function drawSongs() {
   els.songsNone.hidden = app.songs.length > 0;

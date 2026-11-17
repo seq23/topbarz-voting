@@ -486,11 +486,11 @@ test("a booth track is never in the vote: not in /api/state, /api/beats, the tal
   };
   // The holiday contest (17 Nov 2026) is the second door from the booth onto the vote: its rules are
   // functions/_lib/contest.js, its columns migrations/0009_party.sql, its tests tests/party.test.mjs.
-  assert.deepEqual(mentions("booth_tracks"), ["CLAUDE.md", "RUNBOOK.md", "functions/_lib/booth.js", "functions/_lib/contest.js", "functions/api/booth/[[path]].js", "migrations/0004_booth_tracks.sql", "migrations/0005_booth_share.sql", "migrations/0006_booth_people.sql", "migrations/0009_party.sql", "migrations/0010_party_pull.sql", "scripts/booth-log.mjs", "scripts/promote-booth.mjs", "tests/booth.test.mjs", "tests/party.test.mjs"], "booth_tracks is named only by the booth's own code, the contest's, their migrations, the two scripts, the tests and the two docs");
+  assert.deepEqual(mentions("booth_tracks"), ["CLAUDE.md", "RUNBOOK.md", "functions/_lib/booth.js", "functions/_lib/contest.js", "functions/api/booth/[[path]].js", "migrations/0004_booth_tracks.sql", "migrations/0005_booth_share.sql", "migrations/0006_booth_people.sql", "migrations/0009_party.sql", "migrations/0010_party_pull.sql", "migrations/0011_party_lanes.sql", "scripts/booth-log.mjs", "scripts/promote-booth.mjs", "tests/booth.test.mjs", "tests/party.test.mjs"], "booth_tracks is named only by the booth's own code, the contest's, their migrations, the two scripts, the tests and the two docs");
   assert.deepEqual(mentions("booth_people"), ["CLAUDE.md", "RUNBOOK.md", "functions/_lib/booth.js", "functions/_lib/contest.js", "functions/api/booth/[[path]].js", "migrations/0006_booth_people.sql", "migrations/0009_party.sql", "scripts/booth-log.mjs", "scripts/promote-booth.mjs", "tests/booth.test.mjs", "tests/party.test.mjs"], "booth_people (the emails) is read by the booth's routes, the contest, its log script and its promotion script only: never /api/state, the tally, the export or /api/beats");
   // The contest reads the booth's two tables and the guests' sign-ups, and writes the vote's tracks: nothing else.
   const contestSql = src("functions/_lib/contest.js");
-  assert.deepEqual([...new Set([...contestSql.matchAll(/(?:FROM|INTO|UPDATE|JOIN) ([a-z_]+)/g)].map((m) => m[1]))].sort(), ["booth_people", "booth_tracks", "party_guests", "party_sessions", "tracks"], "the contest reads booth_tracks, booth_people, party_guests and party_sessions, and writes tracks");
+  assert.deepEqual([...new Set([...contestSql.matchAll(/(?:FROM|INTO|UPDATE|JOIN) ([a-z_]+)/g)].map((m) => m[1]))].sort(), ["booth_people", "booth_tracks", "party_guests", "party_sessions", "party_status_events", "tracks"], "the contest reads booth_tracks, booth_people, party_guests and party_sessions, writes tracks, and records the upload on the line (party_status_events)");
   // It deletes nothing of the vote: a song leaves it by active = 0, likes kept. The one DELETE is the
   // team taking off a song one person who has NOT ticked, one row of one track.
   assert.deepEqual([...contestSql.matchAll(/DELETE FROM[^"`;]*/g)].map((m) => m[0]), ["DELETE FROM booth_people WHERE track_id = ?1 AND id = ?2 AND contest_opt_in = 0 RETURNING id"], "and deletes nothing of the vote: only one unticked person off one song");
@@ -519,7 +519,7 @@ test("a booth track is never in the vote: not in /api/state, /api/beats, the tal
     "CREATE UNIQUE INDEX booth_tracks_share_id ON booth_tracks (share_id)",
   ], "exactly these four statements: public off by default for every track, a unique share id, an artwork key");
   const cols = (await env.DB.prepare("PRAGMA table_info(booth_tracks)").all()).results.map((c) => c.name);
-  assert.deepEqual(cols, ["id", "code", "file_name", "content_type", "size", "media_key", "uploaded_at", "opened", "last_opened_at", "public", "share_id", "art_key", "party_session_id", "title", "vote_track_id", "pulled_at", "pulled_by"], "and the holiday contest's three (migrations/0009_party.sql): the group tagged at upload, the title, the vote track it became; and the team's pull (migrations/0010_party_pull.sql)");
+  assert.deepEqual(cols, ["id", "code", "file_name", "content_type", "size", "media_key", "uploaded_at", "opened", "last_opened_at", "public", "share_id", "art_key", "party_session_id", "title", "vote_track_id", "pulled_at", "pulled_by", "contest_entered_by", "contest_entered_at", "contest_rules_version", "contest_confirmed_by", "contest_confirmed_at"], "and the holiday contest's three (migrations/0009_party.sql): the group tagged at upload, the title, the vote track it became; the team's pull (migrations/0010_party_pull.sql); and the song's entry: who ticked, when, which rules, who confirmed with the group, when (migrations/0011_party_lanes.sql)");
   // The people's migration (4 Oct 2026): one table hanging off booth_tracks, one index, nothing else.
   const peopleSql = src("migrations/0006_booth_people.sql").replace(/--.*$/gm, "");
   assert.match(peopleSql, /CREATE TABLE booth_people \(/);
@@ -625,7 +625,7 @@ test("today's log: today's rows only, newest first, well-formed only; sizes, tim
 // ── The pages ────────────────────────────────────────────────────────────────────────────────
 test("the copy of each page is one object with exactly these keys, and the page's elements are empty until it is read", () => {
   assert.deepEqual(Object.keys(BOOTH_COPY), ["headline", "intro", "zone", "zoneHint", "uploading", "doneTitle", "next", "retry", "failed", "notAudio", "tooBig", "empty", "dailyLimit", "rateLimited", "logTitle", "logEmpty", "logFailed", "nobody", "onePerson", "people", "allIn", "groupsTitle", "groupsNone", "walkUp", "groupsNote", "sessionGone"]);
-  assert.deepEqual(Object.keys(TRACK_COPY), ["headline", "intro", "codeLabel", "emailLabel", "go", "looking", "found", "download", "another", "notFound", "tooMany", "needCode", "needEmail", "badEmail", "notAttached", "you", "audioNone", "audioFailed", "publicLabel", "publicOff", "publicOn", "publicFailed", "publicNote", "share", "shareMessage", "copied", "copyFailed", "addArt", "changeArt", "artWorking", "artUnreadable", "artFailed", "voteLabel", "voteWaiting", "voteAll", "voteOnlyYou", "voteFailed", "contestTitle", "contestHelp", "contestBox", "contestRules", "titleLabel", "titleSave", "titleSaved", "contestEntered", "contestWaiting", "contestNotYet", "contestBlocked", "contestClosed", "contestIn", "contestOut", "contestYou", "contestUnknown", "contestSignUp", "contestFailed", "contestOwnPhone", "contestPulled"]);
+  assert.deepEqual(Object.keys(TRACK_COPY), ["headline", "intro", "codeLabel", "emailLabel", "go", "looking", "found", "download", "another", "notFound", "tooMany", "needCode", "needEmail", "badEmail", "notAttached", "you", "audioNone", "audioFailed", "publicLabel", "publicOff", "publicOn", "publicFailed", "publicNote", "share", "shareMessage", "copied", "copyFailed", "addArt", "changeArt", "artWorking", "artUnreadable", "artFailed", "voteLabel", "voteWaiting", "voteAll", "voteOnlyYou", "voteFailed", "listenOnly", "contestTitle", "contestHelp", "contestBox", "contestRules", "contestConfirm", "contestOnSong", "titleLabel", "titleSave", "titleSaved", "contestEntered", "contestEnteredGroup", "contestNeedsGroup", "contestNotYet", "contestSomeone", "contestBlocked", "contestClosed", "contestSignUp", "contestFailed", "contestPulled"]);
   assert.deepEqual(Object.keys(LISTEN_COPY), ["title", "loading", "line", "private", "instagram", "artAlt", "audioNone", "audioFailed"]);
   for (const copy of [BOOTH_COPY, TRACK_COPY, LISTEN_COPY]) for (const [k, v] of Object.entries(copy)) assert.ok(typeof v === "string" && v.trim(), `${k} is a sentence`);
   // The share's words, as the client asked for them (4 Oct 2026).
@@ -672,9 +672,8 @@ test("the copy of each page is one object with exactly these keys, and the page'
     const found = [...new Set([...js.matchAll(/[\w$-]*email[\w$-]*/gi)].map((m) => m[0]))].sort();
     assert.deepEqual(found, (EMAIL_MENTIONS[file] ?? []).slice().sort(), `${file}: every mention of an email is one of the named ones (${found.join(", ")})`);
     const stored = [...js.matchAll(/localStorage\.(\w+)\(([^)]*)\)/g)].map((m) => `${m[1]}(${m[2]})`);
-    // track.js writes only its email; it may READ the guest key /join kept (the contest tick proves
-    // the phone that signed up), and never writes it.
-    assert.deepEqual(stored, file === "track.js" ? ["getItem(GUEST_KEY)", "getItem(EMAIL_KEY)", "setItem(EMAIL_KEY, email)"] : [], `${file}: ${file === "track.js" ? "the device keeps the email and nothing else (and only reads the sign-up key)" : "nothing is kept on the device"}`);
+    // track.js keeps only its email (the contest entry no longer reads the sign-up phone's key).
+    assert.deepEqual(stored, file === "track.js" ? ["getItem(EMAIL_KEY)", "setItem(EMAIL_KEY, email)"] : [], `${file}: ${file === "track.js" ? "the device keeps the email and nothing else" : "nothing is kept on the device"}`);
     assert.ok(!/sessionStorage|document\.cookie|indexedDB/.test(js), `${file}: no cookie, no session store, no database`);
   }
   const track = src("public/js/track.js");
@@ -773,7 +772,7 @@ test("/track: Hear your track, a numeric code box that moves on to the email box
   // the clipboard; artwork cut to a square on the device and sent as a JPEG, never the raw file.
   assert.match(html, /<button type="button" id="tbz-public" class="switch" role="switch" aria-checked="false" aria-labelledby="tbz-public-label">/);
   assert.match(js, /els\.publicBtn\.setAttribute\("aria-checked", pub \? "true" : "false"\)/);
-  assert.match(js, /els\.share\.hidden = !pub/, "Share is hidden while the track is private");
+  assert.match(js, /const canShare = t\?\.contest \? t\.contest\.you\.performer : pub;\s*els\.share\.hidden = !canShare;/, "Share is hidden while the track is private (the holiday party's page: Share is for the song's own people, and publishes it)");
   assert.match(js, /track\.public = next;[\s\S]*drawShare\(\);[\s\S]*api\(`\/api\/booth\/tracks\/\$\{track\.code\}\/public`, \{ method: "POST", body: \{ email: track\.you\.email, public: next \}/, "the switch is drawn before the server answers");
   assert.match(js, /catch \(err\) \{[\s\S]*track\.public = was\.public;[\s\S]*track\.share_id = was\.share_id;[\s\S]*drawShare\(\);/, "and put back when the server says no");
   assert.match(js, /const track = cleanTrack\(data\)/, "the share state is read from the server on every lookup");

@@ -61,28 +61,30 @@
       <input type="file" id="tbz-art-file" class="sr-only" accept="image/*">
       <p id="tbz-art-msg" class="field-error" role="alert" hidden></p>
     </div>
-    <div class="switch-row">
+    <div id="tbz-public-row" class="switch-row">
       <span id="tbz-public-label" class="switch-label"></span>
       <button type="button" id="tbz-public" class="switch" role="switch" aria-checked="false" aria-labelledby="tbz-public-label"><span class="switch-knob" aria-hidden="true"></span></button>
     </div>
     <p id="tbz-public-note" class="switch-note" role="status"></p>
     <p id="tbz-public-group" class="switch-note"></p>
-    <div class="switch-row">
+    <div id="tbz-vote-row" class="switch-row">
       <span id="tbz-vote-label" class="switch-label"></span>
       <button type="button" id="tbz-vote" class="switch" role="switch" aria-checked="false" aria-labelledby="tbz-vote-label"><span class="switch-knob" aria-hidden="true"></span></button>
     </div>
     <p id="tbz-vote-note" class="switch-note" role="status"></p>
+    <p id="tbz-listen-only" class="switch-note" hidden></p>
     <section id="tbz-contest" class="contest" aria-labelledby="tbz-contest-title" hidden>
       <h3 id="tbz-contest-title" class="done-title"></h3>
-      <form id="tbz-title-form" class="code-form" novalidate>
+      <p id="tbz-contest-help" class="switch-note"></p>
+      <div class="check contest-check"><input type="checkbox" id="tbz-contest-box"><label for="tbz-contest-box" id="tbz-contest-label"></label></div>
+      <form id="tbz-title-form" class="code-form" novalidate hidden>
         <div class="field"><label for="tbz-title" id="tbz-title-label"></label><input id="tbz-title" type="text" autocomplete="off" maxlength="60" aria-describedby="tbz-title-msg"></div>
         <button type="submit" id="tbz-title-save" class="btn btn-small btn-ghost"></button>
       </form>
       <p id="tbz-title-msg" class="switch-note" role="status" hidden></p>
-      <p id="tbz-contest-help" class="switch-note"></p>
-      <div class="check contest-check"><input type="checkbox" id="tbz-contest-box"><label for="tbz-contest-box" id="tbz-contest-label"></label></div>
+      <div id="tbz-confirm-row" class="check contest-check" hidden><input type="checkbox" id="tbz-confirm-box"><label for="tbz-confirm-box" id="tbz-confirm-label"></label></div>
       <p id="tbz-contest-line" class="contest-line" role="status"></p>
-      <ul id="tbz-contest-people" class="contest-people"></ul>
+      <p id="tbz-contest-people" class="switch-note"></p>
       <p id="tbz-contest-msg" class="field-error" role="alert" hidden></p>
     </section>
     <div class="found-actions">

@@ -4,14 +4,18 @@
 //
 // Guests (open routes, kept safe by what they answer: first names and places, never a phone or an email):
 //   GET  /api/party                  → { on }
-//   POST /api/party/join             { name, phone, email, city, instagram?, session_code?, website } → 201 { guest_key, you, session }
-//   POST /api/party/me               { guest_key } → { you, session }   the guest's own page refreshes this
-//   POST /api/party/move             { guest_key, session_code | null } → { you, session }   join another group, or start your own
+//   POST /api/party/join             { guests: [{ name, phone, email, city, instagram? }, …], website } → 201 { guest_key, you, session }
+//                                    one phone, handed around: each person fills their own slot, and they are one group (1 to 10);
+//                                    a single person may send { name, phone, email, city, instagram?, website }. One active place
+//                                    per email: 409 already_in_line (with the slot) while that email's group is waiting, in the
+//                                    booth or at the upload station; once its song is uploaded (done) the same email signs up again.
+//   POST /api/party/me               { guest_key } → { you, session }   the sign-up phone's page refreshes this
 // The team (a team token from the emailed code; functions/_lib/team.js):
 //   POST /api/party/team/code        { email } → { sent, email, resend_in_seconds }   only an email on the team list
 //   POST /api/party/team/verify      { email, code } → { token, member: { email } }
 //   GET  /api/party/team/line        → { now, sessions: [{ id, code, status, place, …, guests: [{ name, phone, email, city, instagram, joined_at }] }] }
-//   POST /api/party/team/sessions/<id>/status  { status, from } → { session }   waiting | booth (green) | out (red); undo is the same call back
+//   POST /api/party/team/sessions/<id>/status  { status, from } → { session }   waiting | booth (green) | upload (red: just out, at
+//                                    the upload station) | done; undo is the same call back. The engineer's upload moves upload → done.
 //   POST /api/party/team/sessions/<id>/texted  → { texted_at }
 //   GET  /api/party/team/members     → { members: [{ id, email, you }] };  POST { email } adds;  POST …/members/<id>/remove
 //   GET  /api/party/team/gifs        → { gifs };  POST { id, url, width, height, title } adds;  POST …/gifs/<giphy id>/remove
@@ -25,8 +29,8 @@ import { CONTEST_TRACK_SQL, DETACH_SQL, PERSON_ON_SONG_SQL, PULL_SQL, contestClo
 import { LIMITS, VERIFICATION, verificationStatus } from "../../_lib/config.js";
 import { HttpError, fail, ipHash, json, readJson, route } from "../../_lib/http.js";
 import {
-  ADD_GIF_SQL, GIFS_SQL, GUEST_BY_EMAIL_SQL, GUEST_BY_KEY_SQL, INSERT_GUEST_SQL, LINE_GUESTS_SQL, LINE_SESSIONS_SQL, MOVE_GUEST_SQL, NEW_SESSION_SQL, REMOVE_GIF_SQL, SESSION_BY_CODE_SQL, SESSION_CODE_TRIES, SESSION_NAMES_SQL, SET_STATUS_SQL, STATUS_EVENT_SQL, TEXTED_SQL,
-  firstOf, guestKey, holidayOn, isGuestKey, isSessionCode, lineOrder, parsePartyGif, parseSignUp, parseStatusChange, randomSessionCode, sessionCodeFrom, toGif,
+  ADD_GIF_SQL, GIFS_SQL, GUEST_BY_EMAIL_SQL, GUEST_BY_KEY_SQL, INSERT_GUEST_SQL, LANE_COLUMNS, LINE_GUESTS_SQL, LINE_SESSIONS_SQL, NEW_SESSION_SQL, REJOIN_GUEST_SQL, REMOVE_GIF_SQL, SESSION_CODE_TRIES, SESSION_NAMES_SQL, SET_STATUS_SQL, STATUS_EVENT_SQL, TEXTED_SQL, VISIT_SQL,
+  firstOf, guestKey, holidayOn, isGuestKey, laneOf, lineOrder, parsePartyGif, parseSignUp, parseStatusChange, randomSessionCode, toGif,
 } from "../../_lib/party.js";
 import { assertUnderLimit, limitStatement, maybePrune } from "../../_lib/ratelimit.js";
 import { MEMBER_BY_EMAIL_SQL, STORE_TEAM_CODE_SQL, newCode, releaseTeamSlot, requireMember, signTeamToken, takeTeamSlot, teamCodeEmail, teamCodeHmac, teamCodeMatches } from "../../_lib/team.js";
@@ -37,23 +41,16 @@ const off = () => { throw new HttpError(404, "party_off", "Nothing on right now.
 const limited = async (db, key, limit, what) => assertUnderLimit(await limitStatement(db, key, limit).all(), limit, what);
 
 // ── Guests ─────────────────────────────────────────────────────────────────────────────────────
-// A new session with a fresh 4-letter code (the UNIQUE constraint settles a collision; retried).
+// A new session with a fresh 4-letter code (kept as the group's id on the team's line; nobody types
+// it). The UNIQUE constraint settles a collision; retried.
 async function newSession(db, now) {
   for (let i = 0; i < SESSION_CODE_TRIES; i++) {
     const row = await db.prepare(NEW_SESSION_SQL).bind(randomSessionCode(), now).first();
     if (row) return row;
   }
-  throw new HttpError(503, "no_code_free", "No group code is free right now. Try again in a moment.");
+  throw new HttpError(503, "no_code_free", "Could not start a place in line right now. Try again in a moment.");
 }
-// The session a code names, for joining: unknown → 404; already out of the booth → 409.
-async function joinable(db, rawCode) {
-  const code = sessionCodeFrom(rawCode);
-  const row = isSessionCode(code) ? await db.prepare(SESSION_BY_CODE_SQL).bind(code).first() : null;
-  if (!row) throw new HttpError(404, "no_session", "No group with that code. Check the 4 letters with your friend.", { field: "session_code" });
-  if (row.status === "out") throw new HttpError(409, "session_done", "That group has already been in the booth. Leave the code empty to get your own place in line.", { field: "session_code" });
-  return row;
-}
-// What a guest sees of themselves and their group: first names, the code to share, the place.
+// What the sign-up phone sees of its group: first names and the place.
 async function guestView(db, guest) {
   const [names, sessions, guests] = await db.batch([db.prepare(SESSION_NAMES_SQL).bind(guest.session_id), db.prepare(LINE_SESSIONS_SQL), db.prepare("SELECT session_id FROM party_guests")]);
   const bySession = new Map();
@@ -62,27 +59,40 @@ async function guestView(db, guest) {
   const mine = line.find((s) => s.id === guest.session_id);
   return {
     you: { first_name: firstOf(guest.name) },
-    session: { code: mine?.code ?? guest.code, status: mine?.status ?? guest.status, place: mine?.place ?? null, names: (names.results ?? []).map((r) => firstOf(r.name)), size: (names.results ?? []).length },
+    session: { status: mine?.lane ?? laneOf(guest) ?? "waiting", place: mine?.place ?? null, names: (names.results ?? []).map((r) => firstOf(r.name)), size: (names.results ?? []).length },
   };
 }
 
+// The sign-up: one person, or a group on one phone. Every email is checked before anything is
+// written, so a group is in line whole or not at all. An email already holding an active place is
+// refused with what is happening (never a silent block); an email whose last group is done comes
+// back in line: its one row moves to the new group, and the visit is kept in party_visits.
 async function join(context) {
   const { request, env } = context;
   const parsed = parseSignUp(await readJson(request));
-  if (!parsed.ok) throw new HttpError(400, parsed.error, parsed.message, { field: parsed.field });
-  const v = parsed.value;
+  if (!parsed.ok) throw new HttpError(400, parsed.error, parsed.message, { field: parsed.field, slot: parsed.slot ?? 0 });
+  const { guests } = parsed.value;
   const db = env.DB;
   const now = Date.now();
   const ip = await ipHash(request, env);
   await limited(db, `party:join:ip:${ip}`, LIMITS.partyJoinsPerIp, "sign-ups");
-  if (await db.prepare(GUEST_BY_EMAIL_SQL).bind(v.email).first()) {
-    throw new HttpError(409, "already_signed_up", "You're already in line with this email. Use the phone you signed up on, or ask the team at the booth.", { field: "email" });
+  const found = await db.batch(guests.map((g) => db.prepare(GUEST_BY_EMAIL_SQL).bind(g.email)));
+  const existing = found.map((r) => r.results?.[0] ?? null);
+  const busy = existing.findIndex((row) => row && laneOf(row) !== "done");
+  if (busy >= 0) {
+    const lane = laneOf(existing[busy]);
+    const where = lane === "booth" ? "in the booth right now" : lane === "upload" ? "just out of the booth, waiting for their song to be uploaded" : "already in line";
+    throw new HttpError(409, "already_in_line", `${guests.length > 1 ? `Person ${busy + 1} (${guests[busy].name}): this email is` : "This email is"} ${where}. One place at a time: once that group's song is uploaded, the same email can get back in line. If that is wrong, ask the team at the booth.`, { field: "email", slot: busy, lane });
   }
-  const session = v.session_code ? await joinable(db, v.session_code) : await newSession(db, now);
-  const key = guestKey();
-  await db.prepare(INSERT_GUEST_SQL).bind(session.id, v.name, v.phone, v.email, v.city, v.instagram, key, now, ip).run();
+  const session = await newSession(db, now);
+  const keys = guests.map(() => guestKey());
+  await db.batch(guests.map((g, i) => existing[i]
+    ? db.prepare(REJOIN_GUEST_SQL).bind(existing[i].id, session.id, g.name, g.phone, g.city, g.instagram, keys[i], now + i, ip)
+    : db.prepare(INSERT_GUEST_SQL).bind(session.id, g.name, g.phone, g.email, g.city, g.instagram, keys[i], now + i, ip)));
+  const ids = await db.batch(guests.map((g) => db.prepare("SELECT id FROM party_guests WHERE email = ?1").bind(g.email)));
+  await db.batch(ids.map((r, i) => db.prepare(VISIT_SQL).bind(r.results[0].id, session.id, now + i)));
   maybePrune(context);
-  return json({ guest_key: key, ...(await guestView(db, { name: v.name, session_id: session.id, code: session.code, status: session.status })) }, 201);
+  return json({ guest_key: keys[0], ...(await guestView(db, { name: guests[0].name, session_id: session.id, status: "waiting", done_at: null })) }, 201);
 }
 async function guestFrom(context, rawKey) {
   const { request, env } = context;
@@ -94,17 +104,6 @@ async function guestFrom(context, rawKey) {
 async function me(context) {
   const body = await readJson(context.request);
   return json(await guestView(context.env.DB, await guestFrom(context, body.guest_key)));
-}
-// Join another group (its code), or leave the group for a place of your own (session_code null).
-// Only from the phone that signed up (its key), and only while the guest has not been in the booth.
-async function move(context) {
-  const body = await readJson(context.request);
-  const db = context.env.DB;
-  const guest = await guestFrom(context, body.guest_key);
-  if (guest.status !== "waiting") throw new HttpError(409, "not_waiting", "Your group is already at the booth, so it cannot change now. Ask the team.");
-  const target = body.session_code ? await joinable(db, body.session_code) : await newSession(db, Date.now());
-  if (target.id !== guest.session_id) await db.prepare(MOVE_GUEST_SQL).bind(guest.id, target.id).run();
-  return json(await guestView(db, { ...guest, session_id: target.id, code: target.code, status: target.status }));
 }
 
 // ── The team's sign-in ───────────────────────────────────────────────────────────────────────
@@ -164,7 +163,7 @@ async function line(context) {
   const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
   return json({
     now: new Date().toISOString(),
-    sessions: lineOrder((sessions.results ?? []).map((s) => ({ ...s, guests: bySession.get(s.id) ?? [] }))).map((s) => ({ id: s.id, code: s.code, status: s.status, place: s.place, created_at: iso(s.created_at), status_at: iso(s.status_at), texted_at: iso(s.texted_at), guests: s.guests })),
+    sessions: lineOrder((sessions.results ?? []).map((s) => ({ ...s, guests: bySession.get(s.id) ?? [] }))).map((s) => ({ id: s.id, code: s.code, status: s.lane, place: s.place, created_at: iso(s.created_at), status_at: iso(s.status_at), texted_at: iso(s.texted_at), guests: s.guests })),
   });
 }
 async function setStatus(context, id, m) {
@@ -172,14 +171,16 @@ async function setStatus(context, id, m) {
   if (!parsed.ok) throw new HttpError(400, parsed.error, parsed.message);
   const db = context.env.DB;
   const now = Date.now();
-  const row = await db.prepare(SET_STATUS_SQL).bind(id, parsed.value.status, parsed.value.from, now).first();
+  const [toStatus, toDone] = LANE_COLUMNS[parsed.value.status];
+  const [fromStatus, fromDone] = LANE_COLUMNS[parsed.value.from];
+  const row = await db.prepare(SET_STATUS_SQL).bind(id, toStatus, toDone ? now : null, now, fromStatus, fromDone ? 0 : 1).first();
   if (!row) {
-    const current = await db.prepare("SELECT status FROM party_sessions WHERE id = ?1").bind(id).first();
+    const current = await db.prepare("SELECT status, done_at FROM party_sessions WHERE id = ?1").bind(id).first();
     if (!current) throw new HttpError(404, "no_session", "That group is not in the line.");
-    throw new HttpError(409, "changed", "Someone else changed this group a moment ago. The line has been refreshed.", { status: current.status });
+    throw new HttpError(409, "changed", "Someone else changed this group a moment ago. The line has been refreshed.", { status: laneOf(current) });
   }
   await db.prepare(STATUS_EVENT_SQL).bind(id, parsed.value.from, parsed.value.status, m.id, now).run();
-  return json({ session: { id, status: row.status, status_at: new Date(row.status_at).toISOString() } });
+  return json({ session: { id, status: laneOf(row), status_at: new Date(row.status_at).toISOString() } });
 }
 async function texted(context, id) {
   const row = await context.env.DB.prepare(TEXTED_SQL).bind(id, Date.now()).first();
@@ -270,7 +271,6 @@ export const onRequest = route({
     if (!holidayOn(context.env)) off();
     if (parts.length === 1 && parts[0] === "join") return join(context);
     if (parts.length === 1 && parts[0] === "me") return me(context);
-    if (parts.length === 1 && parts[0] === "move") return move(context);
     if (parts[0] !== "team") return fail(404, "not_found", "No such API route.");
     if (parts.length === 2 && parts[1] === "code") return teamCode(context);
     if (parts.length === 2 && parts[1] === "verify") return teamVerify(context);

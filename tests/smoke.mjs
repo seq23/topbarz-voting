@@ -98,6 +98,7 @@ try {
   const page = await fetch(base + "/");
   const pageText = await page.text();
   ok(page.status === 200 && pageText.includes("JUMP IN THE BOOTH"), "GET / serves the page");
+  ok(pageText.includes('content="Vote for your favorite CultureCon track | Top Barz"') && !pageText.includes("data-dressed"), "with the party off (production), GET / is served untouched");
   ok((page.headers.get("content-security-policy") ?? "").includes("script-src 'self'"), "the page is served with its content security policy (public/_headers)");
   const assets = [...new Set([...pageText.matchAll(/(?:src|href)="(\/(?:js|css|img|fonts)\/[^"]+)"/g)].map((m) => m[1]))];
   const served = await Promise.all(assets.map(async (a) => { const r = await fetch(base + a); await r.arrayBuffer(); return r.status === 200 ? null : `${a} → ${r.status}`; }));
@@ -438,6 +439,13 @@ try {
     ok(r.status === 200 && /text\/html|image\/png/.test(r.headers.get("content-type") ?? ""), `${page} is served (${r.status})`);
   }
   ok((await j("/api/party")).body?.on === true, "GET /api/party says the party is on");
+  // "Remove everything CultureCon" (Scooter, 17 Nov 2026) holds before any script runs: a link
+  // preview reads the HTML only, so the server writes the party's words into it (functions/index.js).
+  const dressed = await fetch(base + "/");
+  const dressedText = await dressed.text();
+  ok(dressed.status === 200 && !/culturecon|october 11/i.test(dressedText), `with the party on, GET / has no CultureCon and no October date anywhere, meta tags included${/culturecon/i.test(dressedText) ? ` (found: ${dressedText.match(/.{0,60}culturecon.{0,40}/i)[0]})` : ""}`);
+  ok(dressedText.includes('<meta property="og:title" content="Vote for your favorite Christmas jingle | Top Barz">') && dressedText.includes("Dick and Jane") && dressedText.includes('class="stand-in-mark"') && dressedText.includes("JUMP IN THE BOOTH"), "the link preview and the page carry the party's words and the marked prize placeholder");
+  ok((dressed.headers.get("content-security-policy") ?? "").includes("script-src 'self'"), "the dressed page keeps its content security policy");
   const g1 = await post("/api/party/join", { guests: [{ name: "Smoke Ava", phone: "555 010 2030", email: "ava@example.com", city: "Brooklyn" }, { name: "Smoke Bo", phone: "555 010 4050", email: "bo@example.com", city: "Queens" }], website: "" });
   ok(g1.status === 201 && g1.body.session.size === 2 && !("code" in g1.body.session) && !JSON.stringify({ ...g1.body, guest_key: "" }).includes("555"), "POST /api/party/join signs up a group of two on one phone: no group code, no phone in the answer");
   ok((await post("/api/party/me", { guest_key: g1.body.guest_key })).body?.session?.size === 2, "POST /api/party/me reads it back");
@@ -455,7 +463,7 @@ try {
   const stateBy = Date.now() + 8_000;
   do { holidayState = await j(`/api/state?smoke=${Date.now()}`); if (holidayState.body?.holiday) break; await new Promise((r) => setTimeout(r, 1000)); } while (Date.now() < stateBy);
   ok(holidayState.body?.holiday?.on === true && Array.isArray(holidayState.body.gifs), "/api/state carries the party and its GIFs");
-  if (passed < 144) throw new Error(`only ${passed} checks ran`);
+  if (passed < 148) throw new Error(`only ${passed} checks ran`);
   console.log(`smoke: ${passed} checks passed`);
 } catch (err) {
   console.error(String(err.message ?? err));

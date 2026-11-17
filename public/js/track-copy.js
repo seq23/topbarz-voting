@@ -44,6 +44,8 @@ export const COPY = {
   // The holiday contest (17 Nov 2026, with Scooter's preview notes), shown only while the party is
   // on, and only to the song's own people (the group picked when it was uploaded).
   listenOnly: "You can hear and download this song. Only the people recorded on it can enter it in the contest or share it.",
+  // Uploaded with nobody on it yet (the team puts the group on it from the team page).
+  noGroupYet: "You can hear and download this song. Nobody is on it yet: if you recorded it, ask the Top Barz team to put your group on it, then enter this code again to enter the contest.",
   contestTitle: "Enter the contest",
   contestHelp: "Tick the box to put this song in the vote. If you recorded it with friends, confirm it with your group too.",
   contestBox: "Enter the contest. I agree to the",

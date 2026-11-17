@@ -22,10 +22,12 @@
 //   GET  /api/party/team/songs       → { songs: [{ code, label, entered, pulled, pulled_at, people, ticked, members: [{ id, first_name, signed_up, in, attached_at }] }] }   every contest song, entered or not (never an email)
 //   POST /api/party/team/songs/<booth code>/pull  { pulled: true|false } → { song }   "Take out of the vote" / "Put back": the team's
 //                                    safety valve on auto-entry; a pulled song stays out even if everyone ticks again; likes are kept
+//   POST /api/party/team/songs/<booth code>/group  { session_id } → { song }   puts a group on a song uploaded with nobody on it
+//                                    (409 has_people / session_done; the group moves to done, as an upload would have moved it)
 //   POST /api/party/team/songs/<booth code>/people/<id>/remove → { song }   takes off the song someone who has not ticked
 //                                    (409 ticked for someone who has); the song is judged again on the people left
 import { cleanEmail, isCode } from "../../_lib/booth.js";
-import { CONTEST_TRACK_SQL, DETACH_SQL, PERSON_ON_SONG_SQL, PULL_SQL, contestClosed, readSong, syncEntry, teamSongs } from "../../_lib/contest.js";
+import { ASSIGN_DONE_SQL, ASSIGN_SESSION_SQL, ASSIGN_TAG_SQL, ATTACH_TAGGED_SQL, CONTEST_TRACK_SQL, DETACH_SQL, PERSON_ON_SONG_SQL, PULL_SQL, SESSION_EMAILS_SQL, SONG_PEOPLE_COUNT_SQL, contestClosed, readSong, syncEntry, teamSongs } from "../../_lib/contest.js";
 import { LIMITS, VERIFICATION, verificationStatus } from "../../_lib/config.js";
 import { HttpError, fail, ipHash, json, readJson, route } from "../../_lib/http.js";
 import {
@@ -250,6 +252,37 @@ async function detach(context, code, personId) {
   await syncEntry(env, await readSong(env.DB, code), now);
   return json({ song: await songOf(env.DB, code, { code }) });
 }
+// "Put this group on the song": the song was uploaded with nobody on it (the engineer uploaded before
+// the team tapped Out, or a walk-up signed up afterwards), so nobody could enter it. The team picks
+// the group that recorded it; its people go on the song exactly as the upload would have put them,
+// and the group moves to done. Refused for a song that already has people or a group (taking the
+// song from them is not the team's call) and for a group whose song is already uploaded.
+async function assignGroup(context, code, m) {
+  const { env } = context;
+  const sessionId = idOf(String((await readJson(context.request)).session_id ?? ""));
+  if (!sessionId) throw new HttpError(400, "bad_session", "Pick the group that recorded this song.");
+  const now = Date.now();
+  if (await contestClosed(env, now)) throw new HttpError(403, "voting_closed", "Voting has closed, so songs can no longer change.");
+  const db = env.DB;
+  const track = await db.prepare(CONTEST_TRACK_SQL).bind(code).first();
+  if (!track) throw new HttpError(404, "no_song", "No booth song has that code.");
+  const count = (await db.prepare(SONG_PEOPLE_COUNT_SQL).bind(track.id).first())?.n ?? 0;
+  if (track.party_session_id || count > 0) throw new HttpError(409, "has_people", "This song already has its people on it. The list has been refreshed.");
+  const session = await db.prepare(ASSIGN_SESSION_SQL).bind(sessionId).first();
+  const emails = session ? (await db.prepare(SESSION_EMAILS_SQL).bind(sessionId).all()).results ?? [] : [];
+  if (!session || emails.length === 0) throw new HttpError(404, "no_session", "That group is not in the line.");
+  if (session.done_at) throw new HttpError(409, "session_done", "That group's song is already uploaded. Pick the group that recorded this one.");
+  const tagged = await db.prepare(ASSIGN_TAG_SQL).bind(track.id, sessionId).run();
+  // The tag is the guard (nobody on the song, no group): only when it took do the people go on.
+  if (!tagged?.meta?.changes) throw new HttpError(409, "has_people", "This song already has its people on it. The list has been refreshed.");
+  await db.batch([
+    ...emails.map((r) => db.prepare(ATTACH_TAGGED_SQL).bind(track.id, r.email, now)),
+    db.prepare(ASSIGN_DONE_SQL).bind(sessionId, now),
+    db.prepare(STATUS_EVENT_SQL).bind(sessionId, laneOf(session), "done", m.id, now),
+  ]);
+  await syncEntry(env, await readSong(db, code), now);
+  return json({ song: await songOf(db, code, { code }) });
+}
 
 const idOf = (s) => (/^[1-9][0-9]{0,9}$/.test(s ?? "") ? Number(s) : null);
 export const onRequest = route({
@@ -281,6 +314,7 @@ export const onRequest = route({
     if (parts.length === 4 && parts[1] === "members" && idOf(parts[2]) && parts[3] === "remove") return removeMember(context, idOf(parts[2]), m);
     if (parts.length === 2 && parts[1] === "gifs") return addGif(context);
     if (parts.length === 4 && parts[1] === "songs" && isCode(parts[2]) && parts[3] === "pull") return pull(context, parts[2], m);
+    if (parts.length === 4 && parts[1] === "songs" && isCode(parts[2]) && parts[3] === "group") return assignGroup(context, parts[2], m);
     if (parts.length === 6 && parts[1] === "songs" && isCode(parts[2]) && parts[3] === "people" && idOf(parts[4]) && parts[5] === "remove") return detach(context, parts[2], idOf(parts[4]));
     if (parts.length === 4 && parts[1] === "gifs" && /^[A-Za-z0-9]{1,64}$/.test(parts[2]) && parts[3] === "remove") return removeGif(context, parts[2]);
     return fail(404, "not_found", "No such API route.");

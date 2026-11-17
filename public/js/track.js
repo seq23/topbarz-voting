@@ -289,6 +289,7 @@ function drawContest() {
   for (const el of [els.publicRow, els.publicNote, els.publicGroup, els.voteRow, els.voteNote]) el.hidden = Boolean(c);
   els.artRow.hidden = Boolean(c) && !performer;
   els.listenOnly.hidden = !c || performer;
+  els.listenOnly.textContent = c?.nobody ? COPY.noGroupYet : COPY.listenOnly;
   els.contest.hidden = !performer;
   drawShare();
   if (!c) return;

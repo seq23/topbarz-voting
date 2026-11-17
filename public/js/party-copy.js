@@ -23,6 +23,14 @@ export const HOLIDAY = {
     photoAlt: "Top Barz Christmas party, photo",
     footMark: "Top Barz",
     pageTitle: "Vote for your favorite Christmas jingle | Top Barz",
+    // The page's own words before its script runs, and what a link preview shows (written into the
+    // HTML on the server by functions/index.js while the party is on).
+    description: "Vote for your favorite Christmas jingle recorded in the Top Barz booth at our first-ever Christmas party, hosted at Dick and Jane's.",
+    shareTitle: "Vote for your favorite Christmas jingle | Top Barz",
+    shareDescription: "Christmas jingles recorded in the Top Barz booth at Dick and Jane's. Listen, like your favorite, and send it to your people.",
+    imageAlt: "Top Barz. JUMP IN THE BOOTH. Vote for your favorite Christmas jingle.",
+    endsPending: "soon",
+    ruleEndsPending: "Voting ends when the countdown above reaches zero.",
   },
   // Still being finalized (Scooter: "use a placeholder like this for now, not final terms").
   prize: "The winner wins a bar tab at Dick and Jane's.",

@@ -27,7 +27,11 @@ export const COPY = {
   // the groups just out of the booth (the upload station), so the song lands on the right group
   // even when the next group is already recording. Shown only while the party is on.
   groupsTitle: "Whose song is this?",
-  groupsNone: "Nobody is at the upload station. The team taps Out of the booth on the team page when a group comes out; or upload as a walk-up.",
+  groupsNone: "Nobody is at the upload station yet. The team taps Out of the booth on the team page when a group comes out, and the group shows here within a few seconds. Wait for it if you can.",
+  // Uploading with no group picked: asked first, because nobody can enter that song until the team
+  // puts the right group on it from the team page (Contest songs).
+  walkUpConfirm: "Upload with no group on it? Nobody can enter this song in the contest until the team puts the group that recorded it on the song, from the team page.",
+  walkUpHeld: "Not uploaded. Pick the group whose song this is, then drop the file again.",
   walkUp: "No group (a walk-up)",
   groupsNote: "Upload an MP3 export if you can: it plays fast on phones on the bar's Wi-Fi.",
   sessionGone: "That group is not at the upload station any more. Pick the group again.",

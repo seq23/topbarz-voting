@@ -72,13 +72,15 @@ export const UNMARK_ALL_SQL = "UPDATE booth_people SET contest_opt_in = 0, conte
 // now or pulled, tagged with a session at upload, or with anyone on it who signed up at /join),
 // entered or not, so a song stuck waiting is in front of the team. Counts only (never an email);
 // the people come from TEAM_SONG_PEOPLE_SQL per song.
-export const TEAM_SONGS_SQL = `SELECT b.id, b.code, b.title, b.file_name, b.pulled_at, b.contest_entered_at, b.contest_confirmed_at, t.label, t.active,
+export const TEAM_SONGS_SQL = `SELECT b.id, b.code, b.title, b.file_name, b.party_session_id, b.pulled_at, b.contest_entered_at, b.contest_confirmed_at, t.label, t.active,
   (SELECT g.name FROM party_guests g WHERE g.email = b.contest_entered_by) AS entered_by_name,
   (SELECT g.name FROM party_guests g WHERE g.email = b.contest_confirmed_by) AS confirmed_by_name,
   (SELECT COUNT(*) FROM booth_people p WHERE p.track_id = b.id) AS people
   FROM booth_tracks b LEFT JOIN tracks t ON t.id = b.vote_track_id
   WHERE b.vote_track_id IS NOT NULL OR b.party_session_id IS NOT NULL
      OR EXISTS (SELECT 1 FROM booth_people p JOIN party_guests g ON g.email = p.email WHERE p.track_id = b.id)
+     OR (b.party_session_id IS NULL AND b.uploaded_at > (CAST(strftime('%s', 'now') AS INTEGER) - 172800) * 1000
+         AND NOT EXISTS (SELECT 1 FROM booth_people p WHERE p.track_id = b.id))
   ORDER BY b.uploaded_at DESC, b.id DESC LIMIT 200`;
 // One song's people for the team: the row id (what Remove names), the box, and the sign-up name
 // (NULL when not signed up). Never the email: a booth email is shown to its owner only.
@@ -103,6 +105,14 @@ export const UPLOAD_EVENT_SQL = "INSERT INTO party_status_events (session_id, fr
 export const SESSION_EMAILS_SQL = "SELECT email FROM party_guests WHERE session_id = ?1 ORDER BY joined_at, id";
 export const ATTACH_TAGGED_SQL = "INSERT OR IGNORE INTO booth_people (track_id, email, attached_at) VALUES (?1, ?2, ?3)";
 export const TAG_SQL = "UPDATE booth_tracks SET party_session_id = ?2 WHERE id = ?1";
+// The team puts a group on a song uploaded with nobody on it (the engineer uploaded before the group
+// reached the upload station, or a walk-up who signed up afterwards): any group whose song is not
+// uploaded yet (waiting, in the booth or at the upload station). The song must still have nobody on
+// it and no group; the group then moves to done, as an upload would have moved it.
+export const ASSIGN_SESSION_SQL = "SELECT id, status, done_at FROM party_sessions WHERE id = ?1";
+export const ASSIGN_TAG_SQL = "UPDATE booth_tracks SET party_session_id = ?2 WHERE id = ?1 AND party_session_id IS NULL AND NOT EXISTS (SELECT 1 FROM booth_people p WHERE p.track_id = ?1)";
+export const ASSIGN_DONE_SQL = "UPDATE party_sessions SET status = 'out', status_at = ?2, done_at = ?2 WHERE id = ?1 AND done_at IS NULL";
+export const SONG_PEOPLE_COUNT_SQL = "SELECT COUNT(*) AS n FROM booth_people WHERE track_id = ?1";
 // The groups an engineer can pick: those at the upload station, the longest waiting first, first names only.
 export const IN_BOOTH_SQL = "SELECT s.id, s.status_at, g.name FROM party_sessions s JOIN party_guests g ON g.session_id = s.id WHERE s.status = 'out' AND s.done_at IS NULL ORDER BY s.status_at, s.id, g.joined_at, g.id";
 
@@ -177,6 +187,7 @@ export function contestView(song, email, { entered, closed, production }) {
     confirmed_by: track.contest_confirmed_at ? nameOf(track.contest_confirmed_by) : null,
     step: verdict.step,
     you: { performer: Boolean(me), signed_up: Boolean(me?.name) },
+    nobody: people.length === 0, // no group on it yet: the team puts one on from /team
     people: people.map((p) => ({ first_name: p.name ? firstOf(p.name) : null, you: p.email === email })),
     blocked: ["scooter_taylor", "test_file_in_production", "pulled_by_team"].includes(verdict.reason) ? verdict.reason : null,
   };
@@ -192,6 +203,8 @@ export const teamSong = (row, people = []) => ({
   pulled: Boolean(row.pulled_at),
   pulled_at: row.pulled_at ? new Date(row.pulled_at).toISOString() : null,
   people: row.people,
+  // Nobody on it and no group: the team picks the group that recorded it (POST …/songs/<code>/group).
+  needs_group: row.people === 0 && !row.party_session_id,
   ticked: Boolean(row.contest_entered_at),
   confirmed: Boolean(row.contest_confirmed_at),
   ticked_by: row.contest_entered_at && row.entered_by_name ? firstOf(row.entered_by_name) : null,

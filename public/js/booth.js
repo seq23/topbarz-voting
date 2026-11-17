@@ -106,6 +106,8 @@ function upload(file) {
   if (app.busy || !file) return;
   const why = refuseFile(file);
   if (why) { failed(why === "not_audio" ? COPY.notAudio : why === "too_big" ? COPY.tooBig : COPY.empty); return; }
+  // While the party is on, a song with no group picked has nobody on it: asked first, never silent.
+  if (!els.groups.hidden && !app.group && !window.confirm(COPY.walkUpConfirm)) { failed(COPY.walkUpHeld); app.lastFile = file; return; }
   app.busy = true;
   app.lastFile = file;
   show("uploading");

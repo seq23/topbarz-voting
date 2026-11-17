@@ -561,6 +561,9 @@ dialog::backdrop { background: var(--color-backdrop); }
 .line-meta { font-size: var(--text-xs); color: var(--color-ink-2); }
 .song-people { list-style: none; margin: 0.5rem 0 0; padding: 0; display: grid; gap: 0.35rem; }
 .song-person { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem; font-size: var(--text-xs); color: var(--color-ink-2); }
+.assign { display: grid; gap: var(--space-2); margin-top: var(--space-2); }
+.assign label { font-size: var(--text-xs); color: var(--color-ink-2); }
+.assign select { min-height: var(--tap); padding: 0 var(--space-3); background: var(--color-paper); color: var(--color-ink); border: 2px solid var(--color-field-line); font: 400 var(--text-base)/1.2 var(--font-body); }
 .line-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .btn-status { min-height: 52px; padding: 0 var(--space-6); color: var(--color-status-ink); }
 .btn-go { background: var(--color-go); border-color: var(--color-go); }

@@ -58,6 +58,15 @@ export const COPY = {
   songsIntro: "A song goes into the vote by itself when someone on it ticks Enter and, for a group, confirms it with the group. If one should not be in the vote, take it out here. Its likes are kept, and you can put it back. Typing a song's code only lets someone hear and download it: the people on a song are the group the engineer picked.",
   songsNone: "No contest songs yet. A song shows here once the engineer uploads it for a group.",
   songPeople: "Who is on this song",
+  // A song uploaded with nobody on it (before the group reached the upload station, or a walk-up):
+  // nobody can enter it until the team picks the group that recorded it.
+  songNoGroup: "Nobody is on this song yet, so nobody can enter it. Pick the group that recorded it.",
+  songNoGroupNone: "Nobody is on this song yet. A walk-up signs up at the QR sign first; then pick their group here.",
+  assignLabel: "Group that recorded it",
+  assignPick: "Pick a group",
+  assignGo: "Put this group on it",
+  confirmAssign: "Put {names} on song {code}? They become the song's people, can enter it, and move to Done.",
+  assigned: "{names}: on song {code}",
   personIn: "entered it",
   personWaiting: "on the song",
   personNoSignUp: "has not signed up",

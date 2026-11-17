@@ -35,6 +35,8 @@ function dressHome() {
   const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
   const lede = document.querySelector(".intro .lede");
   if (!lede || !document.getElementById("tbz-tracks-title")) return;
+  // The server already wrote the party's words into the page (functions/index.js).
+  if (document.documentElement.dataset.dressed === "server") return;
   const H = HOLIDAY.home;
   document.title = H.pageTitle;
   lede.textContent = H.lede;

@@ -24,7 +24,7 @@ const els = Object.fromEntries([
   "person", "person-title", "person-list", "person-close", "confirm", "confirm-title", "confirm-yes", "confirm-no", "toast", "toast-text", "undo",
 ].map((id) => [id.replace(/-([a-z])/g, (_, c) => c.toUpperCase()), $(`tbz-team-${id}`)]));
 
-const app = { token: null, me: "", sessions: [], timer: null, pending: null, undo: null, undoTimer: null, resendTimer: null, platform: detectPlatform(navigator), gifs: [], gifTimer: null, songs: [] };
+const app = { token: null, me: "", sessions: [], timer: null, pending: null, undo: null, undoTimer: null, resendTimer: null, platform: detectPlatform(navigator), gifs: [], gifTimer: null, songs: [], assignPick: {} };
 
 // ── The words
 document.title = `${COPY.headline} | Top Barz`;
@@ -235,10 +235,51 @@ function drawSongs() {
       h("p", { class: "next-names", text: s.label }),
       h("p", { class: "line-meta", text: songLine(s) }),
       h("ul", { class: "song-people", "aria-label": COPY.songPeople }, ...(s.members ?? []).map((p) => songPerson(s, p))),
+      s.needs_group ? assignRow(s) : null,
       h("div", { class: "line-actions" }, s.pulled
         ? h("button", { type: "button", class: "btn btn-small btn-ghost", text: COPY.putBack, onclick: () => askSong(s, false) })
         : h("button", { type: "button", class: "btn btn-status btn-stop", text: COPY.pullOut, onclick: () => askSong(s, true) })));
   }));
+}
+// A song with nobody on it: pick the group that recorded it from the groups whose song is not
+// uploaded yet (the pick survives the 5 s redraw), then confirm.
+function assignRow(song) {
+  const groups = app.sessions.filter((g) => g.status !== "done");
+  if (!groups.length) return h("p", { class: "line-meta", text: COPY.songNoGroupNone });
+  const id = `tbz-assign-${song.code}`;
+  const pick = app.assignPick[song.code] ?? "";
+  const select = h("select", { id, onchange: (e) => { app.assignPick[song.code] = e.target.value; } },
+    h("option", { value: "", text: COPY.assignPick, selected: pick === "" }),
+    ...groups.map((g) => h("option", { value: String(g.id), text: `${namesOf(g)} · ${STATUS[g.status]?.word ?? g.status}`, selected: pick === String(g.id) })));
+  return h("div", { class: "assign" },
+    h("p", { class: "line-meta", text: COPY.songNoGroup }),
+    h("label", { for: id, text: COPY.assignLabel }), select,
+    h("button", { type: "button", class: "btn btn-small", text: COPY.assignGo, onclick: () => askAssign(song, groups.find((g) => String(g.id) === app.assignPick[song.code])) }));
+}
+function askAssign(song, group) {
+  if (!group) { document.getElementById(`tbz-assign-${song.code}`)?.focus(); return; }
+  app.pending = { song, group };
+  els.confirmTitle.textContent = COPY.confirmAssign.replace("{names}", namesOf(group)).replace("{code}", song.code);
+  els.confirmYes.className = "btn";
+  showModal(els.confirm, cancel);
+  els.confirmNo.focus();
+}
+async function assignGroup(song, group) {
+  try {
+    await call(`/api/party/team/songs/${song.code}/group`, { method: "POST", body: { session_id: group.id } });
+    delete app.assignPick[song.code];
+    els.toastText.textContent = COPY.assigned.replace("{names}", namesOf(group)).replace("{code}", song.code);
+  } catch (err) {
+    if (signedOut(err)) { signOut(); return; }
+    els.toastText.textContent = err?.message || COPY.failed;
+  }
+  app.undo = null;
+  els.undo.hidden = true;
+  els.toast.hidden = false;
+  clearTimeout(app.undoTimer);
+  app.undoTimer = setTimeout(() => { els.toast.hidden = true; }, UNDO_MS);
+  app.pending = null;
+  poll();
 }
 // One person on a song: first name (or "Not signed up" with when they entered the code), their box,
 // and Remove for anyone who has not ticked: a plus-one or a mistyped code would hold the song out.
@@ -328,7 +369,8 @@ async function change(s, from, to, { undoable }) {
 els.confirmYes.addEventListener("click", () => {
   const p = app.pending;
   closeModal(els.confirm);
-  if (p?.person) removePerson(p.song, p.person);
+  if (p?.group) assignGroup(p.song, p.group);
+  else if (p?.person) removePerson(p.song, p.person);
   else if (p?.song) pullSong(p.song, p.pulled, { undoable: true });
   else if (p) change(p.s, p.s.status, p.to, { undoable: true });
 });

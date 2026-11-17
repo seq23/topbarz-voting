@@ -363,6 +363,46 @@ test("the team's songs: who entered and who confirmed, by first name; Remove tak
   assert.equal((await post(`team/songs/${code}/people/${gus.id}/remove`, {}, { token })).status, 404, "removing twice says they are gone");
 });
 
+test("a song uploaded with nobody on it is never stuck: the team puts the group that recorded it on it (still in the booth, at the station, or a walk-up who signed up after), once, team only", async () => {
+  const token = await teamToken();
+  // Scooter's timing case: the engineer uploads before the team taps the group Out.
+  await group([["Uma Early", "uma@example.com"], ["Vic Early", "vic@example.com"]]);
+  await move("uma@example.com", "waiting", "booth", token);
+  const groupId = await sessionOf("uma@example.com");
+  const up = await upload("Too Early.mp3");
+  assert.equal(up.status, 200, JSON.stringify(up.body));
+  const code = up.body.code;
+  let listed = (await get("team/songs", { token })).body.songs.find((s) => s.code === code);
+  assert.deepEqual([listed?.needs_group, listed?.people], [true, 0], "the untagged song is in front of the team, marked as needing its group");
+  const stuck = await B(code, "enter", { email: "uma@example.com" });
+  assert.deepEqual([stuck.body.contest.you.performer, stuck.body.contest.nobody], [false, true], "/track says nobody is on it yet");
+  assert.equal((await post(`team/songs/${code}/group`, { session_id: groupId })).body.error, "team_sign_in", "only the team");
+  assert.equal((await post(`team/songs/${code}/group`, { session_id: "x" }, { token })).body.error, "bad_session");
+  const closedEnv = { ...env, VOTING_ENDS_AT: "2020-06-01T00:00:00Z" };
+  assert.equal((await post(`team/songs/${code}/group`, { session_id: groupId }, { token, e: closedEnv })).body.error, "voting_closed");
+  const put = await post(`team/songs/${code}/group`, { session_id: groupId }, { token });
+  assert.equal(put.status, 200, put.text);
+  assert.deepEqual([put.body.song.people, put.body.song.needs_group], [2, false]);
+  const people = (await env.DB.prepare("SELECT p.email FROM booth_people p JOIN booth_tracks b ON b.id = p.track_id WHERE b.code = ?1 ORDER BY p.email").bind(code).all()).results.map((r) => r.email);
+  assert.deepEqual(people, ["uma@example.com", "vic@example.com"], "the song is now that group's, exactly as a tagged upload would make it");
+  assert.equal((await get("team/line", { token })).body.sessions.find((s) => s.id === groupId).status, "done", "and the group is done");
+  const ev = await env.DB.prepare("SELECT from_status, to_status FROM party_status_events WHERE session_id = ?1 ORDER BY id DESC LIMIT 1").bind(groupId).first();
+  assert.deepEqual(ev, { from_status: "booth", to_status: "done" }, "on the line's record");
+  const now = await B(code, "contest", { email: "uma@example.com", enter: true, agree: true, group_confirmed: true });
+  assert.equal(now.status, 200, now.text);
+  assert.equal(now.body.contest.entered, true, "the people put on it can enter it");
+  // A song that has its people is never handed to another group.
+  await guest("Wes Walkup", "wes@example.com");
+  const wes = await sessionOf("wes@example.com");
+  assert.equal((await post(`team/songs/${code}/group`, { session_id: wes }, { token })).body.error, "has_people");
+  // A walk-up who never signed up: the engineer uploads with no group, Wes signs up afterwards (waiting), the team puts him on it.
+  const walk = (await upload("Walk Up.mp3")).body.code;
+  assert.equal((await post(`team/songs/${walk}/group`, { session_id: groupId }, { token })).body.error, "session_done", "a group whose song is uploaded is not offered again");
+  const wesOn = await post(`team/songs/${walk}/group`, { session_id: wes }, { token });
+  assert.deepEqual([wesOn.status, wesOn.body.song.people], [200, 1], wesOn.text);
+  assert.ok(!JSON.stringify(wesOn.body).includes("@"), "never an email");
+});
+
 test("after voting ends nothing moves: the box and the title answer 403 voting_closed", async () => {
   const token = await teamToken();
   const closedEnv = { ...env, VOTING_ENDS_AT: "2020-06-01T00:00:00Z" };
@@ -382,7 +422,7 @@ test("the team's safety valve: Take out of the vote from /team holds even if it 
   const likesBefore = 1;
   const listed = (await get("team/songs", { token })).body.songs.find((s) => s.code === code);
   const { members, ...rest } = listed;
-  assert.deepEqual(rest, { code, label: "Val", entered: true, pulled: false, pulled_at: null, people: 1, ticked: true, confirmed: false, ticked_by: "Val", confirmed_by: null }, "the team sees the song, in, with who entered it");
+  assert.deepEqual(rest, { code, label: "Val", entered: true, pulled: false, pulled_at: null, people: 1, needs_group: false, ticked: true, confirmed: false, ticked_by: "Val", confirmed_by: null }, "the team sees the song, in, with who entered it");
   assert.equal(members.length, 1);
   assert.deepEqual(Object.keys(members[0]).sort(), ["attached_at", "first_name", "id", "in", "signed_up"], "first names and boxes, never an email");
   assert.equal(members[0].first_name, "Val");

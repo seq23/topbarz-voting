@@ -85,7 +85,8 @@ test("the contest box: first names with in or waiting, one line everyone sees th
   assert.ok(!/id="tbz-contest-box"[^>]*checked/.test(html), "unticked by default");
   const js = read("public/js/track.js");
   assert.match(js, /h\("a", \{ href: "\/holiday-rules", target: "_blank", rel: "noopener", text: COPY\.contestRules \}\)/);
-  assert.match(js, /body: \{ email: track\.you\.email, enter, agree: enter \}/, "a tick sends the rules agreement with it");
+  assert.match(js, /body: \{ email: track\.you\.email, enter, agree: enter, \.\.\.\(enter \? \{ guest_key: ownKey\(\) \} : \{\}\) \}/, "a tick sends the rules agreement and this phone's own sign-up key with it");
+  assert.match(js, /const ownKey = \(\) => \{ try \{ const k = localStorage\.getItem\(GUEST_KEY\); return isGuestKey\(k\) \? k : null; \} catch \{ return null; \} \};/, "the key is read from this phone only, never written here");
   assert.match(js, /if \(voteRow\) voteRow\.hidden = Boolean\(c\);/, "while the party is on the box takes the place of the public-vote switch");
   assert.match(js, /app\.contestTimer = setTimeout\(refreshContest, LINE_POLL_MS\);/, "and the status refreshes by itself");
 });
@@ -106,8 +107,10 @@ test("the team's page: every status change asks first and can be undone; no swip
   const team = read("public/js/team.js");
   assert.ok(!/touchstart|touchend|touchmove|pointerdown|swipe/i.test(team), "no gestures on the team's page");
   assert.match(team, /onclick: \(\) => ask\(s, to\)/, "a status button only asks");
-  assert.match(team, /els\.confirmYes\.addEventListener\("click", \(\) => \{[^}]*change\(p\.s, p\.s\.status, p\.to, \{ undoable: true \}\)/, "Yes makes the change, with Undo");
-  assert.match(team, /els\.undo\.addEventListener\("click", \(\) => \{ const u = app\.undo; if \(u\) change\(u\.s, u\.from, u\.to, \{ undoable: false \}\); \}\);/);
+  assert.match(team, /els\.confirmYes\.addEventListener\("click", \(\) => \{\s*const p = app\.pending;\s*closeModal\(els\.confirm\);\s*if \(p\?\.song\) pullSong\(p\.song, p\.pulled, \{ undoable: true \}\);\s*else if \(p\) change\(p\.s, p\.s\.status, p\.to, \{ undoable: true \}\);\s*\}\);/, "Yes makes the change (a group's status, or a song in or out of the vote), with Undo");
+  assert.match(team, /els\.undo\.addEventListener\("click", \(\) => \{\s*const u = app\.undo;\s*if \(u\?\.song\) pullSong\(u\.song, u\.pulled, \{ undoable: false \}\);\s*else if \(u\) change\(u\.s, u\.from, u\.to, \{ undoable: false \}\);\s*\}\);/);
+  assert.match(team, /onclick: \(\) => askSong\(s, true\)/, "Take out of the vote only asks");
+  assert.match(team, /onclick: \(\) => askSong\(s, false\)/, "Put back only asks");
   assert.match(team, /els\.confirmNo\.focus\(\);/, "the keyboard lands on Cancel, so Enter never changes a status by mistake");
   for (const k of ["empty", "unreachable", "loading", "intro", "headline"]) assert.ok(TEAM[k], k);
   assert.equal(TEAM.empty, "Nobody in line yet. Put the QR sign up and the first sign-up shows here.");

@@ -28,9 +28,12 @@ export const COPY = {
   // even when the next group is already recording. Shown only while the party is on.
   groupsTitle: "Whose song is this?",
   groupsNone: "Nobody is at the upload station yet. The team taps Out of the booth on the team page when a group comes out, and the group shows here within a few seconds. Wait for it if you can.",
-  // Uploading with no group picked: asked first, because nobody can enter that song until the team
+  // Uploading with no group picked: asked first, on the page itself (Scooter, 18 Nov 2026: the
+  // browser's own pop-up "is easy to miss"), because nobody can enter that song until the team
   // puts the right group on it from the team page (Contest songs).
   walkUpConfirm: "Upload with no group on it? Nobody can enter this song in the contest until the team puts the group that recorded it on the song, from the team page.",
+  walkUpPick: "Pick a group first",
+  walkUpGo: "Upload with no group",
   walkUpHeld: "Not uploaded. Pick the group whose song this is, then drop the file again.",
   walkUp: "No group (a walk-up)",
   groupsNote: "Upload an MP3 export if you can: it plays fast on phones on the bar's Wi-Fi.",

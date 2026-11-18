@@ -61,6 +61,14 @@ export const COPY = {
   contestNotYet: "Not entered yet.",
   contestSomeone: "someone on the song",
   contestBlocked: "This song cannot go in the contest.",
+  // …and why (Scooter, 18 Nov 2026). Scooter Taylor's own songs are never in the vote: Top Barz's
+  // standing rule since CultureCon, read from the file name, the song title and the people on it.
+  blockedScooterFile: "Its file name is Scooter Taylor's.",
+  blockedScooterTitle: "Its title names Scooter Taylor.",
+  blockedScooterPerson: "Scooter Taylor is one of the people on it.",
+  blockedScooterAny: "It is Scooter Taylor's.",
+  blockedScooterRule: "Scooter Taylor's own songs are never in the vote (a standing Top Barz rule). To try the entry, use a song recorded by a group signed up under other names.",
+  blockedTest: "It is a test file, and test songs never go in the live vote.",
   contestClosed: "Voting has closed, so nothing changes now.",
   contestSignUp: "Sign up at the QR code first, with the same email you used here, then tick the box.",
   contestFailed: "That did not save. Try again.",

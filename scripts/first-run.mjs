@@ -127,4 +127,16 @@ if (token) {
   if (back.status !== 201) fail(`once the group is done, signing up again answered ${back.status} ${back.text.slice(0, 120)}`);
   ok("once the group's song is uploaded, the same person gets back in line");
 }
-console.log(`FIRST_RUN OK ${base}: ${step} steps${token ? "" : " (the team's emailed-code sign-in is a person's step: set FIRST_RUN_TEAM_TOKEN to cover the team's line, the upload station and the contest entry too)"}`);
+// Last: leave the preview as this run found it (Scooter, 18 Nov 2026: test groups and uploads were
+// in his demo). Only this run's own rows, by its tag (scripts/clean-test-data.mjs); D1 through
+// wrangler on this Mac. If that cannot run, the OK line says so and names the command.
+let cleaned = "";
+try {
+  const { cleanTestData } = await import("./clean-test-data.mjs");
+  const { targets } = await import("./lib/cf.mjs");
+  const { picked } = await cleanTestData(targets(/\/\/(localhost|127\.0\.0\.1)/.test(base) ? "local" : "preview"), { tag });
+  cleaned = `; cleared its own test rows (${picked.guests.length} sign-ups, ${picked.tracks.length} uploads)`;
+} catch (err) {
+  cleaned = `; its test rows are still there (${String(err.message).split("\n")[0].slice(0, 120)}): npm run clean-test-data -- --env preview --keep <demo code>`;
+}
+console.log(`FIRST_RUN OK ${base}: ${step} steps${cleaned}${token ? "" : " (the team's emailed-code sign-in is a person's step: set FIRST_RUN_TEAM_TOKEN to cover the team's line, the upload station and the contest entry too)"}`);

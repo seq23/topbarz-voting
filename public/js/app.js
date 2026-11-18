@@ -522,8 +522,11 @@ function setClosed(closed) {
 }
 
 // The rules' last line follows the window: it never promises an end that has passed.
+// While the holiday party is on, the end is the day Scooter set, with its time marked as not set
+// yet (HOLIDAY.dates), never a time read off the preview's window as if it were final.
+const endsWords = () => (app.holiday ? `${HOLIDAY.dates.votingEnds} (${HOLIDAY.dates.timeMark})` : formatEndsLine(app.endMs));
 function renderRuleEnds() {
-  if (Number.isFinite(app.endMs)) els.ruleEnds.textContent = rulesEndLine(app.closed, formatEndsLine(app.endMs));
+  if (Number.isFinite(app.endMs)) els.ruleEnds.textContent = rulesEndLine(app.closed, endsWords());
 }
 
 let spokenMinute = null;
@@ -557,11 +560,12 @@ festive().then((on) => { if (on) gallery.rename(HOLIDAY.home.photoAlt); });
 function applyState(state, generatedAt) {
   app.loaded = true;
   app.endMs = Date.parse(state.voting_ends_at);
+  app.holiday = state.holiday?.on === true;
   app.serverClosed = state.closed === true || generatedAt < app.closedHold;
   app.gateOn = state.gate?.available !== false;
   app.giphyOn = state.giphy?.available === true;
   app.codesOn = state.verification?.available === true;
-  if (Number.isFinite(app.endMs)) els.ends.textContent = formatEndsLine(app.endMs);
+  if (Number.isFinite(app.endMs)) els.ends.textContent = endsWords();
   renderRuleEnds();
   els.offNote.hidden = app.gateOn;
   const notOpen = state.open === false && state.closed !== true;

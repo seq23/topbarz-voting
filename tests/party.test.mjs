@@ -332,7 +332,7 @@ test("typing a song's code hears and downloads it, and never puts anyone on it; 
   // Scooter Taylor's file: never.
   const scooter = await groupSong([["Pat Booth", "pat@example.com"]], "Scooter Taylor - Jingle.mp3", token);
   const refused = await B(scooter, "contest", { email: "pat@example.com", enter: true, agree: true });
-  assert.deepEqual([refused.body.contest.entered, refused.body.contest.blocked], [false, "scooter_taylor"]);
+  assert.deepEqual([refused.body.contest.entered, refused.body.contest.blocked, refused.body.contest.blocked_where], [false, "scooter_taylor", "file"], "the page is told which name set it off, so it can say why");
   assert.ok(!(await stateNow()).tracks.some((t) => /scooter/i.test(t.label)));
   // A test file in production: never.
   const prodEnv = { ...env, APP_ENV: "production" };

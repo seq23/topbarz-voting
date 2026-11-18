@@ -97,6 +97,7 @@ export function slotProblem(g) {
 // The server's contest view → what the page draws, or null (no contest here). First names only.
 const BLOCKS = ["scooter_taylor", "test_file_in_production", "pulled_by_team"];
 const STEPS = ["not_entered", "needs_group", "in"];
+const WHERES = ["file", "title", "person"];
 export function cleanContest(c) {
   if (!c || typeof c !== "object" || c.on !== true) return null;
   const name = (v) => (typeof v === "string" && v.trim() ? v.trim().slice(0, 30) : null);
@@ -114,13 +115,20 @@ export function cleanContest(c) {
     you: { performer: c.you?.performer === true, signed_up: c.you?.signed_up === true },
     people: (Array.isArray(c.people) ? c.people : []).slice(0, 50).map((p) => ({ first_name: name(p?.first_name), you: p?.you === true })),
     blocked: BLOCKS.includes(c.blocked) ? c.blocked : null,
+    blocked_where: c.blocked === "scooter_taylor" && WHERES.includes(c.blocked_where) ? c.blocked_where : null,
   };
 }
 // The one line under the box that everyone on the song sees the same way: in or not, and who did
 // what, by first name, so nobody's tick speaks for the group in silence.
 export function contestLine(COPY, c) {
   if (!c) return "";
+  // A song that cannot go in says why (Scooter, 18 Nov 2026: never a bare "cannot").
   if (c.blocked === "pulled_by_team") return COPY.contestPulled;
+  if (c.blocked === "test_file_in_production") return `${COPY.contestBlocked} ${COPY.blockedTest}`;
+  if (c.blocked === "scooter_taylor") {
+    const which = c.blocked_where === "file" ? COPY.blockedScooterFile : c.blocked_where === "title" ? COPY.blockedScooterTitle : c.blocked_where === "person" ? COPY.blockedScooterPerson : COPY.blockedScooterAny;
+    return `${COPY.contestBlocked} ${which} ${COPY.blockedScooterRule}`;
+  }
   if (c.blocked) return COPY.contestBlocked;
   const who = (n) => n || COPY.contestSomeone;
   const group = groupLabel(c.people.map((p) => p.first_name).filter(Boolean));

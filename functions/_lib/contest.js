@@ -37,8 +37,9 @@ export function contestVerdict({ track, people, production } = {}) {
   const no = (reason, message, step = null) => ({ ok: false, reason, message, step });
   if (!track || typeof track !== "object") return no("no_such_code", "no booth track has that code");
   const file = String(track.file_name ?? "");
-  const names = [file.replace(/\.[^.]+$/, ""), String(track.title ?? ""), ...rows.map((r) => String(r.name ?? ""))];
-  if (names.some((n) => n && isScooterTaylor(n))) return no("scooter_taylor", "Scooter Taylor's track is never in the vote");
+  // Which of the three names it is goes with the refusal, so the page can say why (Scooter, 18 Nov 2026).
+  const where = isScooterTaylor(file.replace(/\.[^.]+$/, "")) ? "file" : isScooterTaylor(String(track.title ?? "")) ? "title" : rows.some((r) => r.name && isScooterTaylor(String(r.name))) ? "person" : null;
+  if (where) return { ...no("scooter_taylor", "Scooter Taylor's track is never in the vote"), where };
   if (production && isTestName(file)) return no("test_file_in_production", "test files go to preview only, never production");
   if (track.pulled_at) return no("pulled_by_team", "the team took this song out of the vote");
   if (rows.length === 0) return no("nobody_attached", "nobody is on this song: the engineer did not pick a group when it was uploaded");
@@ -190,6 +191,8 @@ export function contestView(song, email, { entered, closed, production }) {
     nobody: people.length === 0, // no group on it yet: the team puts one on from /team
     people: people.map((p) => ({ first_name: p.name ? firstOf(p.name) : null, you: p.email === email })),
     blocked: ["scooter_taylor", "test_file_in_production", "pulled_by_team"].includes(verdict.reason) ? verdict.reason : null,
+    // For Scooter Taylor's rule: which name set it off ("file", "title" or "person"), never whose.
+    blocked_where: verdict.reason === "scooter_taylor" ? verdict.where : null,
   };
 }
 export { holidayOn };

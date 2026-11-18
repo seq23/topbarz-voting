@@ -33,6 +33,10 @@ const els = {
   groupsTitle: $("tbz-groups-title"),
   groupsList: $("tbz-groups-list"),
   groupsNote: $("tbz-groups-note"),
+  walkup: $("tbz-walkup"),
+  walkupText: $("tbz-walkup-text"),
+  walkupPick: $("tbz-walkup-pick"),
+  walkupGo: $("tbz-walkup-go"),
 };
 
 const app = { busy: false, lastFile: null, group: "", groups: [] };
@@ -48,6 +52,9 @@ els.next.textContent = COPY.next;
 els.retry.textContent = COPY.retry;
 els.logTitle.textContent = COPY.logTitle;
 els.groupsTitle.textContent = COPY.groupsTitle;
+els.walkupText.textContent = COPY.walkUpConfirm;
+els.walkupPick.textContent = COPY.walkUpPick;
+els.walkupGo.textContent = COPY.walkUpGo;
 
 // ── The holiday party: whose song this is, from the groups at the upload station (the team marks
 // a group Out of the booth on /team). The pick goes with the upload, so the song's people are that
@@ -78,6 +85,7 @@ function show(state) {
   els.progress.hidden = state !== "uploading";
   els.done.hidden = state !== "done";
   els.failed.hidden = state !== "failed";
+  els.walkup.hidden = state !== "walkup";
   if (state !== "uploading") { els.progressText.textContent = ""; setProgress(0); }
 }
 function setProgress(fraction) {
@@ -102,12 +110,13 @@ function done({ code, file_name: name }) {
 }
 
 // ── The upload
-function upload(file) {
+function upload(file, { walkUpOk = false } = {}) {
   if (app.busy || !file) return;
   const why = refuseFile(file);
   if (why) { failed(why === "not_audio" ? COPY.notAudio : why === "too_big" ? COPY.tooBig : COPY.empty); return; }
-  // While the party is on, a song with no group picked has nobody on it: asked first, never silent.
-  if (!els.groups.hidden && !app.group && !window.confirm(COPY.walkUpConfirm)) { failed(COPY.walkUpHeld); app.lastFile = file; return; }
+  // While the party is on, a song with no group picked has nobody on it: asked first, on the page
+  // (never the browser's own pop-up, which is easy to miss), and never uploaded in silence.
+  if (!els.groups.hidden && !app.group && !walkUpOk) { app.lastFile = file; show("walkup"); els.walkupPick.focus(); return; }
   app.busy = true;
   app.lastFile = file;
   show("uploading");
@@ -148,6 +157,14 @@ els.zone.addEventListener("drop", (ev) => {
   ev.preventDefault();
   upload(ev.dataTransfer?.files?.[0]);
 });
+// The walk-up question: pick a group (back to the list, the file kept for the next drop) or go on.
+els.walkupPick.addEventListener("click", () => {
+  show("ready");
+  els.progressText.textContent = COPY.walkUpHeld;
+  els.groups.scrollIntoView({ behavior: "smooth", block: "start" });
+  els.groupsList.querySelector("input")?.focus({ preventScroll: true });
+});
+els.walkupGo.addEventListener("click", () => { const file = app.lastFile; app.lastFile = null; upload(file, { walkUpOk: true }); });
 els.next.addEventListener("click", () => { show("ready"); els.file.focus(); });
 els.retry.addEventListener("click", () => {
   if (app.lastFile) upload(app.lastFile);

@@ -84,7 +84,13 @@ test("the contest entry: one line everyone on the song sees the same, naming who
   assert.equal(contestLine(TRACK, { ...c, entered: true, confirmed: true, confirmed_by: "Kim" }), "Entered by Jay, confirmed with the group by Kim: it's in the vote for Jay & Kim.");
   assert.equal(contestLine(TRACK, { ...c, group: false, entered: true }), "Entered by Jay: it's in the vote.");
   assert.equal(contestLine(TRACK, { ...c, ticked: false, ticked_by: null }), TRACK.contestNotYet);
-  assert.equal(contestLine(TRACK, { ...c, blocked: "scooter_taylor" }), TRACK.contestBlocked);
+  // A song that cannot go in says why, never a bare "cannot" (Scooter, 18 Nov 2026).
+  for (const [where, why] of [["file", TRACK.blockedScooterFile], ["title", TRACK.blockedScooterTitle], ["person", TRACK.blockedScooterPerson], [undefined, TRACK.blockedScooterAny]]) {
+    const line = contestLine(TRACK, cleanContest({ on: true, people: [], blocked: "scooter_taylor", blocked_where: where }));
+    assert.equal(line, `${TRACK.contestBlocked} ${why} ${TRACK.blockedScooterRule}`);
+  }
+  assert.equal(contestLine(TRACK, cleanContest({ on: true, people: [], blocked: "test_file_in_production" })), `${TRACK.contestBlocked} ${TRACK.blockedTest}`);
+  assert.equal(cleanContest({ on: true, blocked: "pulled_by_team", blocked_where: "file" }).blocked_where, null, "the where is only Scooter Taylor's rule");
   assert.equal(contestLine(TRACK, { ...c, blocked: "pulled_by_team" }), TRACK.contestPulled);
   assert.equal(cleanContest({ on: false }), null, "no contest, no box");
   assert.equal(cleanContest(undefined), null);
@@ -127,7 +133,13 @@ test("the team's page: every status change asks first and can be undone; no swip
   assert.match(team, /els\.confirmYes\.addEventListener\("click", \(\) => \{\s*const p = app\.pending;\s*closeModal\(els\.confirm\);\s*if \(p\?\.group\) assignGroup\(p\.song, p\.group\);\s*else if \(p\?\.person\) removePerson\(p\.song, p\.person\);\s*else if \(p\?\.song\) pullSong\(p\.song, p\.pulled, \{ undoable: true \}\);\s*else if \(p\) change\(p\.s, p\.s\.status, p\.to, \{ undoable: true \}\);\s*\}\);/, "Yes makes the change (a group's status, a song in or out of the vote with Undo, a person off a song, or a group put on a song with nobody on it)");
   assert.match(team, /onclick: \(\) => askRemove\(song, p\)/, "Remove from this song only asks");
   assert.match(team, /onclick: \(\) => askAssign\(song, /, "Put this group on it only asks");
-  assert.match(read("public/js/booth.js"), /if \(!els\.groups\.hidden && !app\.group && !window\.confirm\(COPY\.walkUpConfirm\)\) \{ failed\(COPY\.walkUpHeld\);/, "while the party is on, an upload with no group picked is asked first, never silent");
+  // While the party is on, an upload with no group picked is asked first, ON the page (Scooter, 18
+  // Nov 2026: the browser's pop-up was easy to miss), and nothing goes up until a button is tapped.
+  const boothJs = read("public/js/booth.js");
+  assert.match(boothJs, /if \(!els\.groups\.hidden && !app\.group && !walkUpOk\) \{ app\.lastFile = file; show\("walkup"\); els\.walkupPick\.focus\(\); return; \}/);
+  assert.match(boothJs, /els\.walkupGo\.addEventListener\("click", \(\) => \{ const file = app\.lastFile; app\.lastFile = null; upload\(file, \{ walkUpOk: true \}\); \}\);/);
+  assert.match(read("public/booth.html"), /<div id="tbz-walkup" class="walkup" role="alert" hidden>[\s\S]*id="tbz-walkup-pick"[\s\S]*id="tbz-walkup-go"/);
+  for (const f of ["booth.js", "track.js", "team.js", "join.js", "app.js"]) assert.ok(!/window\.(confirm|alert|prompt)\(/.test(read(`public/js/${f}`)), `${f}: no browser pop-up`);
   assert.match(team, /p\.in \? null : h\("button"/, "no Remove button for a person who ticked");
   assert.match(team, /els\.undo\.addEventListener\("click", \(\) => \{\s*const u = app\.undo;\s*if \(u\?\.song\) pullSong\(u\.song, u\.pulled, \{ undoable: false \}\);\s*else if \(u\) change\(u\.s, u\.from, u\.to, \{ undoable: false \}\);\s*\}\);/);
   assert.match(team, /onclick: \(\) => askSong\(s, true\)/, "Take out of the vote only asks");
@@ -219,4 +231,15 @@ test("the gallery: the team's GIFs replace the photos while there are any, with 
   assert.match(gallery, /by\.hidden = gifList\.length === 0;/);
   assert.match(read("public/index.html"), /<p id="tbz-gallery-by" class="gif-by gallery-by" hidden>Powered by GIPHY<\/p>/);
   assert.match(read("public/js/app.js"), /gallery\.update\(state\.photos, state\.gifs\);/);
+});
+
+test("the party's dates (Scooter, 18 Nov 2026): Sunday, December 13 and voting ends Friday, December 18, with no cutoff time shown as set", () => {
+  assert.deepEqual(HOLIDAY.dates, { party: "Sunday, December 13", votingEnds: "Friday, December 18", timeMark: "exact time to be confirmed" });
+  assert.equal(HOLIDAY.home.endsPending, "Friday, December 18 (exact time to be confirmed)");
+  assert.equal(HOLIDAY.home.ruleEndsPending, "Voting ends Friday, December 18 (exact time to be confirmed).");
+  assert.ok(HOLIDAY.home.lede.includes(HOLIDAY.dates.party), "the party's day is on the voting page");
+  assert.ok(!/\b\d{1,2}(:\d{2})?\s*(AM|PM)\b/i.test(HOLIDAY.home.endsPending + HOLIDAY.home.ruleEndsPending), "no time of day while the cutoff is unset");
+  const rules = read("public/holiday-rules.html");
+  for (const day of ["Sunday, December 13, 2026", "Friday, December 18, 2026"]) assert.ok(rules.includes(day), `the rules draft carries ${day}`);
+  assert.ok(!/the event date, the voting window/.test(rules), "the dates are no longer listed as unknown");
 });

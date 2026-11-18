@@ -50,3 +50,12 @@ test("clean-test-data refuses production, and a run with no kept song named", as
     assert.equal(code, 2, argv.join(" "));
   }
 });
+
+// first-run's self-clean failure read `failed: "error": {` (18 Nov 2026): the reason wrangler gave was lost.
+test("a wrangler --json failure is reported by its own words, not its first line", async () => {
+  const { wranglerJsonError } = await import("../scripts/lib/cf.mjs");
+  const out = '\n{\n  "error": {\n    "text": "Authentication error [code: 10000]",\n    "notes": [{ "text": "Check the API token." }]\n  }\n}\n';
+  assert.equal(wranglerJsonError(out), "Authentication error [code: 10000] | Check the API token.");
+  assert.equal(wranglerJsonError("not json"), "");
+  assert.equal(wranglerJsonError('[{"results":[]}]'), "");
+});

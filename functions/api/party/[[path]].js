@@ -35,7 +35,7 @@ import {
   firstOf, guestKey, holidayOn, isGuestKey, laneOf, lineOrder, parsePartyGif, parseSignUp, parseStatusChange, randomSessionCode, toGif,
 } from "../../_lib/party.js";
 import { assertUnderLimit, limitStatement, maybePrune } from "../../_lib/ratelimit.js";
-import { MEMBER_BY_EMAIL_SQL, STORE_TEAM_CODE_SQL, newCode, releaseTeamSlot, requireMember, signTeamToken, takeTeamSlot, teamCodeEmail, teamCodeHmac, teamCodeMatches } from "../../_lib/team.js";
+import { MEMBER_BY_EMAIL_SQL, STORE_TEAM_CODE_SQL, newCode, releaseTeamSlot, requireMember, signTeamToken, takeTeamSlot, teamCodeEmail, teamCodeHmac, teamCodeLive, teamCodeMatchesAny } from "../../_lib/team.js";
 import { sendMail } from "../../_lib/verify.js";
 
 const segments = (params) => (Array.isArray(params?.path) ? params.path : [params?.path]).filter((s) => typeof s === "string" && s !== "");
@@ -129,7 +129,7 @@ async function teamCode(context) {
   }
   if (slot.refused) throw new HttpError(503, "code_unavailable", "We could not send your code right now. Try again in a little while.");
   const code = newCode();
-  await db.prepare(STORE_TEAM_CODE_SQL).bind(member.id, await teamCodeHmac(env, member.id, code), nowS + VERIFICATION.codeTtl).run();
+  await db.prepare(STORE_TEAM_CODE_SQL).bind(member.id, await teamCodeHmac(env, member.id, code), nowS + VERIFICATION.codeTtl, nowS).run();
   const sent = await sendMail(env, email, teamCodeEmail(code));
   if (!sent.ok) {
     if (sent.sent === "no") await releaseTeamSlot(db, slot.slot);
@@ -147,10 +147,10 @@ async function teamVerify(context) {
   const nowS = Math.floor(Date.now() / 1000);
   await limited(db, `team:verify:ip:${await ipHash(request, env)}`, LIMITS.teamVerifyPerIp, "tries");
   const member = await db.prepare(MEMBER_BY_EMAIL_SQL).bind(email).first();
-  const stored = member ? await db.prepare("UPDATE team_codes SET attempts = attempts + 1 WHERE member_id = ?1 RETURNING code_hmac, expires_at, attempts").bind(member.id).first() : null;
-  if (!stored || stored.expires_at <= nowS) throw new HttpError(410, "code_expired", "That code has run out. Send a new one.");
+  const stored = member ? await db.prepare("UPDATE team_codes SET attempts = attempts + 1 WHERE member_id = ?1 RETURNING code_hmac, expires_at, prev_code_hmac, prev_expires_at, attempts").bind(member.id).first() : null;
+  if (!teamCodeLive(stored, nowS)) throw new HttpError(410, "code_expired", "That code has run out. Send a new one.");
   if (stored.attempts > VERIFICATION.maxTries) throw new HttpError(410, "code_exhausted", "Too many wrong tries for that code. Send a new one.");
-  if (!(await teamCodeMatches(env, member.id, code, stored.code_hmac))) throw new HttpError(400, "wrong_code", `That code is not right. ${VERIFICATION.maxTries - stored.attempts} tries left.`, { tries_left: VERIFICATION.maxTries - stored.attempts });
+  if (!(await teamCodeMatchesAny(env, member.id, code, stored, nowS))) throw new HttpError(400, "wrong_code", `That code is not right. ${VERIFICATION.maxTries - stored.attempts} tries left.`, { tries_left: VERIFICATION.maxTries - stored.attempts });
   await db.prepare("DELETE FROM team_codes WHERE member_id = ?1").bind(member.id).run();
   return json({ token: await signTeamToken(env, member.id, nowS), member: { email: member.email } });
 }

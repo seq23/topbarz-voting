@@ -162,9 +162,12 @@ export async function storeCode(env, db, voterId, code, nowS) {
   await db
     .prepare(
       `INSERT INTO email_codes (voter_id, code_hmac, expires_at, attempts) VALUES (?1, ?2, ?3, 0)
-       ON CONFLICT (voter_id) DO UPDATE SET code_hmac = excluded.code_hmac, expires_at = excluded.expires_at, attempts = 0`,
+       ON CONFLICT (voter_id) DO UPDATE SET
+         prev_code_hmac = CASE WHEN email_codes.expires_at > ?4 THEN email_codes.code_hmac ELSE NULL END,
+         prev_expires_at = CASE WHEN email_codes.expires_at > ?4 THEN email_codes.expires_at ELSE NULL END,
+         code_hmac = excluded.code_hmac, expires_at = excluded.expires_at, attempts = 0`,
     )
-    .bind(voterId, await codeHmac(env, voterId, code), nowS + VERIFICATION.codeTtl)
+    .bind(voterId, await codeHmac(env, voterId, code), nowS + VERIFICATION.codeTtl, nowS)
     .run();
 }
 

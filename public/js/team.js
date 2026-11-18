@@ -72,7 +72,9 @@ async function sendCode() {
   try {
     const { data } = await api("/api/party/team/code", { method: "POST", body: { email }, timeout: 12000 });
     app.me = email;
-    els.codeSent.textContent = COPY.codeSent.replace("{email}", email);
+    // sent: false = a code went to this email under a minute ago and no new one was sent: say so,
+    // never "We sent a code" for an email that did not go out.
+    els.codeSent.textContent = (data?.sent === false ? COPY.codeAlreadySent : COPY.codeSent).replace("{email}", email);
     els.emailForm.hidden = true;
     els.codeForm.hidden = false;
     els.code.value = "";

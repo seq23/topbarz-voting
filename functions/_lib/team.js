@@ -97,5 +97,16 @@ export async function takeTeamSlot(env, memberId, nowS) {
   return { refused: "budget", wait: oldest?.t ? Math.max(60, oldest.t + 86400 - nowS) : 3600 };
 }
 export const releaseTeamSlot = (db, id) => db.prepare("UPDATE team_code_sends SET counted = 0 WHERE id = ?1").bind(id).run();
+// A new code keeps the one before it while that one is still live (migrations/0012_code_resend.sql):
+// the first email to arrive must still work after a "Send me a new code". ?4 = now, epoch seconds.
 export const STORE_TEAM_CODE_SQL = `INSERT INTO team_codes (member_id, code_hmac, expires_at, attempts) VALUES (?1, ?2, ?3, 0)
-  ON CONFLICT (member_id) DO UPDATE SET code_hmac = excluded.code_hmac, expires_at = excluded.expires_at, attempts = 0`;
+  ON CONFLICT (member_id) DO UPDATE SET
+    prev_code_hmac = CASE WHEN team_codes.expires_at > ?4 THEN team_codes.code_hmac ELSE NULL END,
+    prev_expires_at = CASE WHEN team_codes.expires_at > ?4 THEN team_codes.expires_at ELSE NULL END,
+    code_hmac = excluded.code_hmac, expires_at = excluded.expires_at, attempts = 0`;
+// Does `code` match the newest live code or the live one before it? `row` from team_codes.
+export async function teamCodeMatchesAny(env, id, code, row, nowS) {
+  if (row.expires_at > nowS && (await teamCodeMatches(env, id, code, row.code_hmac))) return true;
+  return row.prev_expires_at > nowS && (await teamCodeMatches(env, id, code, row.prev_code_hmac));
+}
+export const teamCodeLive = (row, nowS) => Boolean(row) && (row.expires_at > nowS || row.prev_expires_at > nowS);

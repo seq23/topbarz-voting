@@ -179,6 +179,38 @@ test("team sign-in: an emailed code for an email on the list only; the token is 
   assert.equal((await get("team/line", { token: helperToken })).body.error, "team_sign_in", "taken off the list: refused at once");
 });
 
+test("team sign-in: a resend never kills the first email's code, and a send refused for the 60 s wait says no email went", async () => {
+  const id = (await env.DB.prepare("INSERT INTO team_members (email, added_at) VALUES ('slow@example.com', ?1) ON CONFLICT (email) DO UPDATE SET removed_at = NULL RETURNING id").bind(Date.now()).first()).id;
+  await env.DB.prepare("DELETE FROM team_code_sends WHERE member_id = ?1").bind(id).run();
+  const before = mailbox.length;
+  assert.equal((await post("team/code", { email: "slow@example.com" })).body.sent, true);
+  const soon = await post("team/code", { email: "slow@example.com" });
+  assert.equal(soon.status, 200);
+  assert.equal(soon.body.sent, false, "inside the 60 s wait: no new email, and the answer says so");
+  assert.equal(mailbox.length, before + 1, "nothing sent inside the wait");
+  await env.DB.prepare("UPDATE team_code_sends SET sent_at = sent_at - 61 WHERE member_id = ?1").bind(id).run();
+  assert.equal((await post("team/code", { email: "slow@example.com" })).body.sent, true);
+  assert.equal(mailbox.length, before + 2);
+  const codeOf = (m) => /(\d{6})/.exec(m.subject)[1];
+  const [first, second] = [codeOf(mailbox.at(-2)), codeOf(mailbox.at(-1))];
+  if (first !== second) {
+    const ok = await post("team/verify", { email: "slow@example.com", code: first });
+    assert.equal(ok.status, 200, `the FIRST email's code still signs in after a resend: ${ok.text}`);
+    assert.match(ok.body.token, /^t1\./);
+    assert.equal((await post("team/verify", { email: "slow@example.com", code: second })).body.error, "code_expired", "signing in uses both codes up");
+  }
+  // An earlier code past its own 10 minutes is refused.
+  await env.DB.prepare("UPDATE team_code_sends SET sent_at = sent_at - 3600 WHERE member_id = ?1").bind(id).run();
+  await post("team/code", { email: "slow@example.com" });
+  await env.DB.prepare("UPDATE team_code_sends SET sent_at = sent_at - 61 WHERE member_id = ?1").bind(id).run();
+  await post("team/code", { email: "slow@example.com" });
+  const [old, fresh] = [codeOf(mailbox.at(-2)), codeOf(mailbox.at(-1))];
+  await env.DB.prepare("UPDATE team_codes SET prev_expires_at = ?2 WHERE member_id = ?1").bind(id, Math.floor(Date.now() / 1000) - 1).run();
+  if (old !== fresh) assert.equal((await post("team/verify", { email: "slow@example.com", code: old })).body.error, "wrong_code");
+  assert.equal((await post("team/verify", { email: "slow@example.com", code: fresh })).status, 200);
+  await env.DB.prepare("DELETE FROM team_code_sends").run();
+});
+
 test("team sign-in: when the day's code emails are used up, the screen names the wait (never 'a little while') and nothing is sent", async () => {
   await env.DB.prepare("DELETE FROM team_code_sends").run();
   await env.DB.prepare("DELETE FROM email_sends").run();

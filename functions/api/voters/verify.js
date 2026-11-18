@@ -43,14 +43,18 @@ export const onRequest = route({
     if (!voter) throw expired();
 
     const tried = await db
-      .prepare("UPDATE email_codes SET attempts = attempts + 1 WHERE voter_id = ?1 AND attempts < ?2 AND expires_at > ?3 RETURNING code_hmac, attempts")
+      .prepare("UPDATE email_codes SET attempts = attempts + 1 WHERE voter_id = ?1 AND attempts < ?2 AND (expires_at > ?3 OR prev_expires_at > ?3) RETURNING code_hmac, expires_at, prev_code_hmac, prev_expires_at, attempts")
       .bind(voter.id, VERIFICATION.maxTries, nowS)
       .first();
     if (!tried) {
-      const dead = await db.prepare("SELECT attempts, expires_at FROM email_codes WHERE voter_id = ?1").bind(voter.id).first();
-      throw dead && dead.expires_at > nowS ? exhausted() : expired();
+      const dead = await db.prepare("SELECT attempts, expires_at, prev_expires_at FROM email_codes WHERE voter_id = ?1").bind(voter.id).first();
+      throw dead && (dead.expires_at > nowS || dead.prev_expires_at > nowS) ? exhausted() : expired();
     }
-    if (!(await codeMatches(env, voter.id, code, tried.code_hmac))) {
+    // The newest live code, or the live one before it (a resend never kills the first email's code;
+    // migrations/0012_code_resend.sql).
+    const matches = (tried.expires_at > nowS && (await codeMatches(env, voter.id, code, tried.code_hmac)))
+      || (tried.prev_expires_at > nowS && (await codeMatches(env, voter.id, code, tried.prev_code_hmac)));
+    if (!matches) {
       const left = VERIFICATION.maxTries - tried.attempts;
       if (left <= 0) throw exhausted();
       throw new HttpError(400, "wrong_code", `That code is not right. ${left} ${left === 1 ? "try" : "tries"} left.`, { tries_left: left });

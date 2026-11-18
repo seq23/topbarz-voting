@@ -11,7 +11,7 @@ import * as me from "../functions/api/me.js";
 import * as state from "../functions/api/state.js";
 import * as voters from "../functions/api/voters.js";
 import * as verify from "../functions/api/voters/verify.js";
-import { LIMITS, VERIFICATION, sendBudget } from "../functions/_lib/config.js";
+import { LIMITS, VERIFICATION, sendBudget, voterSendBudget } from "../functions/_lib/config.js";
 import { signVoterToken, verifyVoterToken } from "../functions/_lib/token.js";
 import { codeEmail, codeHmac, newCode } from "../functions/_lib/verify.js";
 import { ROOT, SECRET, addTrack, call, freshIp, makeEnv } from "./helpers.mjs";
@@ -39,7 +39,7 @@ const sendsCounted = async () => (await env.DB.prepare("SELECT COUNT(*) AS n FRO
 async function spendBudget(leave = 0) {
   await env.DB.prepare("INSERT OR IGNORE INTO voters (name, email, email_key, city, created_at) VALUES ('Filler', 'filler@example.com', 'filler@example.com', 'X', '2026-10-01T00:00:00.000Z')").run();
   const id = (await row("filler@example.com")).id;
-  for (let i = await sendsCounted(); i < sendBudget(env) - leave; i++) await env.DB.prepare("INSERT INTO email_sends (voter_id, sent_at) VALUES (?1, ?2)").bind(id, nowS() - 3 * 3600).run();
+  for (let i = await sendsCounted(); i < voterSendBudget(env) - leave; i++) await env.DB.prepare("INSERT INTO email_sends (voter_id, sent_at) VALUES (?1, ?2)").bind(id, nowS() - 3 * 3600).run();
 }
 // A voter who has entered a code: { token, code }.
 async function verified(mail, email, extra = {}) {
@@ -274,7 +274,9 @@ test("at most 3 codes per email per hour, however the address is written", async
 
 test("the 50-a-day budget: the last email of the share goes out, then a NEW email is let in at once as skipped", async (t) => {
   const mail = stubMail(t);
-  const share = sendBudget(env);
+  const share = voterSendBudget(env);
+  assert.equal(share, sendBudget(env) - VERIFICATION.teamReserve, "the voters stop short of the share by the team's reserve");
+  assert.ok(VERIFICATION.teamReserve >= 3, "the team keeps enough for a partner signing in on a few devices");
   await spendBudget(1);
   assert.equal(await sendsCounted(), share - 1);
   assert.equal((await gate("budget.last@example.com")).body.verification, "code_sent");
@@ -305,13 +307,13 @@ test("the 50-a-day budget: the last email of the share goes out, then a NEW emai
   assert.equal((await gate("budget.nextday@example.com")).body.verification, "code_sent");
   assert.equal(mail.attempts.length, 2);
 
-  // Staging has its own, smaller share: 15 emails, then skipped.
+  // Staging has its own, smaller share: 15 emails, of which the voters may send 10, then skipped.
   await env.DB.prepare("DELETE FROM email_sends").run();
   const staging = { ...env, APP_ENV: "preview" };
   const answers = [];
   for (let i = 0; i < 17; i++) answers.push((await gate(`staging.share${i}@example.com`, {}, staging)).body.verification);
-  assert.deepEqual(answers, [...Array(15).fill("code_sent"), "skipped", "skipped"]);
-  assert.equal(mail.attempts.length, 2 + VERIFICATION.previewSendShare);
+  assert.deepEqual(answers, [...Array(10).fill("code_sent"), ...Array(7).fill("skipped")]);
+  assert.equal(mail.attempts.length, 2 + VERIFICATION.previewSendShare - VERIFICATION.teamReserve);
 });
 
 test("mail service down (429, 5xx, network error): a NEW email is let in at once as skipped", async (t) => {

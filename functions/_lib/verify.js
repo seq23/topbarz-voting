@@ -7,7 +7,7 @@
 //     same daily budget), so the daily budget (config.js, sendBudget), the per-email hourly cap and the
 //     resend cooldown are counted over true rolling windows.
 // The rules about who gets a token are in functions/api/voters.js and functions/api/voters/verify.js.
-import { VERIFICATION, sendBudget } from "./config.js";
+import { VERIFICATION, voterSendBudget } from "./config.js";
 
 const enc = new TextEncoder();
 const toHex = (bytes) => [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -141,7 +141,7 @@ export async function takeSendSlot(env, voterId, nowS) {
         AND (SELECT COUNT(*) FROM email_sends WHERE counted = 1 AND voter_id = ?1 AND sent_at > ?5) < ?6
         AND NOT EXISTS (SELECT 1 FROM email_sends WHERE counted = 1 AND voter_id = ?1 AND sent_at > ?7)
        RETURNING id`,
-    ).bind(voterId, nowS, nowS - 86400, sendBudget(env), nowS - 3600, V.sendsPerEmailPerHour, nowS - V.resendCooldown),
+    ).bind(voterId, nowS, nowS - 86400, voterSendBudget(env), nowS - 3600, V.sendsPerEmailPerHour, nowS - V.resendCooldown),
   ]);
   const stats = statsRes.results[0];
   const code = codeRes.results[0] ?? null;

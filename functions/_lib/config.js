@@ -56,6 +56,11 @@ export const VERIFICATION = {
   dailySendBudget: 50,
   previewSendShare: 15, // of the 50: what staging / preview may send (voter AND team codes; 5 ran out on one partner
   // signing in on his devices, 17 Nov 2026). Production gets the rest.
+  // Of each environment's share, the last few are kept for the team's sign-in codes (/team): the
+  // voters' codes stop this many short, so testing or running the vote can never lock the team out
+  // (Scooter, 18 Nov 2026: "look at the code-sending on the preview ... so I can get back in").
+  // A voter past their share is let in unverified, as ever; nothing here raises the 50.
+  teamReserve: 5,
   codeTtl: 10 * 60,
   maxTries: 5,
   resendCooldown: 60,
@@ -134,6 +139,10 @@ export function gateStatus(env) {
 export function sendBudget(env) {
   const { dailySendBudget, previewSendShare } = VERIFICATION;
   return env?.APP_ENV === "preview" ? previewSendShare : dailySendBudget - previewSendShare;
+}
+// What the voters' codes may use of that share: all of it but the team's reserve.
+export function voterSendBudget(env) {
+  return sendBudget(env) - VERIFICATION.teamReserve;
 }
 
 // The code step is on only when the switch says so AND there is a key to send mail with.

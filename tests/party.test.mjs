@@ -9,7 +9,7 @@ import { after, before, test } from "node:test";
 import * as booth from "../functions/api/booth/[[path]].js";
 import * as party from "../functions/api/party/[[path]].js";
 import * as state from "../functions/api/state.js";
-import { sendBudget } from "../functions/_lib/config.js";
+import { VERIFICATION, sendBudget, voterSendBudget } from "../functions/_lib/config.js";
 import { contestVerdict, freshSlug, voteLabel } from "../functions/_lib/contest.js";
 import { cleanInstagram, groupLabel, isSessionCode, laneOf, lineOrder, parseSignUp, randomSessionCode } from "../functions/_lib/party.js";
 import { signTeamToken, verifyTeamToken } from "../functions/_lib/team.js";
@@ -196,6 +196,33 @@ test("team sign-in: when the day's code emails are used up, the screen names the
   assert.match(res.body.message, /about 4 hours/);
   assert.equal(mailbox.length, before, "nothing sent over the budget");
   await env.DB.prepare("DELETE FROM team_code_sends").run();
+});
+
+test("team sign-in: voters' codes can never spend the team's reserve; the team's own sends stop at the share", async () => {
+  await env.DB.prepare("DELETE FROM team_code_sends").run();
+  await env.DB.prepare("DELETE FROM email_sends").run();
+  const id = (await env.DB.prepare("INSERT INTO team_members (email, added_at) VALUES ('reserve@example.com', ?1) ON CONFLICT (email) DO UPDATE SET removed_at = NULL RETURNING id").bind(Date.now()).first()).id;
+  const nowS = Math.floor(Date.now() / 1000);
+  const share = sendBudget(env);
+  assert.ok(VERIFICATION.teamReserve >= 3 && voterSendBudget(env) === share - VERIFICATION.teamReserve);
+  // The voters' codes have used everything they may: the vote being tested all day.
+  await env.DB.prepare("INSERT OR IGNORE INTO voters (name, email, email_key, city, created_at) VALUES ('Filler', 'filler.team@example.com', 'filler.team@example.com', 'X', '2026-10-01T00:00:00.000Z')").run();
+  const voter = (await env.DB.prepare("SELECT id FROM voters WHERE email_key = 'filler.team@example.com'").first()).id;
+  for (let i = 0; i < voterSendBudget(env); i++) await env.DB.prepare("INSERT INTO email_sends (voter_id, sent_at) VALUES (?1, ?2)").bind(voter, nowS - 3 * 3600).run();
+  const before = mailbox.length;
+  const res = await post("team/code", { email: "reserve@example.com" });
+  assert.equal(res.status, 200, res.text);
+  assert.equal(res.body.sent, true, "the team still gets its code");
+  assert.equal(mailbox.length, before + 1);
+  // The day as a whole still never passes the share: fill the rest and the next team code is refused.
+  for (let i = voterSendBudget(env) + 1; i < share; i++) await env.DB.prepare("INSERT INTO team_code_sends (member_id, sent_at) VALUES (?1, ?2)").bind(id, nowS - 2 * 3600).run();
+  await env.DB.prepare("UPDATE team_code_sends SET sent_at = ?1 WHERE member_id = ?2").bind(nowS - 2 * 3600, id).run();
+  const over = await post("team/code", { email: "reserve@example.com" });
+  assert.equal(over.status, 429, over.text);
+  assert.equal(over.body.error, "code_budget");
+  assert.equal(mailbox.length, before + 1, "nothing past the share");
+  await env.DB.prepare("DELETE FROM team_code_sends").run();
+  await env.DB.prepare("DELETE FROM email_sends").run();
 });
 
 test("the team's line: details only behind the team token; four lanes with a check that nobody else changed it; undo; texted is kept", async () => {

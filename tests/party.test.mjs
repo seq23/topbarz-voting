@@ -9,6 +9,7 @@ import { after, before, test } from "node:test";
 import * as booth from "../functions/api/booth/[[path]].js";
 import * as party from "../functions/api/party/[[path]].js";
 import * as state from "../functions/api/state.js";
+import { sendBudget } from "../functions/_lib/config.js";
 import { contestVerdict, freshSlug, voteLabel } from "../functions/_lib/contest.js";
 import { cleanInstagram, groupLabel, isSessionCode, laneOf, lineOrder, parseSignUp, randomSessionCode } from "../functions/_lib/party.js";
 import { signTeamToken, verifyTeamToken } from "../functions/_lib/team.js";
@@ -176,6 +177,25 @@ test("team sign-in: an emailed code for an email on the list only; the token is 
   const helperToken = await signTeamToken(env, helper.id, nowS);
   await post(`team/members/${helper.id}/remove`, {}, { token: ok.body.token });
   assert.equal((await get("team/line", { token: helperToken })).body.error, "team_sign_in", "taken off the list: refused at once");
+});
+
+test("team sign-in: when the day's code emails are used up, the screen names the wait (never 'a little while') and nothing is sent", async () => {
+  await env.DB.prepare("DELETE FROM team_code_sends").run();
+  await env.DB.prepare("DELETE FROM email_sends").run();
+  const id = (await env.DB.prepare("INSERT INTO team_members (email, added_at) VALUES ('budget@example.com', ?1) ON CONFLICT (email) DO UPDATE SET removed_at = NULL RETURNING id").bind(Date.now()).first()).id;
+  const nowS = Math.floor(Date.now() / 1000);
+  const share = sendBudget(env);
+  assert.ok(sendBudget({ APP_ENV: "preview" }) >= 15, "the preview's share covers a partner signing in on several devices");
+  // Spent across the day by other members, the oldest 20 hours ago: it rolls off in about 4 hours.
+  for (let i = 0; i < share; i++) await env.DB.prepare("INSERT INTO team_code_sends (member_id, sent_at) VALUES (?1, ?2)").bind(id, nowS - 20 * 3600 + i * 60).run();
+  const before = mailbox.length;
+  const res = await post("team/code", { email: "budget@example.com" });
+  assert.equal(res.status, 429, res.text);
+  assert.equal(res.body.error, "code_budget");
+  assert.ok(res.body.retry_after_seconds > 3.5 * 3600 && res.body.retry_after_seconds <= 4 * 3600, String(res.body.retry_after_seconds));
+  assert.match(res.body.message, /about 4 hours/);
+  assert.equal(mailbox.length, before, "nothing sent over the budget");
+  await env.DB.prepare("DELETE FROM team_code_sends").run();
 });
 
 test("the team's line: details only behind the team token; four lanes with a check that nobody else changed it; undo; texted is kept", async () => {

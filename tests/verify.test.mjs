@@ -57,7 +57,7 @@ test("the numbers are the owner's: 50 emails a day, 10 minutes, 5 tries, 60 s, 3
   assert.equal(VERIFICATION.dailySendBudget, 50);
   // Production and staging count in separate databases: their shares add up to the 50, never more.
   const production = sendBudget({ APP_ENV: "production" }), preview = sendBudget({ APP_ENV: "preview" });
-  assert.deepEqual([production, preview], [45, 5]);
+  assert.deepEqual([production, preview], [35, 15]);
   assert.equal(production + preview, VERIFICATION.dailySendBudget);
   assert.equal(sendBudget({}), production, "anything that is not preview gets production's share, never more");
   assert.equal(sendBudget(env), production);
@@ -305,12 +305,12 @@ test("the 50-a-day budget: the last email of the share goes out, then a NEW emai
   assert.equal((await gate("budget.nextday@example.com")).body.verification, "code_sent");
   assert.equal(mail.attempts.length, 2);
 
-  // Staging has its own, small share: 5 emails, then skipped.
+  // Staging has its own, smaller share: 15 emails, then skipped.
   await env.DB.prepare("DELETE FROM email_sends").run();
   const staging = { ...env, APP_ENV: "preview" };
   const answers = [];
-  for (let i = 0; i < 7; i++) answers.push((await gate(`staging.share${i}@example.com`, {}, staging)).body.verification);
-  assert.deepEqual(answers, ["code_sent", "code_sent", "code_sent", "code_sent", "code_sent", "skipped", "skipped"]);
+  for (let i = 0; i < 17; i++) answers.push((await gate(`staging.share${i}@example.com`, {}, staging)).body.verification);
+  assert.deepEqual(answers, [...Array(15).fill("code_sent"), "skipped", "skipped"]);
   assert.equal(mail.attempts.length, 2 + VERIFICATION.previewSendShare);
 });
 

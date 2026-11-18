@@ -123,6 +123,10 @@ async function teamCode(context) {
   const slot = await takeTeamSlot(env, member.id, nowS);
   if (slot.refused === "cooldown") return json({ sent: false, email, resend_in_seconds: slot.wait });
   if (slot.refused === "hourly") throw new HttpError(429, "code_limit", "That is 3 codes this hour. Use the last one, or try again later.", { retry_after_seconds: slot.wait });
+  if (slot.refused === "budget") {
+    const hours = Math.max(1, Math.round(slot.wait / 3600));
+    throw new HttpError(429, "code_budget", `Today's sign-in emails are used up. Try again in about ${hours} hour${hours === 1 ? "" : "s"}, or use a phone that is already signed in.`, { retry_after_seconds: slot.wait });
+  }
   if (slot.refused) throw new HttpError(503, "code_unavailable", "We could not send your code right now. Try again in a little while.");
   const code = newCode();
   await db.prepare(STORE_TEAM_CODE_SQL).bind(member.id, await teamCodeHmac(env, member.id, code), nowS + VERIFICATION.codeTtl).run();

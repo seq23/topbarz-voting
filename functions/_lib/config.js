@@ -54,7 +54,8 @@ export const GIPHY = { budgetPerHour: 90, searchTtl: 30 * 60, trendingTtl: 60 * 
 // rolling 24 hours. THE ONE PLACE that number is written. Times are seconds unless named ms.
 export const VERIFICATION = {
   dailySendBudget: 50,
-  previewSendShare: 5, // of the 50: what staging / preview may send. Production gets the rest.
+  previewSendShare: 15, // of the 50: what staging / preview may send (voter AND team codes; 5 ran out on one partner
+  // signing in on his devices, 17 Nov 2026). Production gets the rest.
   codeTtl: 10 * 60,
   maxTries: 5,
   resendCooldown: 60,

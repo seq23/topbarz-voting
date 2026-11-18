@@ -89,7 +89,12 @@ export async function takeTeamSlot(env, memberId, nowS) {
   // The stats row was read after the insert was refused, so it describes the refusal.
   if (stats.last && nowS - stats.last < V.resendCooldown) return { refused: "cooldown", wait: V.resendCooldown - (nowS - stats.last) };
   if ((stats.hour ?? 0) >= V.sendsPerEmailPerHour) return { refused: "hourly", wait: 3600 };
-  return { refused: "budget" };
+  // The day's budget: say when the oldest counted send in the window rolls off, so the screen can
+  // name a real wait instead of "a little while".
+  const oldest = await db.prepare(
+    "SELECT MIN(sent_at) AS t FROM (SELECT sent_at FROM email_sends WHERE counted = 1 AND sent_at > ?1 UNION ALL SELECT sent_at FROM team_code_sends WHERE counted = 1 AND sent_at > ?1)",
+  ).bind(nowS - 86400).first();
+  return { refused: "budget", wait: oldest?.t ? Math.max(60, oldest.t + 86400 - nowS) : 3600 };
 }
 export const releaseTeamSlot = (db, id) => db.prepare("UPDATE team_code_sends SET counted = 0 WHERE id = ?1").bind(id).run();
 export const STORE_TEAM_CODE_SQL = `INSERT INTO team_codes (member_id, code_hmac, expires_at, attempts) VALUES (?1, ?2, ?3, 0)

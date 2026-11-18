@@ -238,7 +238,8 @@ test("the party's dates (Scooter, 18 Nov 2026): Sunday, December 13 and voting e
   assert.equal(HOLIDAY.home.endsPending, "Friday, December 18 (exact time to be confirmed)");
   assert.equal(HOLIDAY.home.ruleEndsPending, "Voting ends Friday, December 18 (exact time to be confirmed).");
   assert.ok(HOLIDAY.home.lede.includes(HOLIDAY.dates.party), "the party's day is on the voting page");
-  assert.ok(!/\b\d{1,2}(:\d{2})?\s*(AM|PM)\b/i.test(HOLIDAY.home.endsPending + HOLIDAY.home.ruleEndsPending), "no time of day while the cutoff is unset");
+  assert.ok(HOLIDAY.home.notOpen.includes(HOLIDAY.dates.party), "before voting opens, the page names the party night");
+  assert.ok(!/\b\d{1,2}(:\d{2})?\s*(AM|PM)\b/i.test(HOLIDAY.home.endsPending + HOLIDAY.home.ruleEndsPending + HOLIDAY.home.notOpen + HOLIDAY.home.notOpenRefusal), "no time of day while the cutoff is unset");
   const rules = read("public/holiday-rules.html");
   for (const day of ["Sunday, December 13, 2026", "Friday, December 18, 2026"]) assert.ok(rules.includes(day), `the rules draft carries ${day}`);
   assert.ok(!/the event date, the voting window/.test(rules), "the dates are no longer listed as unknown");

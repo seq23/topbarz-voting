@@ -6,7 +6,8 @@ import { END_SETTING_SQL, LIMITS, START_SETTING_SQL, votingPhase } from "../_lib
 import { HttpError, ipHash, json, readJson, route } from "../_lib/http.js";
 import { assertUnderLimit, limitStatement, maybePrune } from "../_lib/ratelimit.js";
 import { requireVoter } from "../_lib/token.js";
-import { partyTrackClause } from "../_lib/party.js";
+import { holidayOn, partyTrackClause } from "../_lib/party.js";
+import { HOLIDAY } from "../../public/js/party-copy.js";
 
 const LAST_ACTION = "COALESCE((SELECT action FROM like_events WHERE voter_id = ?1 AND track_id = ?2 ORDER BY id DESC LIMIT 1), 'unlike')";
 // One statement each, so two taps racing can never leave two active likes.
@@ -40,7 +41,7 @@ export const onRequest = route({
     ]);
     const phase = votingPhase(env, now, startRes.results[0]?.value ?? null, settingRes.results[0]?.value ?? null);
     if (phase.closed) throw new HttpError(403, "voting_closed", "Voting has closed.");
-    if (phase.notOpen) throw new HttpError(403, "voting_not_open", "Voting opens Sunday, October 11, at 10 AM ET.");
+    if (phase.notOpen) throw new HttpError(403, "voting_not_open", holidayOn(env) ? HOLIDAY.home.notOpenRefusal : "Voting opens Sunday, October 11, at 10 AM ET.");
     if (!voterRes.results[0]) throw new HttpError(401, "invalid_token", "Sign in again to continue.");
     assertUnderLimit(ipLimit, LIMITS.likesPerIp, "likes");
     assertUnderLimit(voterLimit, LIMITS.likesPerVoter, "likes");

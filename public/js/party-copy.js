@@ -27,7 +27,9 @@ export const HOLIDAY = {
     lede: "Our first-ever Christmas party, Sunday, December 13, hosted at Dick and Jane's in partnership with Flow Music and Blitz and Bubbles. JUMP IN THE BOOTH and make a Christmas jingle. Below are the songs recorded: vote and comment on your favorites.",
     tracksTitle: "THE CHRISTMAS JINGLES:",
     emptyNote: "The jingles are on their way out of the booth. Come back to listen, vote, and send your favorite to your people.",
-    notOpen: "Voting opens soon. You can listen now; likes open then.",
+    // Before voting opens: the party night, no time of day (Scooter, 18 Nov 2026).
+    notOpenRefusal: "Voting opens on the party night, Sunday, December 13 (exact time to be confirmed).",
+    notOpen: "",
     galleryLabel: "Holiday GIFs and photos from the party",
     photoAlt: "Top Barz Christmas party, photo",
     footMark: "Top Barz",
@@ -47,3 +49,4 @@ export const HOLIDAY = {
   off: "Nothing on right now",
   offNote: "The holiday contest is not open yet. Follow Top Barz on Instagram to hear when it is.",
 };
+HOLIDAY.home.notOpen = `${HOLIDAY.home.notOpenRefusal} You can listen now; likes open then.`;

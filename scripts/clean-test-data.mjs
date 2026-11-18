@@ -103,5 +103,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const keep = args.keep === "none" ? [] : split(args.keep);
   if (keep.some((c) => !/^\d{4}$/.test(c))) { console.error("STOPPED: --keep takes 4-digit song codes, comma-separated."); process.exit(2); }
   const { lines } = await cleanTestData(targets(args.env), { keep, names: split(args.names), codes: split(args.codes), dryRun: Boolean(args["dry-run"]) });
-  for (const l of lines) console.log(l);
+  // One line: the job's run record keeps only the last line printed, and the 18 Nov dry run's record
+  // read "dry run: nothing written." with the list itself lost. Everything it saw is on that line.
+  console.log(lines.join(" "));
 }

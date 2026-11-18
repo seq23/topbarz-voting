@@ -24,7 +24,15 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - name: ffprobe (the loaders and promote-booth read durations with it; the smoke runs promote-booth for real)
-        run: command -v ffprobe || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null && ffprobe -version | head -1)
+        # Each apt attempt is bounded and retried once: on 18 Nov 2026 a stuck mirror held this step
+        # for the whole 5-minute gate twice (it usually takes ~20 s).
+        run: |
+          command -v ffprobe && exit 0
+          for i in 1 2; do
+            timeout 60 sh -c 'sudo apt-get -o Acquire::http::Timeout=15 -o Acquire::Retries=2 update -qq && sudo apt-get -o Acquire::http::Timeout=15 install -y -qq --no-install-recommends ffmpeg > /dev/null' && break
+            echo "ffmpeg install attempt $i did not finish in 60 s; trying again"
+          done
+          ffprobe -version | head -1
       - name: Rules (gate, token, likes, window, comments, state, media, giphy, loaders, docs)
         run: npm test
       - name: Every route over HTTP (wrangler pages dev, local D1 + R2)

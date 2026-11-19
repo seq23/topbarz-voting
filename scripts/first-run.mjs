@@ -74,6 +74,7 @@ ok("voting ends Friday, November 27 at 11:59 PM EST, shown with the countdown; P
 const demoCode = arg("demo") ?? process.env.FIRST_RUN_DEMO_CODE;
 const demoOnly = process.argv.includes("--demo-only");
 if (demoOnly && !demoCode) fail("--demo-only needs --demo <code> (the code npm run demo-song printed)");
+let demoAs = "";
 async function playDemo() {
   const { DEMO_DEFAULTS } = await import("./demo-song.mjs");
   const email = arg("demo-email") ?? DEMO_DEFAULTS.email;
@@ -82,7 +83,8 @@ async function playDemo() {
   if (opened.status !== 200 || !opened.json?.download_url) fail(`the demo song ${demoCode} with ${email}: ${opened.status} ${opened.text.slice(0, 160)}`);
   if (c?.blocked) fail(`the demo song ${demoCode} cannot go in the contest: ${JSON.stringify(c.blocked).slice(0, 160)}`);
   if (c?.you?.can_manage !== true) fail(`${email} cannot manage the demo song ${demoCode} (manager: ${c?.manager}): run npm run demo-song -- --env preview to reset it`);
-  ok(`the demo song ${demoCode} opens with ${email}: hear, download, and the controls are theirs`);
+  demoAs = c.you.host === true ? "the host's own email" : "the demo singer's email";
+  ok(`the demo song ${demoCode} opens with ${demoAs}: hear, download, and the controls are theirs`);
   if (c.entered) {
     ok(`the demo song ${demoCode} is already entered: left as it is`);
   } else {
@@ -106,7 +108,7 @@ async function playDemo() {
 }
 if (demoOnly) {
   await playDemo();
-  console.log(`FIRST_RUN OK ${base}: ${step} steps (demo only: the pages, the cutoff and the demo song ${demoCode}; no test rows made)`);
+  console.log(`FIRST_RUN OK ${base}: ${step} steps (demo only: the pages, the cutoff and the demo song ${demoCode}, played with ${demoAs}; no test rows made)`);
   process.exit(0);
 }
 

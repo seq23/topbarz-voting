@@ -303,7 +303,6 @@ function drawContest() {
   els.access.textContent = c ? accessLine(COPY, c.access) : "";
   els.listenOnly.hidden = !c || performer;
   els.listenOnly.textContent = COPY.listenOnly;
-els.viewContest.textContent = COPY.viewContest;
   els.onSong.textContent = manages ? COPY.youreOn : "";
   els.onSong.hidden = !manages;
   // The entry's status is everyone's to see; its box is everyone's on the song.

@@ -425,7 +425,7 @@ test("managing is first come: the first on the song to tick Enter keeps the cont
   const view = await B(songCode, "contest-status", { email: "mo.i@gmail.com" });
   assert.equal(view.status, 200, view.text);
   assert.deepEqual(view.body.contest.access, ["Jay", "Mo", "Kim"], "all three have access before anyone opens /track");
-  assert.deepEqual([view.body.contest.ticked, view.body.contest.step, view.body.contest.manager, view.body.contest.you], [false, "not_entered", null, { performer: true, manager: false, can_manage: true, signed_up: true, host: false }]);
+  assert.deepEqual([view.body.contest.ticked, view.body.contest.step, view.body.contest.manager, view.body.contest.you], [false, "not_entered", null, { performer: true, manager: false, can_manage: true, signed_up: true }]);
   assert.equal(view.body.contest.rules_url, "/holiday-rules");
   assert.ok(!/@/.test(JSON.stringify(view.body.contest)), "no email for anyone");
   const heard = await B(songCode, "enter", { email: "friend@gmail.com" });
@@ -716,7 +716,7 @@ test("the demo song (Scooter, 19 Nov 2026: \"make sure I can ... take a song thr
   assert.match(demo.checkArgs({ env: "preview", name: "Scooter Taylor" }).error, /Scooter Taylor/, "a song with Scooter Taylor on it never goes in the vote");
   assert.match(demo.checkArgs({ env: "preview", name: "Test Ava" }).error, /Test/);
   assert.match(demo.checkArgs({ env: "preview", email: "nope" }).error, /email/);
-  assert.deepEqual(demo.checkArgs({ env: "preview" }), { name: "Demo Singer", email: "jingle.demo@example.com", host: null });
+  assert.deepEqual(demo.checkArgs({ env: "preview" }), { name: "Demo Singer", email: "jingle.demo@example.com" });
   const wav = demo.jingleWav();
   assert.deepEqual([wav.toString("ascii", 0, 4), wav.toString("ascii", 8, 12), wav.readUInt32LE(40) === wav.length - 44], ["RIFF", "WAVE", true]);
   assert.ok(wav.length / (22050 * 2) > 6, "a few seconds of music, not a click");
@@ -743,41 +743,12 @@ test("the demo song (Scooter, 19 Nov 2026: \"make sure I can ... take a song thr
   assert.equal((await B("8642", "contest", { email: "jingle.demo@example.com", enter: true, agree: true })).body.contest.entered, true, "and it goes in again");
   assert.ok(await inVote("Demo") || await inVote("Jingle Demo"), "the same song, back on the voting page");
   await B("8642", "contest", { email: "jingle.demo@example.com", enter: false });
-});
-
-test("the demo's host (Scooter, 19 Nov 2026: \"use my own access to take a song through contest entry and see it appear on the voting page\"): their own email manages the demo song and enters it, without being on it; nobody else can; production ignores it", async () => {
-  const demo = await import("../scripts/demo-song.mjs");
-  const host = "host.demo@example.org";
-  assert.equal(demo.checkArgs({ env: "preview", host }).host, host);
-  assert.match(demo.checkArgs({ env: "preview", host: "nope" }).error, /--host/);
-  assert.match(demo.checkArgs({ env: "preview", host: "jingle.demo@example.com" }).error, /--host/, "the host is a second person, never the singer");
-  await clearStation();
-  const run = async (stmts) => { for (const sql of stmts) await env.DB.prepare(sql).run(); };
-  const wav = demo.jingleWav();
-  // The host has signed up as Scooter Taylor: the vote must still never see that name on the song.
-  await env.DB.prepare("INSERT INTO party_sessions (code, created_at, status, status_at, done_at) VALUES ('HSTQ', 1, 'out', 1, 1)").run();
-  await env.DB.prepare("INSERT INTO party_guests (session_id, name, phone, email, city, instagram, guest_key, joined_at) SELECT id, 'Scooter Taylor', '555 010 0001', ?1, 'Memphis', '', ?2, 1 FROM party_sessions WHERE code = 'HSTQ'").bind(host, "cd".repeat(12)).run();
-  try {
-    await run(demo.createStatements({ code: "8643", key: "booth/8643-0011223344556677.wav", size: wav.length, now: Date.now(), name: "Demo Singer", email: "jingle.demo@example.com", guest: "ef".repeat(12), session: "DMQY", host }));
-    const view = (await B("8643", "enter", { email: host })).body.contest;
-    assert.deepEqual([view.access, view.you.performer, view.you.can_manage, view.you.host, view.blocked, view.step], [["Demo"], true, true, true, null, "not_entered"], "the host's own email opens it with the controls; the song is still the singer's alone");
-    const stranger = await B("8643", "contest", { email: "listener@gmail.com", enter: true, agree: true });
-    assert.deepEqual([stranger.status, stranger.body.error], [403, "not_attached"], "anyone else with the code still only hears it");
-    assert.equal((await B("8643", "title", { email: host, title: "Host Jingle" })).status, 200, "the host sets the title");
-    const ticked = await B("8643", "contest", { email: host, enter: true, agree: true });
-    assert.deepEqual([ticked.status, ticked.body.contest.entered, ticked.body.contest.step, ticked.body.contest.ticked_by], [200, true, "in", "the demo's host"], "Enter, by the host's own email, puts it in");
-    assert.ok(await inVote("Host Jingle"), "and it is on the voting page");
-    const singer = await B("8643", "contest", { email: "jingle.demo@example.com", enter: false });
-    assert.deepEqual([singer.status, singer.body.error], [403, "not_manager"], "first come: the host manages it now, the singer's email cannot take it out");
-    const prodEnv = { ...env, APP_ENV: "production" };
-    const prod = await B("8643", "contest", { email: host, enter: false }, freshIp(), prodEnv);
-    assert.deepEqual([prod.status, prod.body.error], [403, "not_attached"], "production never honours a host");
-    assert.equal((await B("8643", "contest", { email: host, enter: false })).body.contest.entered, false, "the host's untick takes it out again");
-    assert.ok(!(await inVote("Host Jingle")));
-    await run(demo.resetStatements({ code: "8643", now: Date.now() }));
-    const after = (await B("8643", "enter", { email: host })).body.contest;
-    assert.deepEqual([after.ticked, after.manager, after.title, after.you.can_manage], [false, null, "", true], "a reset without --host keeps the host: ready to show again");
-  } finally {
-    await env.DB.prepare("DELETE FROM party_guests WHERE email = ?1").bind(host).run();
-  }
+  // The retired host column (migrations/0014_demo_host.sql) gives nobody the controls: an email that is
+  // not on the song cannot enter it even when the column names it, and a reset clears the column.
+  await run([`UPDATE booth_tracks SET host_email = 'outsider.host@gmail.com' WHERE code = '8642'`]);
+  const outsider = await B("8642", "contest", { email: "outsider.host@gmail.com", enter: true, agree: true });
+  assert.equal(outsider.status, 403, "a host email that is not on the song is refused");
+  assert.ok(!(await inVote("Demo")) && !(await inVote("Jingle Demo")), "and the song stays out of the vote");
+  await run(demo.resetStatements({ code: "8642", now: Date.now() }));
+  assert.equal((await env.DB.prepare("SELECT host_email FROM booth_tracks WHERE code = '8642'").first()).host_email, null, "the reset clears the host");
 });

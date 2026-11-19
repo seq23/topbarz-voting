@@ -173,7 +173,7 @@ export const OPEN_SQL = "UPDATE booth_tracks SET opened = opened + 1, last_opene
 export const ATTACH_SQL = "INSERT OR IGNORE INTO booth_people (track_id, email, attached_at) VALUES (?1, ?2, ?3)";
 export const PEOPLE_SQL = "SELECT email, vote_opt_in FROM booth_people WHERE track_id = ?1";
 export const VOTE_SQL = "UPDATE booth_people SET vote_opt_in = ?3, opted_at = ?4 WHERE track_id = ?1 AND email = ?2 RETURNING vote_opt_in";
-export const ACCESS_SQL = "SELECT t.id AS track_id, t.host_email, p.id AS person_id FROM booth_tracks t LEFT JOIN booth_people p ON p.track_id = t.id AND p.email = ?2 WHERE code = ?1";
+export const ACCESS_SQL = "SELECT t.id AS track_id, p.id AS person_id FROM booth_tracks t LEFT JOIN booth_people p ON p.track_id = t.id AND p.email = ?2 WHERE code = ?1";
 export const DROP_SQL = "DELETE FROM booth_tracks WHERE id = ?1";
 // The share: the switch (a track from before the share existed gets its id now), the artwork,
 // and the listen page's read, by share id only (never the code), which never counts an open.

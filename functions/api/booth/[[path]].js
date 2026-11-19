@@ -32,7 +32,7 @@ import {
   ACCESS_SQL, ART_SQL, ATTACH_SQL, BOOTH_DAY_KEY, DROP_SQL, LISTEN_SQL, LOG_SQL, OPEN_SQL, PEOPLE_SQL, PUBLIC_SQL, VOTE_SQL, allIn, artKey, artMagic, artSize, artType, artUrl, audioExtension, audioType, cleanEmail, cleanFileName, countPeople, fileBody, isCode, isShareId, reserveCode, shareId, toTrack, uploadSize,
 } from "../../_lib/booth.js";
 import { LIMITS } from "../../_lib/config.js";
-import { ATTACH_PERSON_SQL, ENTER_SQL, MARK_PERSON_SQL, SESSION_DONE_SQL, TAG_TAKE_SQL, TITLE_SQL, UNMARK_ALL_SQL, UPLOAD_EVENT_SQL, WITHDRAW_SQL, claimManager, cleanTitle, contestClosed, contestView, holidayOn, isEntered, isHost, readSong, syncEntry } from "../../_lib/contest.js";
+import { ATTACH_PERSON_SQL, ENTER_SQL, MARK_PERSON_SQL, SESSION_DONE_SQL, TAG_TAKE_SQL, TITLE_SQL, UNMARK_ALL_SQL, UPLOAD_EVENT_SQL, WITHDRAW_SQL, claimManager, cleanTitle, contestClosed, contestView, holidayOn, isEntered, readSong, syncEntry } from "../../_lib/contest.js";
 import { CLAIM_TAKE_SQL, IN_BOOTH_NOW_SQL, NEXT_TAKE_SQL, RULES_VERSION, STATION_TAKES_SQL, TAKE_PEOPLE_SQL, firstOf, groupLabel, guestFlags } from "../../_lib/party.js";
 import { HttpError, fail, ipHash, json, readJson, route } from "../../_lib/http.js";
 import { assertUnderLimit, limitStatement, maybePrune } from "../../_lib/ratelimit.js";
@@ -199,7 +199,7 @@ async function contest(context, code) {
   if (await contestClosed(env, now)) throw new HttpError(403, "voting_closed", "Voting has closed, so songs can no longer go in or come out.");
   const db = env.DB;
   let song = await readSong(db, code);
-  if (body.enter && !isHost(song.track, email, env.APP_ENV === "production") && !song.people.find((p) => p.email === email)?.name) throw new HttpError(409, "not_signed_up", "Sign up at the QR code with this same email first, then tick the box.");
+  if (body.enter && !song.people.find((p) => p.email === email)?.name) throw new HttpError(409, "not_signed_up", "Sign up at the QR code with this same email first, then tick the box.");
   await asManager(env, trackId, email, code, now);
   if (!body.enter) await db.batch([db.prepare(WITHDRAW_SQL).bind(trackId), db.prepare(UNMARK_ALL_SQL).bind(trackId)]);
   else await db.batch([db.prepare(ENTER_SQL).bind(trackId, email, now, RULES_VERSION), db.prepare(MARK_PERSON_SQL).bind(trackId, email, now, RULES_VERSION)]);
@@ -270,9 +270,7 @@ async function access(context, ip, now, code, rawEmail) {
   const email = cleanEmail(rawEmail);
   const row = isCode(code) ? (await context.env.DB.prepare(ACCESS_SQL).bind(code, email || "-").all()).results?.[0] : null;
   if (!row) return miss(context, ip, now);
-  const onIt = row.person_id !== null && row.person_id !== undefined;
-  // The preview demo's host (scripts/demo-song.mjs --host) may change it without being on it.
-  if (!email || (!onIt && !isHost(row, email, context.env.APP_ENV === "production"))) throw new HttpError(403, "not_attached", "Enter the code with your email first.");
+  if (!email || row.person_id === null || row.person_id === undefined) throw new HttpError(403, "not_attached", "Enter the code with your email first.");
   return { track_id: row.track_id, email };
 }
 

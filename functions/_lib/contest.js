@@ -59,7 +59,7 @@ export function freshSlug(label, taken) {
 }
 
 // ── I/O ──────────────────────────────────────────────────────────────────────────────────────
-export const CONTEST_TRACK_SQL = "SELECT id, code, file_name, media_key, title, vote_track_id, party_session_id, party_take_id, pulled_at, manager_email, manager_at, contest_entered_by, contest_entered_at FROM booth_tracks WHERE code = ?1";
+export const CONTEST_TRACK_SQL = "SELECT id, code, file_name, media_key, title, vote_track_id, party_session_id, party_take_id, pulled_at, manager_email, manager_at, host_email, contest_entered_by, contest_entered_at FROM booth_tracks WHERE code = ?1";
 // The entry: ticked (who, when, which rules) by the manager. Unticking clears it.
 export const ENTER_SQL = "UPDATE booth_tracks SET contest_entered_by = COALESCE(contest_entered_by, ?2), contest_entered_at = COALESCE(contest_entered_at, ?3), contest_rules_version = ?4 WHERE id = ?1";
 export const WITHDRAW_SQL = "UPDATE booth_tracks SET contest_entered_by = NULL, contest_entered_at = NULL, contest_rules_version = NULL, contest_confirmed_by = NULL, contest_confirmed_at = NULL WHERE id = ?1";
@@ -162,9 +162,13 @@ export async function syncEntry(env, song, now = Date.now()) {
 const managerOf = (track, people, email) => {
   if (!track.manager_email) return { manager: null, you_manage: false };
   const p = people.find((x) => x.email === track.manager_email);
-  return { manager: p?.name ? firstOf(p.name) : COPY_SOMEONE, you_manage: Boolean(email) && track.manager_email === email };
+  return { manager: p?.name ? firstOf(p.name) : track.manager_email === track.host_email ? COPY_HOST : COPY_SOMEONE, you_manage: Boolean(email) && track.manager_email === email };
 };
 const COPY_SOMEONE = "someone on the song";
+const COPY_HOST = "the demo's host";
+// The demo song's host: the one email scripts/demo-song.mjs named with --host, on the preview only.
+// They manage the song without being one of its people, so the verdict never sees their name.
+export const isHost = (track, email, production) => !production && Boolean(email) && Boolean(track?.host_email) && track.host_email === email;
 
 // What /track sees, the same for everyone with the code: who has access (first names), who manages
 // it, whether it is entered and by whom. `you.performer` says whether the asker is one of the song's
@@ -174,6 +178,8 @@ export function contestView(song, email, { entered, closed, production }) {
   const { track, people } = song;
   const verdict = contestVerdict({ track, people, production });
   const me = people.find((p) => p.email === email);
+  // The preview demo's host (migrations/0014_demo_host.sql) holds the controls without being on it.
+  const host = isHost(track, email, production);
   const { manager, you_manage } = managerOf(track, people, email);
   const entrant = people.find((p) => p.email === track.contest_entered_by);
   return {
@@ -183,10 +189,10 @@ export function contestView(song, email, { entered, closed, production }) {
     entered: Boolean(entered),
     closed: Boolean(closed),
     ticked: Boolean(track.contest_entered_at),
-    ticked_by: track.contest_entered_at ? (entrant?.name ? firstOf(entrant.name) : COPY_SOMEONE) : null,
+    ticked_by: track.contest_entered_at ? (entrant?.name ? firstOf(entrant.name) : track.host_email && track.contest_entered_by === track.host_email ? COPY_HOST : COPY_SOMEONE) : null,
     step: verdict.step,
     manager,
-    you: { performer: Boolean(me), manager: you_manage, can_manage: Boolean(me) && (you_manage || !track.manager_email), signed_up: Boolean(me?.name) },
+    you: { performer: Boolean(me) || host, manager: you_manage, can_manage: (Boolean(me) || host) && (you_manage || !track.manager_email), signed_up: Boolean(me?.name) || host, host },
     nobody: people.length === 0, // nobody on it yet: the team puts its people on it from /team
     // "Jeff, John and Scooter have access to this song" (Scooter, 18 Nov 2026).
     access: people.map((p) => (p.name ? firstOf(p.name) : null)).filter(Boolean),

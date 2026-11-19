@@ -15,7 +15,7 @@
 // the song and it is in the vote within 12 s with no script run; the other gets not_manager; a
 // reload reads entered; unticking takes it out (the run leaves nothing in the preview's vote); and
 // one tap puts the first person back in line. With --demo <code> it plays Scooter's demo on that
-// song too (see below).
+// song too, and with --demo <code> --demo-only only that (see below).
 // Test data only: "Test …" names, @example.com addresses; production refuses it (and the party
 // is off there).
 import { PARTY_VOTING_ENDS_AT } from "../functions/_lib/config.js";
@@ -63,6 +63,52 @@ if (/id="tbz-countdown-row"[^>]*hidden/.test(home.text)) fail("the countdown row
 if (!home.text.includes("Prize details TBD")) fail("the voting page does not say Prize details TBD");
 if (!/<input id="tbz-gate-optin" name="marketing_opt_in" type="checkbox">/.test(home.text) || /tbz-gate-optin[^>]*(checked|required)/.test(home.text)) fail("Send me Top Barz updates must ship unticked and optional");
 ok("voting ends Friday, November 27 at 11:59 PM EST, shown with the countdown; Prize details TBD; the updates box unticked and optional");
+
+// The demo (Scooter, 19 Nov 2026: "make sure I can use my own access to take a song through contest
+// entry and see it appear on the voting page"). With --demo <code> (or FIRST_RUN_DEMO_CODE; the code
+// `npm run demo-song` printed), play exactly his steps on that song: its code and the demo email open
+// it with the controls, Enter the contest puts it on the voting page, and unticking takes it off
+// again, so the song is left as it was found. A demo song already entered is left alone.
+// With --demo-only it plays the read-only page checks and the demo, nothing else: no sign-ups and no
+// walk-up upload, so it is the check to run just before a call and leaves no test rows behind.
+const demoCode = arg("demo") ?? process.env.FIRST_RUN_DEMO_CODE;
+const demoOnly = process.argv.includes("--demo-only");
+if (demoOnly && !demoCode) fail("--demo-only needs --demo <code> (the code npm run demo-song printed)");
+async function playDemo() {
+  const { DEMO_DEFAULTS } = await import("./demo-song.mjs");
+  const email = arg("demo-email") ?? DEMO_DEFAULTS.email;
+  const opened = await req(`/api/booth/tracks/${demoCode}/enter`, { method: "POST", body: { email } });
+  const c = opened.json?.contest;
+  if (opened.status !== 200 || !opened.json?.download_url) fail(`the demo song ${demoCode} with ${email}: ${opened.status} ${opened.text.slice(0, 160)}`);
+  if (c?.blocked) fail(`the demo song ${demoCode} cannot go in the contest: ${JSON.stringify(c.blocked).slice(0, 160)}`);
+  if (c?.you?.can_manage !== true) fail(`${email} cannot manage the demo song ${demoCode} (manager: ${c?.manager}): run npm run demo-song -- --env preview to reset it`);
+  ok(`the demo song ${demoCode} opens with ${email}: hear, download, and the controls are theirs`);
+  if (c.entered) {
+    ok(`the demo song ${demoCode} is already entered: left as it is`);
+  } else {
+    const label = c.title || c.people.map((p) => p.first_name).join(" & ");
+    const shows = async (want) => {
+      for (let i = 0; i < 12; i++) {
+        const st = await req(`/api/state?first-run=${Date.now()}`);
+        if ((st.json?.tracks ?? []).some((t) => t.label === label) === want) return true;
+        await sleep(1000);
+      }
+      return false;
+    };
+    const tick = await req(`/api/booth/tracks/${demoCode}/contest`, { method: "POST", body: { email, enter: true, agree: true } });
+    if (tick.status !== 200 || tick.json?.contest?.entered !== true) fail(`Enter the contest on the demo song: ${tick.status} ${tick.text.slice(0, 160)}`);
+    if (!(await shows(true))) fail(`the demo song was entered but "${label}" did not show in /api/state within 12 s`);
+    ok(`Enter the contest on the demo song: "${label}" is on the voting page within 12 s, no script run`);
+    const untick = await req(`/api/booth/tracks/${demoCode}/contest`, { method: "POST", body: { email, enter: false } });
+    if (untick.json?.contest?.entered !== false || !(await shows(false))) fail("unticking the demo song did not take it off the voting page");
+    ok("unticked: the demo song is off the voting page again, ready for the call");
+  }
+}
+if (demoOnly) {
+  await playDemo();
+  console.log(`FIRST_RUN OK ${base}: ${step} steps (demo only: the pages, the cutoff and the demo song ${demoCode}; no test rows made)`);
+  process.exit(0);
+}
 
 // 2. Two people, each signing up on their own, and a reload.
 const tag = `${Date.now().toString(36)}`;
@@ -157,42 +203,7 @@ if (token) {
   if (back.status !== 201 || back.json?.session?.status !== "waiting") fail(`Get back in line answered ${back.status} ${back.text.slice(0, 120)}`);
   ok("once their song is uploaded, one tap puts the same person back in line");
 }
-// The demo (Scooter, 19 Nov 2026: "make sure I can use my own access to take a song through contest
-// entry and see it appear on the voting page"). With --demo <code> (or FIRST_RUN_DEMO_CODE; the code
-// `npm run demo-song` printed), play exactly his steps on that song: its code and the demo email open
-// it with the controls, Enter the contest puts it on the voting page, and unticking takes it off
-// again, so the song is left as it was found. A demo song already entered is left alone.
-const demoCode = arg("demo") ?? process.env.FIRST_RUN_DEMO_CODE;
-if (demoCode) {
-  const { DEMO_DEFAULTS } = await import("./demo-song.mjs");
-  const email = arg("demo-email") ?? DEMO_DEFAULTS.email;
-  const opened = await req(`/api/booth/tracks/${demoCode}/enter`, { method: "POST", body: { email } });
-  const c = opened.json?.contest;
-  if (opened.status !== 200 || !opened.json?.download_url) fail(`the demo song ${demoCode} with ${email}: ${opened.status} ${opened.text.slice(0, 160)}`);
-  if (c?.blocked) fail(`the demo song ${demoCode} cannot go in the contest: ${JSON.stringify(c.blocked).slice(0, 160)}`);
-  if (c?.you?.can_manage !== true) fail(`${email} cannot manage the demo song ${demoCode} (manager: ${c?.manager}): run npm run demo-song -- --env preview to reset it`);
-  ok(`the demo song ${demoCode} opens with ${email}: hear, download, and the controls are theirs`);
-  if (c.entered) {
-    ok(`the demo song ${demoCode} is already entered: left as it is`);
-  } else {
-    const label = c.title || c.people.map((p) => p.first_name).join(" & ");
-    const shows = async (want) => {
-      for (let i = 0; i < 12; i++) {
-        const st = await req(`/api/state?first-run=${Date.now()}`);
-        if ((st.json?.tracks ?? []).some((t) => t.label === label) === want) return true;
-        await sleep(1000);
-      }
-      return false;
-    };
-    const tick = await req(`/api/booth/tracks/${demoCode}/contest`, { method: "POST", body: { email, enter: true, agree: true } });
-    if (tick.status !== 200 || tick.json?.contest?.entered !== true) fail(`Enter the contest on the demo song: ${tick.status} ${tick.text.slice(0, 160)}`);
-    if (!(await shows(true))) fail(`the demo song was entered but "${label}" did not show in /api/state within 12 s`);
-    ok(`Enter the contest on the demo song: "${label}" is on the voting page within 12 s, no script run`);
-    const untick = await req(`/api/booth/tracks/${demoCode}/contest`, { method: "POST", body: { email, enter: false } });
-    if (untick.json?.contest?.entered !== false || !(await shows(false))) fail("unticking the demo song did not take it off the voting page");
-    ok("unticked: the demo song is off the voting page again, ready for the call");
-  }
-}
+if (demoCode && !demoOnly) await playDemo();
 // Last: leave the preview as this run found it (Scooter, 18 Nov 2026: test groups and uploads were
 // in his demo). Only this run's own rows, by its tag (scripts/clean-test-data.mjs); D1 through
 // wrangler on this Mac. If that cannot run, the OK line says so and names the command.

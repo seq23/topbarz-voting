@@ -1,34 +1,36 @@
-// The team's page (/team; Scooter, 17 Nov 2026, and his preview notes): sign in with an emailed
-// code, then the line, live (every 5 s): who is next and after that, each group with its people,
-// big status buttons (green "In the booth", red "Out of the booth", which moves the group to its own
-// lane, "At the upload station", apart from whoever is in the booth now, until the engineer uploads
-// its song against it) that always ask first and can be undone for 10 s, a
-// "Text them" button that opens Messages on this phone with every number in the group, and each
-// person's details on a tap. Buttons only, no gestures. Below: the contest songs (each with "Take
-// out of the vote", asked first and undoable), the gallery's GIFs and who is on the team.
+// The team's page (/team; Scooter, 17 Nov 2026, and his revision list of 18 Nov): sign in with an
+// emailed code, then the line, live (every 5 s): one card per person, who is next and after that,
+// big status buttons (green "In the booth", red "Out of the booth") that always ask first and can be
+// undone for 10 s, a "Text them" button that opens Messages on this phone, and each person's details
+// on a tap. The people in the booth together are one recording; when the last of them is out it
+// waits at the upload station, whole, and the engineer's next upload goes to exactly them. A sign-up
+// that looks like a test or an old one is flagged, with its email and phone, before anyone taps it
+// in. Buttons only, no gestures. Below: the songs (Take out of the vote, and Change who's on it,
+// kept with a note), the gallery's GIFs and who is on the team.
 // The phone keeps the team token and the member's own email (localStorage tbz.team), nothing else.
 import { ApiError, api } from "./api.js";
 import { $, closeModal, h, showModal } from "./dom.js";
 import { festive } from "./festive.js";
 import { detectPlatform } from "./logic.js";
 import { HOLIDAY } from "./party-copy.js";
-import { LINE_POLL_MS, STATUS, TEAM_KEY, UNDO_MS, clockWords, groupLabel, groupSmsHref, isTeamToken, moves, nextTwo } from "./party-rules.js";
+import { LINE_POLL_MS, STATUS, TEAM_KEY, UNDO_MS, clockWords, flagWords, groupLabel, groupSmsHref, isTeamToken, moves, nextTwo } from "./party-rules.js";
 import { COPY } from "./team-copy.js";
 
 const els = Object.fromEntries([
   "headline", "intro", "loading", "off", "off-title", "off-note", "signin", "signin-title", "signin-intro", "email-form", "email", "email-label", "send", "code-form", "code-sent", "code", "code-label", "check", "resend", "change", "signin-error",
-  "board", "who", "signout", "next-label", "next", "after-label", "after", "line-note", "line", "upload-title", "upload-intro", "upload-none", "upload", "done-title", "done",
+  "board", "who", "signout", "next-label", "next", "after-label", "after", "line-note", "line", "waiting-title", "booth-title", "booth-intro", "booth-none", "booth", "upload-title", "upload-intro", "upload-none", "upload", "done-title", "done",
   "songs-title", "songs-intro", "songs-none", "songs",
   "gifs-title", "gifs-intro", "gifs-chosen-title", "gifs-chosen", "gifs-none", "gif-search", "gif-search-label", "gif-status", "gif-results", "gif-by",
   "members-title", "members-intro", "members", "add-form", "add", "add-label", "add-go", "add-msg",
-  "person", "person-title", "person-list", "person-close", "confirm", "confirm-title", "confirm-yes", "confirm-no", "toast", "toast-text", "undo",
+  "person", "person-title", "person-list", "person-close", "confirm", "confirm-title", "confirm-note", "confirm-yes", "confirm-no", "toast", "toast-text", "undo",
+  "repoint", "repoint-title", "repoint-intro", "repoint-find", "repoint-find-label", "repoint-list", "repoint-note", "repoint-note-label", "repoint-msg", "repoint-save", "repoint-cancel",
 ].map((id) => [id.replace(/-([a-z])/g, (_, c) => c.toUpperCase()), $(`tbz-team-${id}`)]));
 
-const app = { token: null, me: "", sessions: [], timer: null, pending: null, undo: null, undoTimer: null, resendTimer: null, platform: detectPlatform(navigator), gifs: [], gifTimer: null, songs: [], assignPick: {} };
+const app = { token: null, me: "", sessions: [], takes: [], timer: null, pending: null, undo: null, undoTimer: null, resendTimer: null, platform: detectPlatform(navigator), gifs: [], gifTimer: null, songs: [], guests: [], repoint: null };
 
 // ── The words
 document.title = `${COPY.headline} | Top Barz`;
-const words = { headline: "headline", intro: "intro", offNote: null, signinTitle: "signInTitle", signinIntro: "signInIntro", emailLabel: "emailLabel", send: "sendCode", codeLabel: "codeLabel", check: "check", change: "changeEmail", signout: "signOut", nextLabel: "nextUp", afterLabel: "afterThat", doneTitle: "doneTitle", uploadTitle: "uploadTitle", uploadIntro: "uploadIntro", uploadNone: "uploadNone", songsTitle: "songsTitle", songsIntro: "songsIntro", songsNone: "songsNone", gifsTitle: "gifsTitle", gifsIntro: "gifsIntro", gifsChosenTitle: "gifsChosen", gifsNone: "gifsNone", gifSearchLabel: "gifsSearch", gifBy: "poweredBy", membersTitle: "teamTitle", membersIntro: "teamIntro", addLabel: "addLabel", addGo: "add", personClose: "close", confirmYes: "yes", confirmNo: "cancel", undo: "undo" };
+const words = { headline: "headline", intro: "intro", offNote: null, signinTitle: "signInTitle", signinIntro: "signInIntro", emailLabel: "emailLabel", send: "sendCode", codeLabel: "codeLabel", check: "check", change: "changeEmail", signout: "signOut", nextLabel: "nextUp", afterLabel: "afterThat", doneTitle: "doneTitle", waitingTitle: "waitingTitle", boothTitle: "boothTitle", boothIntro: "boothIntro", boothNone: "boothNone", uploadTitle: "uploadTitle", uploadIntro: "uploadIntro", uploadNone: "uploadNone", repointIntro: "repointIntro", repointFindLabel: "repointFind", repointNoteLabel: "repointNote", repointSave: "repointSave", repointCancel: "cancel", songsTitle: "songsTitle", songsIntro: "songsIntro", songsNone: "songsNone", gifsTitle: "gifsTitle", gifsIntro: "gifsIntro", gifsChosenTitle: "gifsChosen", gifsNone: "gifsNone", gifSearchLabel: "gifsSearch", gifBy: "poweredBy", membersTitle: "teamTitle", membersIntro: "teamIntro", addLabel: "addLabel", addGo: "add", personClose: "close", confirmYes: "yes", confirmNo: "cancel", undo: "undo" };
 for (const [el, key] of Object.entries(words)) if (key) els[el].textContent = COPY[key];
 els.offTitle.textContent = HOLIDAY.off;
 els.offNote.textContent = HOLIDAY.offNote;
@@ -125,16 +127,17 @@ els.signout.addEventListener("click", signOut);
 // A token the server no longer takes (30 days passed, or taken off the team): back to sign-in.
 const signedOut = (err) => err instanceof ApiError && (err.status === 401 || err.code === "team_sign_in");
 
-// ── The line
-const sizeWords = (n) => (n === 1 ? COPY.onePerson : COPY.people.replace("{n}", String(n)));
+// ── The line: one card per person; the booth and the upload station by recording (take)
 const namesOf = (s) => groupLabel(s.guests.map((g) => g.first_name));
 function personDetails(g, s) {
   els.personTitle.textContent = COPY.detailsTitle.replace("{name}", g.name);
   const row = (k, v, href) => [h("dt", { text: COPY[k] }), h("dd", {}, href ? h("a", { href, text: v }) : (v || COPY.none))];
+  const why = flagWords(COPY, g.flags);
   els.personList.replaceChildren(
     ...row("fName", g.name), ...row("fPhone", g.phone, `tel:${g.phone}`), ...row("fEmail", g.email, `mailto:${g.email}`), ...row("fCity", g.city),
     ...row("fInstagram", g.instagram, g.instagram ? `https://www.instagram.com/${encodeURIComponent(g.instagram.replace(/^@/, ""))}` : null),
-    ...row("fGroup", `${namesOf(s)} · ${sizeWords(s.guests.length)}`), ...row("fJoined", clockWords(g.joined_at)),
+    ...row("fGroup", STATUS[s.status]?.word ?? s.status), ...row("fJoined", clockWords(g.joined_at)),
+    ...(why ? row("fFlags", why) : []),
   );
   showModal(els.person, () => closeModal(els.person));
   els.personClose.focus();
@@ -147,14 +150,16 @@ function textThem(s, note) {
   note.textContent = COPY.textNoPhone.replace("{numbers}", s.guests.map((g) => g.phone).join(", "));
   note.hidden = false;
 }
-// The button that moves a group from one lane to another, in words.
+// The button that moves a person from one lane to another, in words.
 function moveWords(from, to) {
   if (to === "booth") return from === "upload" ? COPY.backToBooth : COPY.toBooth;
   if (to === "upload") return from === "done" ? COPY.backToUpload : COPY.toUpload;
   if (to === "done") return COPY.toDone;
   return COPY.toWaiting;
 }
-function card(s) {
+// A flag, with the contact details, so a test or old sign-up is seen before it is tapped in.
+const flagLine = (g) => h("p", { class: "flag-note", text: `${flagWords(COPY, g.flags)}: ${g.email} · ${g.phone}` });
+function card(s, { contact = false } = {}) {
   const tone = STATUS[s.status].tone;
   const note = h("p", { class: "switch-note", role: "status", hidden: true });
   const actions = h("div", { class: "line-actions" },
@@ -163,27 +168,46 @@ function card(s) {
   const meta = [COPY.joined.replace("{time}", clockWords(s.created_at)), s.texted_at ? COPY.texted.replace("{time}", clockWords(s.texted_at)) : null].filter(Boolean).join(" · ");
   return h("li", { class: `line-item is-${tone}`, "data-status": s.status },
     h("div", { class: "line-head" },
-      h("span", { class: `pill pill-${tone}`, text: STATUS[s.status].word }),
-      h("span", { class: "line-size", text: `${s.place ? `#${s.place} · ` : ""}${sizeWords(s.guests.length)}` })),
+      h("span", { class: `pill pill-${tone}`, text: s.status === "upload" && !takeOf(s)?.closed ? COPY.outWaiting : STATUS[s.status].word }),
+      s.place ? h("span", { class: "line-size", text: `#${s.place}` }) : null),
     h("ul", { class: "line-people" }, ...s.guests.map((g) => h("li", {}, h("button", { type: "button", class: "person-btn", text: g.name, onclick: () => personDetails(g, s) })))),
+    ...s.guests.filter((g) => contact || g.flags?.length).map((g) => (g.flags?.length ? flagLine(g) : h("p", { class: "line-meta", text: `${g.email} · ${g.phone}` }))),
     h("p", { class: "line-meta", text: meta }),
     actions, note);
 }
+const takeOf = (s) => app.takes.find((t) => t.id === s.take_id) ?? null;
+// One recording: its people, each with their own buttons.
+function takeCard(take, people, { title, contact }) {
+  return h("li", { class: "take" },
+    h("p", { class: "next-label", text: title }),
+    h("p", { class: "next-names", text: groupLabel(people.flatMap((s) => s.guests.map((g) => g.first_name))) }),
+    h("ol", { class: "line" }, ...people.map((s) => card(s, { contact }))));
+}
 function draw() {
-  const live = app.sessions.filter((s) => s.status === "waiting" || s.status === "booth");
-  const upload = app.sessions.filter((s) => s.status === "upload");
+  const waiting = app.sessions.filter((s) => s.status === "waiting");
   const done = app.sessions.filter((s) => s.status === "done");
+  // The booth: the recording still open (someone of it in the booth), with anyone of it already out.
+  const open = app.takes.filter((t) => !t.closed && !t.uploaded);
+  const boothPeople = app.sessions.filter((s) => s.status === "booth" || (s.status === "upload" && open.some((t) => t.id === s.take_id)));
+  const station = app.takes.filter((t) => t.closed && !t.uploaded).sort((a, b) => Date.parse(a.closed_at) - Date.parse(b.closed_at))
+    .map((t) => ({ t, people: app.sessions.filter((s) => s.status === "upload" && s.take_id === t.id) })).filter((x) => x.people.length);
+  // Out with no recording (from before 18 Nov 2026): shown at the station on their own.
+  const loose = app.sessions.filter((s) => s.status === "upload" && !s.take_id);
   const { next, after, inBooth } = nextTwo(app.sessions);
   els.nextLabel.textContent = inBooth.length ? COPY.inBooth : COPY.nextUp;
-  const top = inBooth[0] ?? next;
-  const second = inBooth.length ? next : after;
+  const nameOf = (s) => (s ? namesOf(s) : COPY.nobodyNext);
+  els.next.textContent = inBooth.length ? groupLabel(inBooth.map((s) => namesOf(s))) : nameOf(next);
   els.afterLabel.textContent = inBooth.length ? COPY.nextUp : COPY.afterThat;
-  els.next.textContent = top ? `${namesOf(top)} · ${top.guests.length}` : COPY.nobodyNext;
-  els.after.textContent = second ? `${namesOf(second)} · ${second.guests.length}` : COPY.nobodyNext;
-  els.line.replaceChildren(...live.map(card));
-  els.upload.replaceChildren(...upload.map(card));
-  els.uploadNone.hidden = upload.length > 0;
-  els.done.replaceChildren(...done.map(card));
+  els.after.textContent = inBooth.length ? nameOf(next) : nameOf(after);
+  els.booth.replaceChildren(...(boothPeople.length ? [takeCard(open[0] ?? {}, boothPeople, { title: COPY.boothTitle, contact: false })] : []));
+  els.boothNone.hidden = boothPeople.length > 0;
+  els.line.replaceChildren(...waiting.map((s) => card(s)));
+  els.waitingTitle.hidden = waiting.length === 0;
+  els.upload.replaceChildren(
+    ...station.map((x, i) => takeCard(x.t, x.people, { title: i === 0 ? COPY.nextUpload : COPY.laterUpload, contact: true })),
+    ...loose.map((s) => card(s, { contact: true })));
+  els.uploadNone.hidden = station.length + loose.length > 0;
+  els.done.replaceChildren(...done.map((s) => card(s)));
   els.doneTitle.hidden = done.length === 0;
   if (!app.sessions.length) { els.lineNote.textContent = COPY.empty; els.lineNote.hidden = false; }
   else els.lineNote.hidden = true; // loaded: no "Loading…", no stale "Could not reach"
@@ -191,11 +215,13 @@ function draw() {
 async function poll() {
   clearTimeout(app.timer);
   if (!app.token) return;
-  if (!document.hidden && !app.pending) {
+  if (!document.hidden && !app.pending && !app.repoint) {
     try {
       const [{ data }, songs] = await Promise.all([call("/api/party/team/line"), call("/api/party/team/songs")]);
       app.sessions = data.sessions ?? [];
+      app.takes = data.takes ?? [];
       app.songs = songs.data?.songs ?? [];
+      app.guests = songs.data?.guests ?? [];
       drawSongs();
       if (els.lineNote.textContent === COPY.unreachable) els.lineNote.hidden = true;
       draw();
@@ -209,115 +235,105 @@ async function poll() {
 }
 document.addEventListener("visibilitychange", () => { if (!document.hidden && app.token) poll(); });
 
-// ── A status change: always asked first, then Undo for 10 s
+// ── A status change: always asked first (with any flag and its contact details), then Undo for 10 s
 function ask(s, to) {
   app.pending = { s, to };
   els.confirmTitle.textContent = COPY.confirm.replace("{names}", namesOf(s)).replace("{status}", STATUS[to].word);
+  const flagged = to === "booth" ? s.guests.filter((g) => g.flags?.length) : [];
+  els.confirmNote.textContent = flagged.map((g) => COPY.confirmFlagged.replace("{name}", g.name).replace("{email}", g.email).replace("{phone}", g.phone).replace("{why}", flagWords(COPY, g.flags))).join(" ");
+  els.confirmNote.hidden = flagged.length === 0;
   els.confirmYes.className = `btn btn-status btn-${STATUS[to].tone}`;
   showModal(els.confirm, cancel);
   els.confirmNo.focus();
 }
 function cancel() { app.pending = null; closeModal(els.confirm); }
-// ── A contest song: "Take out of the vote" / "Put back", asked first, then Undo for 10 s
-function songLine(s) {
-  const entry = !s.ticked ? COPY.songNotEntered
-    : s.people > 1 && !s.confirmed ? COPY.songNeedsGroup.replace("{ticked}", s.ticked_by || COPY.someone)
-    : s.people > 1 ? COPY.songEnteredGroup.replace("{ticked}", s.ticked_by || COPY.someone).replace("{confirmed}", s.confirmed_by || COPY.someone)
-    : COPY.songEntered.replace("{ticked}", s.ticked_by || COPY.someone);
-  return s.pulled ? `${COPY.songPulledNote} ${entry}` : entry;
+function toast(text, undo = null) {
+  clearTimeout(app.undoTimer);
+  els.toastText.textContent = text;
+  app.undo = undo;
+  els.undo.hidden = !undo;
+  els.toast.hidden = false;
+  app.undoTimer = setTimeout(() => { els.toast.hidden = true; app.undo = null; }, UNDO_MS);
 }
+
+// ── The songs: "Take out of the vote" / "Put back", and "Change who's on it"
+function songLine(s) {
+  const entry = s.ticked ? COPY.songEntered.replace("{ticked}", s.ticked_by || COPY.someone) : COPY.songNotEntered;
+  const manager = s.manager ? COPY.songManager.replace("{name}", s.manager) : COPY.songNoManager;
+  return [s.pulled ? COPY.songPulledNote : null, entry, manager].filter(Boolean).join(" ");
+}
+const clock = (iso) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+const firstNames = (names) => groupLabel(names.map((n) => String(n).split(" ")[0])) || COPY.nobodyOn;
 function drawSongs() {
   els.songsNone.hidden = app.songs.length > 0;
   els.songs.replaceChildren(...app.songs.map((s) => {
     const tone = s.pulled ? "stop" : s.entered ? "go" : "wait";
+    const on = (s.members ?? []).map((p) => p.first_name || COPY.notSignedUp);
     return h("li", { class: `line-item is-${tone}` },
       h("div", { class: "line-head" },
         h("span", { class: `pill pill-${tone}`, text: s.pulled ? COPY.songPulled : s.entered ? COPY.inVote : COPY.notInVote }),
         h("span", { class: "line-size", text: s.code })),
       h("p", { class: "next-names", text: s.label }),
+      h("p", { class: "line-meta", text: s.needs_people ? COPY.songNobody : COPY.songOn.replace("{names}", groupLabel(on)) }),
       h("p", { class: "line-meta", text: songLine(s) }),
-      h("ul", { class: "song-people", "aria-label": COPY.songPeople }, ...(s.members ?? []).map((p) => songPerson(s, p))),
-      s.needs_group ? assignRow(s) : null,
-      h("div", { class: "line-actions" }, s.pulled
-        ? h("button", { type: "button", class: "btn btn-small btn-ghost", text: COPY.putBack, onclick: () => askSong(s, false) })
-        : h("button", { type: "button", class: "btn btn-status btn-stop", text: COPY.pullOut, onclick: () => askSong(s, true) })));
+      ...(s.repoints ?? []).map((r) => h("p", { class: "line-meta repoint-log", text: [COPY.repointLog.replace("{time}", clock(r.at)).replace("{by}", r.by || COPY.someone).replace("{before}", firstNames(r.before)).replace("{after}", firstNames(r.after)), r.note ? COPY.repointLogNote.replace("{note}", r.note) : null].filter(Boolean).join(" ") })),
+      h("div", { class: "line-actions" },
+        h("button", { type: "button", class: "btn btn-small", text: COPY.repoint, onclick: () => openRepoint(s) }),
+        s.pulled
+          ? h("button", { type: "button", class: "btn btn-small btn-ghost", text: COPY.putBack, onclick: () => askSong(s, false) })
+          : s.entered ? h("button", { type: "button", class: "btn btn-status btn-stop", text: COPY.pullOut, onclick: () => askSong(s, true) }) : null));
   }));
 }
-// A song with nobody on it: pick the group that recorded it from the groups whose song is not
-// uploaded yet (the pick survives the 5 s redraw), then confirm.
-function assignRow(song) {
-  const groups = app.sessions.filter((g) => g.status !== "done");
-  if (!groups.length) return h("p", { class: "line-meta", text: COPY.songNoGroupNone });
-  const id = `tbz-assign-${song.code}`;
-  const pick = app.assignPick[song.code] ?? "";
-  const select = h("select", { id, onchange: (e) => { app.assignPick[song.code] = e.target.value; } },
-    h("option", { value: "", text: COPY.assignPick, selected: pick === "" }),
-    ...groups.map((g) => h("option", { value: String(g.id), text: `${namesOf(g)} · ${STATUS[g.status]?.word ?? g.status}`, selected: pick === String(g.id) })));
-  return h("div", { class: "assign" },
-    h("p", { class: "line-meta", text: COPY.songNoGroup }),
-    h("label", { for: id, text: COPY.assignLabel }), select,
-    h("button", { type: "button", class: "btn btn-small", text: COPY.assignGo, onclick: () => askAssign(song, groups.find((g) => String(g.id) === app.assignPick[song.code])) }));
+// "Change who's on it": every sign-up, newest first, with email, phone and any flag; ticked are the
+// song's people now. Saving asks nothing more (the dialog is the question) and is kept with a note.
+function openRepoint(song) {
+  const picked = new Set((song.members ?? []).map((m) => m.guest_id).filter(Boolean));
+  app.repoint = { song, picked };
+  els.repointTitle.textContent = COPY.repointTitle.replace("{code}", song.code);
+  els.repointFind.value = "";
+  els.repointNote.value = "";
+  els.repointMsg.hidden = true;
+  drawRepoint();
+  showModal(els.repoint, closeRepoint);
+  els.repointFind.focus();
 }
-function askAssign(song, group) {
-  if (!group) { document.getElementById(`tbz-assign-${song.code}`)?.focus(); return; }
-  app.pending = { song, group };
-  els.confirmTitle.textContent = COPY.confirmAssign.replace("{names}", namesOf(group)).replace("{code}", song.code);
-  els.confirmYes.className = "btn";
-  showModal(els.confirm, cancel);
-  els.confirmNo.focus();
+function closeRepoint() { app.repoint = null; closeModal(els.repoint); }
+function drawRepoint() {
+  const r = app.repoint;
+  if (!r) return;
+  const q = els.repointFind.value.trim().toLowerCase();
+  const list = app.guests.filter((g) => r.picked.has(g.id) || !q || `${g.name} ${g.email} ${g.phone}`.toLowerCase().includes(q));
+  els.repointList.replaceChildren(...(list.length ? list.map((g) => {
+    const id = `tbz-repoint-${g.id}`;
+    const why = flagWords(COPY, g.flags);
+    return h("li", { class: "check" },
+      h("input", { type: "checkbox", id, checked: r.picked.has(g.id), onchange: (e) => { if (e.target.checked) r.picked.add(g.id); else r.picked.delete(g.id); } }),
+      h("label", { for: id }, h("span", { text: g.name }), h("span", { class: "line-meta", text: ` ${g.email} · ${g.phone}` }), why ? h("span", { class: "flag-note", text: ` ${why}` }) : null));
+  }) : [h("li", { class: "line-meta", text: COPY.repointNoneFound })]));
 }
-async function assignGroup(song, group) {
+els.repointFind.addEventListener("input", drawRepoint);
+els.repointCancel.addEventListener("click", closeRepoint);
+els.repointSave.addEventListener("click", async () => {
+  const r = app.repoint;
+  if (!r) return;
+  els.repointSave.disabled = true;
   try {
-    await call(`/api/party/team/songs/${song.code}/group`, { method: "POST", body: { session_id: group.id } });
-    delete app.assignPick[song.code];
-    els.toastText.textContent = COPY.assigned.replace("{names}", namesOf(group)).replace("{code}", song.code);
+    const { data } = await call(`/api/party/team/songs/${r.song.code}/people`, { method: "POST", body: { guest_ids: [...r.picked], note: els.repointNote.value } });
+    closeRepoint();
+    toast(COPY.repointDone.replace("{code}", r.song.code).replace("{names}", groupLabel((data.song?.members ?? []).map((m) => m.first_name).filter(Boolean)) || COPY.nobodyOn));
+    poll();
   } catch (err) {
-    if (signedOut(err)) { signOut(); return; }
-    els.toastText.textContent = err?.message || COPY.failed;
+    if (signedOut(err)) { closeRepoint(); signOut(); return; }
+    els.repointMsg.textContent = err?.message || COPY.failed;
+    els.repointMsg.hidden = false;
+  } finally {
+    els.repointSave.disabled = false;
   }
-  app.undo = null;
-  els.undo.hidden = true;
-  els.toast.hidden = false;
-  clearTimeout(app.undoTimer);
-  app.undoTimer = setTimeout(() => { els.toast.hidden = true; }, UNDO_MS);
-  app.pending = null;
-  poll();
-}
-// One person on a song: first name (or "Not signed up" with when they entered the code), their box,
-// and Remove for anyone who has not ticked: a plus-one or a mistyped code would hold the song out.
-const clock = (iso) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-const personName = (p) => p.first_name || COPY.notSignedUp.replace("{time}", clock(p.attached_at));
-function songPerson(song, p) {
-  return h("li", { class: "song-person" },
-    h("span", { text: `${personName(p)} · ${p.in ? COPY.personIn : p.signed_up ? COPY.personWaiting : COPY.personNoSignUp}` }),
-    p.in ? null : h("button", { type: "button", class: "btn btn-small btn-ghost", text: COPY.removePerson, "aria-label": `${COPY.removePerson}: ${personName(p)}`, onclick: () => askRemove(song, p) }));
-}
-function askRemove(song, person) {
-  app.pending = { song, person };
-  els.confirmTitle.textContent = COPY.confirmRemovePerson.replace("{name}", person.first_name || personName(person).replace(/^\p{Lu}/u, (c) => c.toLowerCase())).replace("{label}", song.label);
-  els.confirmYes.className = "btn btn-status btn-stop";
-  showModal(els.confirm, cancel);
-  els.confirmNo.focus();
-}
-async function removePerson(song, person) {
-  try {
-    await call(`/api/party/team/songs/${song.code}/people/${person.id}/remove`, { method: "POST", body: {} });
-    els.toastText.textContent = COPY.removedPerson.replace("{name}", personName(person)).replace("{label}", song.label);
-  } catch (err) {
-    if (signedOut(err)) { signOut(); return; }
-    els.toastText.textContent = err?.message || COPY.failed;
-  }
-  app.undo = null;
-  els.undo.hidden = true;
-  els.toast.hidden = false;
-  clearTimeout(app.undoTimer);
-  app.undoTimer = setTimeout(() => { els.toast.hidden = true; }, UNDO_MS);
-  app.pending = null;
-  poll();
-}
+});
 function askSong(song, pulled) {
   app.pending = { song, pulled };
   els.confirmTitle.textContent = (pulled ? COPY.confirmPull : COPY.confirmPutBack).replace("{label}", song.label);
+  els.confirmNote.hidden = true;
   els.confirmYes.className = `btn btn-status btn-${pulled ? "stop" : "go"}`;
   showModal(els.confirm, cancel);
   els.confirmNo.focus();
@@ -325,19 +341,10 @@ function askSong(song, pulled) {
 async function pullSong(song, pulled, { undoable }) {
   try {
     await call(`/api/party/team/songs/${song.code}/pull`, { method: "POST", body: { pulled } });
-    clearTimeout(app.undoTimer);
-    els.toastText.textContent = (pulled ? COPY.pulledDone : COPY.putBackDone).replace("{label}", song.label);
-    app.undo = undoable ? { song, pulled: !pulled } : null;
-    els.undo.hidden = !undoable;
-    els.toast.hidden = false;
-    app.undoTimer = setTimeout(() => { els.toast.hidden = true; app.undo = null; }, UNDO_MS);
+    toast((pulled ? COPY.pulledDone : COPY.putBackDone).replace("{label}", song.label), undoable ? { song, pulled: !pulled } : null);
   } catch (err) {
     if (signedOut(err)) { signOut(); return; }
-    els.toastText.textContent = err?.message || COPY.failed;
-    els.undo.hidden = true;
-    els.toast.hidden = false;
-    clearTimeout(app.undoTimer);
-    app.undoTimer = setTimeout(() => { els.toast.hidden = true; }, UNDO_MS);
+    toast(err?.message || COPY.failed);
   }
   app.pending = null;
   poll();
@@ -346,24 +353,11 @@ async function change(s, from, to, { undoable }) {
   try {
     await call(`/api/party/team/sessions/${s.id}/status`, { method: "POST", body: { status: to, from } });
     s.status = to;
-    if (undoable) {
-      clearTimeout(app.undoTimer);
-      app.undo = { s, from: to, to: from };
-      els.toastText.textContent = COPY.moved.replace("{names}", namesOf(s)).replace("{status}", STATUS[to].word);
-      els.undo.hidden = false;
-      els.toast.hidden = false;
-      app.undoTimer = setTimeout(() => { els.toast.hidden = true; app.undo = null; }, UNDO_MS);
-    } else {
-      els.toast.hidden = true;
-      app.undo = null;
-    }
+    if (undoable) toast(COPY.moved.replace("{names}", namesOf(s)).replace("{status}", STATUS[to].word), { s, from: to, to: from });
+    else { els.toast.hidden = true; app.undo = null; }
   } catch (err) {
     if (signedOut(err)) { signOut(); return; }
-    els.toastText.textContent = err?.code === "changed" ? COPY.changed : err?.message || COPY.failed;
-    els.undo.hidden = true;
-    els.toast.hidden = false;
-    clearTimeout(app.undoTimer);
-    app.undoTimer = setTimeout(() => { els.toast.hidden = true; }, UNDO_MS);
+    toast(err?.code === "changed" ? COPY.changed : err?.message || COPY.failed);
   }
   app.pending = null;
   poll();
@@ -371,9 +365,7 @@ async function change(s, from, to, { undoable }) {
 els.confirmYes.addEventListener("click", () => {
   const p = app.pending;
   closeModal(els.confirm);
-  if (p?.group) assignGroup(p.song, p.group);
-  else if (p?.person) removePerson(p.song, p.person);
-  else if (p?.song) pullSong(p.song, p.pulled, { undoable: true });
+  if (p?.song) pullSong(p.song, p.pulled, { undoable: true });
   else if (p) change(p.s, p.s.status, p.to, { undoable: true });
 });
 els.confirmNo.addEventListener("click", cancel);

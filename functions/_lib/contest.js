@@ -1,19 +1,20 @@
-// The holiday contest's song flow (Scooter, 17 Nov 2026, with his preview notes the same day):
-// "Enter the contest" on /track, and the song going into the vote by itself. The second door from
-// the booth onto the vote, beside scripts/promote-booth.mjs; both refuse the same things.
+// The holiday contest's song flow (Scooter, 17 Nov 2026, and his consolidated revision list of
+// 18 Nov 2026, which wins where they differ): the song on /track, and its going into the vote by
+// itself. The second door from the booth onto the vote, beside scripts/promote-booth.mjs; both
+// refuse the same things.
 //
-// Who is on a song: the group the engineer picked from the upload station when he uploaded it
-// (functions/api/booth/[[path]].js). Typing a song's code lets someone hear and download it and
-// nothing more: it never puts them on the song (Scooter: "never attach them to it as a performer").
+// Who is on a song: exactly the people the brand ambassador tapped into the booth and out for that
+// recording (a take, functions/_lib/party.js), put on it by the engineer's upload, each by their one
+// record (booth_people.guest_id), never by a match on a typed email or phone. The team re-points a
+// song that landed on the wrong people, and every re-point is kept (booth_repoints). Typing a song's
+// code with an email lets anyone hear and download it, and see who has access; it never puts them on.
 //
-// The entry is the song's, made by someone on it (Scooter's flow, preview only until he settles the
-// waiver question): they tick Enter (agreeing to the linked rules); on a solo song that is the
-// entry; on a group song they also tick "Confirmed with your group", saying the group agreed, and
-// that is the entry. Who ticked, who confirmed, when and which rules are kept on the booth row and
-// shown by first name to everyone on the song, so nobody's box speaks for the group in silence.
-// Anyone on the song can untick Enter, which takes it back out for everyone (active = 0; likes are
-// kept). The team can pull any song from /team. After the end nothing moves. Reads booth_tracks,
-// booth_people and party_guests; writes the vote's tracks only through syncEntry below.
+// Managing a song is first come (Scooter: "Whoever manages the song first - artwork, contest entry -
+// keeps those controls. No group-wide confirmation needed."): the first person on the song to add
+// artwork, set the title, tick Enter or Share it is its manager; the others hear, download and share
+// a song already shared. The manager ticks "Enter the contest" (agreeing to the linked rules) and the
+// song is in the vote by itself, solo or group; unticking takes it out (active = 0; likes kept). The
+// team can pull any song from /team. After the end nothing moves.
 import { END_SETTING_SQL, START_SETTING_SQL, votingPhase } from "./config.js";
 import { isScooterTaylor, isTestName } from "./exclusions.js";
 import { RULES_PATH, firstOf, groupLabel, holidayOn } from "./party.js";
@@ -30,22 +31,20 @@ export function cleanTitle(raw) {
 // The verdict, pure. track: the booth row (with its contest_* columns); people: [{ name (from the
 // sign-up, or null) }]. In this order: the track exists; nothing about it is Scooter Taylor's (the
 // file, the title or anyone on it); production takes no "Test …" file; the team has not pulled it;
-// somebody is on it; someone on it ticked Enter; a group song is confirmed with the group.
-// → { ok, reason, message, step: "not_entered" | "needs_group" | "in" | null }.
+// somebody is on it; its manager ticked Enter.
+// → { ok, reason, message, step: "not_entered" | "in" | null }.
 export function contestVerdict({ track, people, production } = {}) {
   const rows = Array.isArray(people) ? people : [];
   const no = (reason, message, step = null) => ({ ok: false, reason, message, step });
   if (!track || typeof track !== "object") return no("no_such_code", "no booth track has that code");
   const file = String(track.file_name ?? "");
-  // Which of the three names it is goes with the refusal, so the page can say why (Scooter, 18 Nov 2026).
   const where = isScooterTaylor(file.replace(/\.[^.]+$/, "")) ? "file" : isScooterTaylor(String(track.title ?? "")) ? "title" : rows.some((r) => r.name && isScooterTaylor(String(r.name))) ? "person" : null;
   if (where) return { ...no("scooter_taylor", "Scooter Taylor's track is never in the vote"), where };
   if (production && isTestName(file)) return no("test_file_in_production", "test files go to preview only, never production");
   if (track.pulled_at) return no("pulled_by_team", "the team took this song out of the vote");
-  if (rows.length === 0) return no("nobody_attached", "nobody is on this song: the engineer did not pick a group when it was uploaded");
+  if (rows.length === 0) return no("nobody_attached", "nobody is on this song yet: the team puts its people on it from /team");
   if (!track.contest_entered_at) return no("not_entered", "nobody on this song has entered it yet", "not_entered");
-  if (rows.length > 1 && !track.contest_confirmed_at) return no("needs_group", "entered, but not yet confirmed with the group", "needs_group");
-  return { ok: true, reason: "entered", message: rows.length > 1 ? `entered and confirmed with the group of ${rows.length}` : "entered", step: "in" };
+  return { ok: true, reason: "entered", message: "entered", step: "in" };
 }
 
 // The song's name in the vote: its title, else the group's first names ("Jay, Mo & Kim").
@@ -60,62 +59,54 @@ export function freshSlug(label, taken) {
 }
 
 // ── I/O ──────────────────────────────────────────────────────────────────────────────────────
-export const CONTEST_TRACK_SQL = "SELECT id, code, file_name, media_key, title, vote_track_id, party_session_id, pulled_at, contest_entered_by, contest_entered_at, contest_confirmed_by, contest_confirmed_at FROM booth_tracks WHERE code = ?1";
-// The entry: ticked (who, when, which rules) and, for a group, confirmed (who, when). Unticking
-// Enter clears both; unticking the confirmation clears only that. A person who ticked or confirmed
-// is marked on their own booth_people row too (contest_opt_in), so the team cannot remove them.
+export const CONTEST_TRACK_SQL = "SELECT id, code, file_name, media_key, title, vote_track_id, party_session_id, party_take_id, pulled_at, manager_email, manager_at, contest_entered_by, contest_entered_at FROM booth_tracks WHERE code = ?1";
+// The entry: ticked (who, when, which rules) by the manager. Unticking clears it.
 export const ENTER_SQL = "UPDATE booth_tracks SET contest_entered_by = COALESCE(contest_entered_by, ?2), contest_entered_at = COALESCE(contest_entered_at, ?3), contest_rules_version = ?4 WHERE id = ?1";
-export const CONFIRM_SQL = "UPDATE booth_tracks SET contest_confirmed_by = ?2, contest_confirmed_at = ?3 WHERE id = ?1";
 export const WITHDRAW_SQL = "UPDATE booth_tracks SET contest_entered_by = NULL, contest_entered_at = NULL, contest_rules_version = NULL, contest_confirmed_by = NULL, contest_confirmed_at = NULL WHERE id = ?1";
 export const MARK_PERSON_SQL = "UPDATE booth_people SET contest_opt_in = 1, contest_at = ?3, rules_version = ?4 WHERE track_id = ?1 AND email = ?2";
 export const UNMARK_ALL_SQL = "UPDATE booth_people SET contest_opt_in = 0, contest_at = NULL, rules_version = NULL WHERE track_id = ?1";
-// The team's list of contest songs: every song that is or could be in the contest (in the vote
-// now or pulled, tagged with a session at upload, or with anyone on it who signed up at /join),
-// entered or not, so a song stuck waiting is in front of the team. Counts only (never an email);
-// the people come from TEAM_SONG_PEOPLE_SQL per song.
-export const TEAM_SONGS_SQL = `SELECT b.id, b.code, b.title, b.file_name, b.party_session_id, b.pulled_at, b.contest_entered_at, b.contest_confirmed_at, t.label, t.active,
+// First come: the first person on the song to manage it becomes its manager; nobody else after.
+export const CLAIM_MANAGER_SQL = "UPDATE booth_tracks SET manager_email = ?2, manager_at = ?3 WHERE id = ?1 AND manager_email IS NULL";
+export const MANAGER_OF_SQL = "SELECT manager_email FROM booth_tracks WHERE id = ?1";
+// A person's name: from their one record when the upload or the team put them on by it
+// (guest_id), else (rows from before 18 Nov 2026) the sign-up of that same address.
+const NAME_OF = "COALESCE((SELECT g.name FROM party_guests g WHERE g.id = p.guest_id), CASE WHEN p.guest_id IS NULL THEN (SELECT g.name FROM party_guests g WHERE g.email = p.email) END)";
+// The team's songs: every song that is or could be in the contest (in the vote now or pulled, from a
+// take or a group, or with anyone on it who signed up), entered or not, and every song uploaded in
+// the last two days with nobody on it, so a song needing its people is in front of the team.
+export const TEAM_SONGS_SQL = `SELECT b.id, b.code, b.title, b.file_name, b.uploaded_at, b.party_session_id, b.party_take_id, b.pulled_at, b.contest_entered_at, b.manager_email, t.label, t.active,
   (SELECT g.name FROM party_guests g WHERE g.email = b.contest_entered_by) AS entered_by_name,
-  (SELECT g.name FROM party_guests g WHERE g.email = b.contest_confirmed_by) AS confirmed_by_name,
+  (SELECT g.name FROM party_guests g WHERE g.email = b.manager_email) AS manager_name,
   (SELECT COUNT(*) FROM booth_people p WHERE p.track_id = b.id) AS people
   FROM booth_tracks b LEFT JOIN tracks t ON t.id = b.vote_track_id
-  WHERE b.vote_track_id IS NOT NULL OR b.party_session_id IS NOT NULL
-     OR EXISTS (SELECT 1 FROM booth_people p JOIN party_guests g ON g.email = p.email WHERE p.track_id = b.id)
-     OR (b.party_session_id IS NULL AND b.uploaded_at > (CAST(strftime('%s', 'now') AS INTEGER) - 172800) * 1000
-         AND NOT EXISTS (SELECT 1 FROM booth_people p WHERE p.track_id = b.id))
+  WHERE b.vote_track_id IS NOT NULL OR b.party_session_id IS NOT NULL OR b.party_take_id IS NOT NULL
+     OR EXISTS (SELECT 1 FROM booth_people p JOIN party_guests g ON g.id = p.guest_id OR (p.guest_id IS NULL AND g.email = p.email) WHERE p.track_id = b.id)
+     OR (b.uploaded_at > (CAST(strftime('%s', 'now') AS INTEGER) - 172800) * 1000 AND NOT EXISTS (SELECT 1 FROM booth_people p WHERE p.track_id = b.id))
   ORDER BY b.uploaded_at DESC, b.id DESC LIMIT 200`;
-// One song's people for the team: the row id (what Remove names), the box, and the sign-up name
-// (NULL when not signed up). Never the email: a booth email is shown to its owner only.
-export const TEAM_SONG_PEOPLE_SQL = "SELECT p.id, p.contest_opt_in, p.attached_at, g.name FROM booth_people p LEFT JOIN party_guests g ON g.email = p.email WHERE p.track_id = ?1 ORDER BY p.attached_at, p.id";
-// The team takes someone off a song: only a person who has NOT ticked (a tick is that person's own
-// consent, and removing it is theirs to do). One person of one track. They can enter the code
-// again; they are then a late joiner as before.
-export const PERSON_ON_SONG_SQL = "SELECT contest_opt_in FROM booth_people WHERE track_id = ?1 AND id = ?2";
-export const DETACH_SQL = "DELETE FROM booth_people WHERE track_id = ?1 AND id = ?2 AND contest_opt_in = 0 RETURNING id";
+// One song's people for the team: their record and name. Never the email here (the team reads
+// contact details from the line, where they are already answered to the team only).
+export const TEAM_SONG_PEOPLE_SQL = `SELECT p.id, p.guest_id, p.email, p.attached_at, ${NAME_OF} AS name FROM booth_people p WHERE p.track_id = ?1 ORDER BY p.attached_at, p.id`;
+export const REPOINTS_SQL = "SELECT r.at, r.before_json, r.after_json, r.note, m.email AS by_email FROM booth_repoints r LEFT JOIN team_members m ON m.id = r.member_id WHERE r.track_id = ?1 ORDER BY r.at DESC, r.id DESC LIMIT 10";
 // Take out (pulled_at set, with who) or put back (NULL). Likes are kept either way.
 export const PULL_SQL = "UPDATE booth_tracks SET pulled_at = ?2, pulled_by = ?3 WHERE code = ?1 AND vote_track_id IS NOT NULL RETURNING code";
-// The people of a song with what the contest needs: their sign-up name (NULL when not signed up)
-// and their own box. Their emails stay here: only `you` is ever answered with one.
-export const CONTEST_PEOPLE_SQL = `SELECT p.email, p.contest_opt_in, p.attached_at, g.name FROM booth_people p LEFT JOIN party_guests g ON g.email = p.email WHERE p.track_id = ?1 ORDER BY p.attached_at, p.id`;
+// The people of a song with what the contest needs: their record, their name and their box. Their
+// emails stay here: only `you` is ever matched against one, and none is answered.
+export const CONTEST_PEOPLE_SQL = `SELECT p.email, p.guest_id, p.contest_opt_in, p.attached_at, ${NAME_OF} AS name FROM booth_people p WHERE p.track_id = ?1 ORDER BY p.attached_at, p.id`;
 export const TITLE_SQL = "UPDATE booth_tracks SET title = ?2 WHERE id = ?1";
-// The group the engineer picks: only one at the upload station (out of the booth, its song not
-// uploaded yet). The upload moves it to done.
-export const BOOTH_SESSION_SQL = "SELECT id FROM party_sessions WHERE id = ?1 AND status = 'out' AND done_at IS NULL";
+// The upload, from a take: the song's people by their one record, the take claimed, each person done.
+export const ATTACH_PERSON_SQL = "INSERT OR IGNORE INTO booth_people (track_id, email, attached_at, guest_id) VALUES (?1, ?2, ?3, ?4)";
+export const TAG_TAKE_SQL = "UPDATE booth_tracks SET party_take_id = ?2 WHERE id = ?1";
 export const SESSION_DONE_SQL = "UPDATE party_sessions SET done_at = ?2 WHERE id = ?1 AND done_at IS NULL";
 // The upload as a line event (member_id 0: the booth page, not a team member).
 export const UPLOAD_EVENT_SQL = "INSERT INTO party_status_events (session_id, from_status, to_status, member_id, at) VALUES (?1, 'upload', 'done', 0, ?2)";
-export const SESSION_EMAILS_SQL = "SELECT email FROM party_guests WHERE session_id = ?1 ORDER BY joined_at, id";
-export const ATTACH_TAGGED_SQL = "INSERT OR IGNORE INTO booth_people (track_id, email, attached_at) VALUES (?1, ?2, ?3)";
-export const TAG_SQL = "UPDATE booth_tracks SET party_session_id = ?2 WHERE id = ?1";
-// The team puts a group on a song uploaded with nobody on it (the engineer uploaded before the group
-// reached the upload station, or a walk-up who signed up afterwards): any group whose song is not
-// uploaded yet (waiting, in the booth or at the upload station). The song must still have nobody on
-// it and no group; the group then moves to done, as an upload would have moved it.
-export const ASSIGN_SESSION_SQL = "SELECT id, status, done_at FROM party_sessions WHERE id = ?1";
-export const ASSIGN_TAG_SQL = "UPDATE booth_tracks SET party_session_id = ?2 WHERE id = ?1 AND party_session_id IS NULL AND NOT EXISTS (SELECT 1 FROM booth_people p WHERE p.track_id = ?1)";
-export const ASSIGN_DONE_SQL = "UPDATE party_sessions SET status = 'out', status_at = ?2, done_at = ?2 WHERE id = ?1 AND done_at IS NULL";
-export const SONG_PEOPLE_COUNT_SQL = "SELECT COUNT(*) AS n FROM booth_people WHERE track_id = ?1";
-// The groups an engineer can pick: those at the upload station, the longest waiting first, first names only.
-export const IN_BOOTH_SQL = "SELECT s.id, s.status_at, g.name FROM party_sessions s JOIN party_guests g ON g.session_id = s.id WHERE s.status = 'out' AND s.done_at IS NULL ORDER BY s.status_at, s.id, g.joined_at, g.id";
+// The team's re-point: the song's people become exactly the records picked.
+export const DETACH_ALL_SQL = "DELETE FROM booth_people WHERE track_id = ?1";
+export const GUESTS_BY_ID_SQL = "SELECT id, name, email FROM party_guests WHERE id = ?1";
+export const REPOINT_LOG_SQL = "INSERT INTO booth_repoints (track_id, member_id, at, before_json, after_json, note) VALUES (?1, ?2, ?3, ?4, ?5, ?6)";
+// A manager no longer on the song stops managing it (the next person on it to manage takes over).
+export const DROP_GONE_MANAGER_SQL = "UPDATE booth_tracks SET manager_email = NULL, manager_at = NULL WHERE id = ?1 AND manager_email IS NOT NULL AND NOT EXISTS (SELECT 1 FROM booth_people p WHERE p.track_id = ?1 AND p.email = booth_tracks.manager_email)";
+// Everyone who has signed up, for the team's re-point picker (team only).
+export const ALL_GUESTS_SQL = "SELECT id, name, email, phone, joined_at FROM party_guests ORDER BY joined_at DESC, id DESC LIMIT 300";
 
 // Whether the song is in the vote right now (its vote track is active).
 export async function isEntered(db, track) {
@@ -166,59 +157,82 @@ export async function syncEntry(env, song, now = Date.now()) {
   return { entered: true, verdict };
 }
 
-// What the page sees under the box, the same for everyone on the song: whether it is entered,
-// who ticked and who confirmed (first names), and the people on it. `you.performer` says whether the
-// asker is on the song at all: someone who only typed the code hears and downloads, nothing more.
-// First names only; the one email is the asker's own, and it is not in here.
+// Who manages the song (first come), as the asker may see it: their first name, and whether it is
+// the asker. → { manager: first name | null, you_manage: bool }.
+const managerOf = (track, people, email) => {
+  if (!track.manager_email) return { manager: null, you_manage: false };
+  const p = people.find((x) => x.email === track.manager_email);
+  return { manager: p?.name ? firstOf(p.name) : COPY_SOMEONE, you_manage: Boolean(email) && track.manager_email === email };
+};
+const COPY_SOMEONE = "someone on the song";
+
+// What /track sees, the same for everyone with the code: who has access (first names), who manages
+// it, whether it is entered and by whom. `you.performer` says whether the asker is one of the song's
+// people (they may manage it if nobody does yet); `you.manager` whether they are its manager. First
+// names only; the one email is the asker's own, and it is not in here.
 export function contestView(song, email, { entered, closed, production }) {
   const { track, people } = song;
   const verdict = contestVerdict({ track, people, production });
-  const nameOf = (e) => { const p = people.find((x) => x.email === e); return p?.name ? firstOf(p.name) : null; };
   const me = people.find((p) => p.email === email);
+  const { manager, you_manage } = managerOf(track, people, email);
+  const entrant = people.find((p) => p.email === track.contest_entered_by);
   return {
     on: true,
     rules_url: RULES_PATH,
     title: track.title ?? "",
     entered: Boolean(entered),
     closed: Boolean(closed),
-    group: people.length > 1,
     ticked: Boolean(track.contest_entered_at),
-    confirmed: Boolean(track.contest_confirmed_at),
-    ticked_by: track.contest_entered_at ? nameOf(track.contest_entered_by) : null,
-    confirmed_by: track.contest_confirmed_at ? nameOf(track.contest_confirmed_by) : null,
+    ticked_by: track.contest_entered_at ? (entrant?.name ? firstOf(entrant.name) : COPY_SOMEONE) : null,
     step: verdict.step,
-    you: { performer: Boolean(me), signed_up: Boolean(me?.name) },
-    nobody: people.length === 0, // no group on it yet: the team puts one on from /team
+    manager,
+    you: { performer: Boolean(me), manager: you_manage, can_manage: Boolean(me) && (you_manage || !track.manager_email), signed_up: Boolean(me?.name) },
+    nobody: people.length === 0, // nobody on it yet: the team puts its people on it from /team
+    // "Jeff, John and Scooter have access to this song" (Scooter, 18 Nov 2026).
+    access: people.map((p) => (p.name ? firstOf(p.name) : null)).filter(Boolean),
     people: people.map((p) => ({ first_name: p.name ? firstOf(p.name) : null, you: p.email === email })),
     blocked: ["scooter_taylor", "test_file_in_production", "pulled_by_team"].includes(verdict.reason) ? verdict.reason : null,
-    // For Scooter Taylor's rule: which name set it off ("file", "title" or "person"), never whose.
-    blocked_where: verdict.reason === "scooter_taylor" ? verdict.where : null,
+    // Where the page says it: a preview's test entry, or the live site (Scooter, 18 Nov 2026: neutral
+    // words, "No policy framing, and nothing about who can or cannot enter").
+    production: Boolean(production),
   };
 }
 export { holidayOn };
 
 // The team's view of one song on /team: its name in the vote (or, never entered, its title, its
-// people's first names, or its file), in or out, who is on it and who it waits on.
-export const teamSong = (row, people = []) => ({
+// people's first names, or its file), in or out, who is on it, who manages it, and its re-points.
+export const teamSong = (row, people = [], repoints = []) => ({
   code: row.code,
   label: row.label || cleanTitle(row.title ?? "") || groupLabel(people.filter((p) => p.name).map((p) => firstOf(p.name))) || String(row.file_name ?? "").replace(/\.[^.]+$/, "") || row.code,
+  file_name: row.file_name,
+  uploaded_at: row.uploaded_at ? new Date(row.uploaded_at).toISOString() : null,
   entered: row.active === 1,
   pulled: Boolean(row.pulled_at),
   pulled_at: row.pulled_at ? new Date(row.pulled_at).toISOString() : null,
   people: row.people,
-  // Nobody on it and no group: the team picks the group that recorded it (POST …/songs/<code>/group).
-  needs_group: row.people === 0 && !row.party_session_id,
+  needs_people: row.people === 0,
   ticked: Boolean(row.contest_entered_at),
-  confirmed: Boolean(row.contest_confirmed_at),
   ticked_by: row.contest_entered_at && row.entered_by_name ? firstOf(row.entered_by_name) : null,
-  confirmed_by: row.contest_confirmed_at && row.confirmed_by_name ? firstOf(row.confirmed_by_name) : null,
-  members: people.map((p) => ({ id: p.id, first_name: p.name ? firstOf(p.name) : null, signed_up: Boolean(p.name), in: p.contest_opt_in === 1, attached_at: new Date(p.attached_at).toISOString() })),
+  manager: row.manager_email ? (row.manager_name ? firstOf(row.manager_name) : COPY_SOMEONE) : null,
+  members: people.map((p) => ({ id: p.id, guest_id: p.guest_id ?? null, name: p.name ?? null, first_name: p.name ? firstOf(p.name) : null, signed_up: Boolean(p.name), attached_at: new Date(p.attached_at).toISOString() })),
+  repoints: repoints.map((r) => ({ at: new Date(r.at).toISOString(), by: r.by_email ?? null, before: namesIn(r.before_json), after: namesIn(r.after_json), note: r.note || "" })),
 });
+const namesIn = (json) => { try { return (JSON.parse(json) ?? []).map((p) => p.name ?? "").filter(Boolean); } catch { return []; } };
 
-// The team's songs with their people, in one round trip for the people.
+// The team's songs with their people and re-points, in one round trip each.
 export async function teamSongs(db) {
   const rows = (await db.prepare(TEAM_SONGS_SQL).all()).results ?? [];
   if (rows.length === 0) return [];
-  const people = await db.batch(rows.map((r) => db.prepare(TEAM_SONG_PEOPLE_SQL).bind(r.id)));
-  return rows.map((r, i) => teamSong(r, people[i].results ?? []));
+  const [people, repoints] = await Promise.all([
+    db.batch(rows.map((r) => db.prepare(TEAM_SONG_PEOPLE_SQL).bind(r.id))),
+    db.batch(rows.map((r) => db.prepare(REPOINTS_SQL).bind(r.id))),
+  ]);
+  return rows.map((r, i) => teamSong(r, people[i].results ?? [], repoints[i].results ?? []));
+}
+
+// First come: the first person on the song to manage it becomes its manager. → true when the asker
+// manages it now (just claimed, or already theirs); false when someone else does.
+export async function claimManager(db, trackId, email, now = Date.now()) {
+  await db.prepare(CLAIM_MANAGER_SQL).bind(trackId, email, now).run();
+  return (await db.prepare(MANAGER_OF_SQL).bind(trackId).first())?.manager_email === email;
 }

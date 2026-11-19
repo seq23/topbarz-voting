@@ -40,14 +40,15 @@ function dressHome() {
   const H = HOLIDAY.home;
   document.title = H.pageTitle;
   lede.textContent = H.lede;
-  lede.after(h("p", { class: "prize-line" }, h("span", { text: `${HOLIDAY.prize} ` }), h("span", { class: "stand-in-mark", text: `(${HOLIDAY.prizeMark})` })));
   set("tbz-tracks-title", H.tracksTitle);
   set("tbz-notopen-note", H.notOpen);
   const empty = document.querySelector("#tbz-empty p:not(.empty-title)");
   if (empty) empty.textContent = H.emptyNote;
   for (const id of ["tbz-gallery", "tbz-strip", "tbz-lightbox"]) document.getElementById(id)?.setAttribute("aria-label", H.galleryLabel);
-  const prize = document.getElementById("tbz-prize-title")?.nextElementSibling;
-  if (prize) prize.replaceChildren(h("span", { text: `${HOLIDAY.prize} ` }), h("span", { class: "stand-in-mark", text: `(${HOLIDAY.prizeMark})` }));
+  // No prize line until Scooter sends the final terms (18 Nov 2026), and no end date until he sends
+  // the cutoff (app.js hides the end lines while /api/state has none).
+  document.querySelector('section[aria-labelledby="tbz-prize-title"]')?.setAttribute("hidden", "");
+
   for (const el of document.querySelectorAll(".foot-mark")) el.textContent = H.footMark;
 }
 

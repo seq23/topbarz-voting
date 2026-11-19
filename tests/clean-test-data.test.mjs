@@ -42,6 +42,28 @@ test("clean-test-data picks test records only, and never the kept song or anyone
   assert.deepEqual([none.guests.length, none.sessionIds.length, none.tracks.length], [0, 0, 0]);
 });
 
+// Since the 18 Nov rebuild a song's people name their sign-up (by guest_id): the kept
+// song keeps exactly those people, whatever email they typed, and a song whose named people are all
+// test sign-ups is a test upload.
+test("clean-test-data follows a song's people by their sign-up, not by a matching email", () => {
+  const g = [
+    { id: 20, session_id: 30, name: "Test Lee", email: "lee@example.com" },
+    { id: 21, session_id: 31, name: "Test Ray", email: "ray@example.com" },
+    { id: 22, session_id: 32, name: "Dana Real", email: "dana@example.com" },
+  ];
+  const t = [
+    { id: 200, code: "7001", file_name: "Kept.mp3", party_session_id: null },
+    { id: 201, code: "7002", file_name: "Jingle.mp3", party_session_id: null },
+    { id: 202, code: "7003", file_name: "Real.mp3", party_session_id: null },
+  ];
+  // Test Lee is on the kept song under another email: kept. Test Ray's song is a test upload. A song
+  // whose person is real stays, even though an old row typed a test sign-up's email.
+  const people = [{ track_id: 200, email: "other@example.com", guest_id: 20 }, { track_id: 201, email: "ray@example.com", guest_id: 21 }, { track_id: 202, email: "ray@example.com", guest_id: 22 }];
+  const p = selectTestRows({ guests: g, visits: [], tracks: t, people }, { keep: ["7001"] });
+  assert.deepEqual(p.guests.map((x) => x.id), [21]);
+  assert.deepEqual(p.tracks.map((x) => x.code), ["7002"]);
+});
+
 test("clean-test-data refuses production, and a run with no kept song named", async () => {
   await assert.rejects(cleanTestData({ env: "production", db: "topbarz-voting" }, { keep: [] }), /REFUSED/);
   for (const argv of [["--env", "production", "--keep", "4380"], ["--env", "preview"]]) {

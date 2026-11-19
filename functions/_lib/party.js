@@ -20,7 +20,7 @@ export const partyTrackClause = (env, alias = "t") => (holidayOn(env) ? ` AND ${
 
 // Which rules a guest agreed to when they ticked "Enter the contest". A new text of the rules is a
 // new version, so each tick records the words that were on the page.
-export const RULES_VERSION = "holiday-2026-draft-2";
+export const RULES_VERSION = "holiday-2026-draft-3";
 export const RULES_PATH = "/holiday-rules";
 
 export const PARTY_NAME_MAX = 80;
@@ -37,7 +37,6 @@ export const LANES = ["waiting", "booth", "upload", "done"];
 export const laneOf = (s) => (s?.status === "out" ? (s.done_at ? "done" : "upload") : s?.status ?? null);
 // A lane as the two columns: [status, done?].
 export const LANE_COLUMNS = { waiting: ["waiting", false], booth: ["booth", false], upload: ["out", false], done: ["out", true] };
-export const GROUP_MAX = 10; // the most people one sign-up phone can put in one group
 export const OUT_SHOWN = 30; // the most recent sessions that are out, on the team's line
 
 export const isSessionCode = (s) => typeof s === "string" && new RegExp(`^[${SESSION_LETTERS}]{4}$`).test(s);
@@ -79,23 +78,29 @@ export function parseGuest(b) {
   if (instagram === null) return refuse("instagram", "bad_instagram", "That Instagram name does not look right. Leave it empty if you like.");
   return { ok: true, value: { name, phone, email, city, instagram } };
 }
-// The body of POST /api/party/join: one person ({ name, phone, … }) or a group signed up on one
-// phone, handed around ({ guests: [{ name, phone, email, city, instagram }, …] }, 1 to 10, each
-// their own slot). → { ok: true, value: { guests } } or the first problem, with its slot (0-based).
+// The body of POST /api/party/join: ONE person (Scooter, 18 Nov 2026: "Each person signs up on
+// their own ... No group setup on the guest side"). { name, phone, email, city, instagram?, website }.
+// A list of several people (the old hand-the-phone-around form) is refused with what to do instead.
+// → { ok: true, value: { guests: [one] } } or the problem.
 export function parseSignUp(body) {
   const b = body && typeof body === "object" ? body : {};
   if (b.website !== undefined && b.website !== "") return refuse("website", "rejected", "That did not go through.");
-  const slots = Array.isArray(b.guests) ? b.guests : [b];
-  if (slots.length < 1) return refuse("guests", "guests_required", "Add at least one person.");
-  if (slots.length > GROUP_MAX) return refuse("guests", "too_many", `A group is at most ${GROUP_MAX} people.`);
-  const guests = [];
-  for (let i = 0; i < slots.length; i++) {
-    const one = parseGuest(slots[i]);
-    if (!one.ok) return { ...one, slot: i };
-    if (guests.some((g) => g.email === one.value.email)) return refuse("email", "same_email", "Two people in this group have the same email. Each person uses their own.", { slot: i });
-    guests.push(one.value);
-  }
-  return { ok: true, value: { guests } };
+  if (Array.isArray(b.guests) && b.guests.length !== 1) return refuse("guests", "one_person", "Each person signs up on their own phone, with their own details.");
+  const one = parseGuest(Array.isArray(b.guests) ? b.guests[0] : b);
+  if (!one.ok) return { ...one, slot: 0 };
+  return { ok: true, value: { guests: [one.value] } };
+}
+
+// A sign-up the team should look at twice before tapping it into the booth (Scooter, 18 Nov 2026:
+// "flag stale test signups at the upload pick ... so test data can't get picked in the first
+// place"): "test" for a test name or address, "stale" for one made more than STALE_HOURS ago.
+export const STALE_HOURS = 12;
+const TEST_EMAIL = /(^test[^@]*@)|(@(example\.(com|org|net)|test\.[a-z]+|mailinator\.com)$)/i;
+export function guestFlags(g, now = Date.now()) {
+  const flags = [];
+  if (/^test\b/i.test(String(g?.name ?? "").trim()) || TEST_EMAIL.test(String(g?.email ?? ""))) flags.push("test");
+  if (Number.isFinite(g?.joined_at) && now - g.joined_at > STALE_HOURS * 3600 * 1000) flags.push("stale");
+  return flags;
 }
 
 // The part of a guest anyone but the team sees.
@@ -165,7 +170,7 @@ export const INSERT_GUEST_SQL = "INSERT INTO party_guests (session_id, name, pho
 export const REJOIN_GUEST_SQL = "UPDATE party_guests SET session_id = ?2, name = ?3, phone = ?4, city = ?5, instagram = ?6, guest_key = ?7, joined_at = ?8, ip_hash = ?9 WHERE id = ?1";
 export const VISIT_SQL = "INSERT INTO party_visits (guest_id, session_id, joined_at) VALUES (?1, ?2, ?3)";
 // The whole line, small enough to read at once at a bar (sessions with their guests).
-export const LINE_SESSIONS_SQL = "SELECT id, code, status, done_at, created_at, status_at, texted_at FROM party_sessions WHERE id IN (SELECT DISTINCT session_id FROM party_guests)";
+export const LINE_SESSIONS_SQL = "SELECT id, code, status, done_at, created_at, status_at, texted_at, take_id FROM party_sessions WHERE id IN (SELECT DISTINCT session_id FROM party_guests)";
 export const LINE_GUESTS_SQL = "SELECT id, session_id, name, phone, email, city, instagram, joined_at FROM party_guests ORDER BY joined_at, id";
 export const SESSION_NAMES_SQL = "SELECT name FROM party_guests WHERE session_id = ?1 ORDER BY joined_at, id";
 // To a lane, from the lane the phone saw: ?2 status, ?3 done_at (or NULL), ?4 now, ?5 the status
@@ -173,6 +178,35 @@ export const SESSION_NAMES_SQL = "SELECT name FROM party_guests WHERE session_id
 export const SET_STATUS_SQL = "UPDATE party_sessions SET status = ?2, done_at = ?3, status_at = ?4 WHERE id = ?1 AND status = ?5 AND ((done_at IS NULL) = ?6) RETURNING status, done_at, status_at";
 export const STATUS_EVENT_SQL = "INSERT INTO party_status_events (session_id, from_status, to_status, member_id, at) VALUES (?1, ?2, ?3, ?4, ?5)";
 export const TEXTED_SQL = "UPDATE party_sessions SET texted_at = ?2 WHERE id = ?1 RETURNING texted_at";
+// ── Takes: who is on the song (Scooter, 18 Nov 2026: "The brand ambassador taps each person into
+// the booth and out when the song is done. Those taps define who's on the song.") ────────────────
+// The open take: someone of it still in the booth and no song yet. A person tapped in joins it, or
+// starts a new one. The newest, if (after an undo) there were ever two.
+export const OPEN_TAKE_SQL = "SELECT id FROM party_takes WHERE closed_at IS NULL AND track_id IS NULL ORDER BY opened_at DESC, id DESC LIMIT 1";
+export const NEW_TAKE_SQL = "INSERT INTO party_takes (opened_at) VALUES (?1) RETURNING id";
+export const SET_TAKE_SQL = "UPDATE party_sessions SET take_id = ?2 WHERE id = ?1";
+// After a tap out (or back to waiting): the take closes once none of its people is in the booth.
+export const CLOSE_TAKE_SQL = "UPDATE party_takes SET closed_at = ?2 WHERE id = ?1 AND closed_at IS NULL AND track_id IS NULL AND NOT EXISTS (SELECT 1 FROM party_sessions s WHERE s.take_id = ?1 AND s.status = 'booth')";
+// Back in the booth from the upload station (an undo): the take opens again, until its song is up.
+export const REOPEN_TAKE_SQL = "UPDATE party_takes SET closed_at = NULL WHERE id = ?1 AND track_id IS NULL";
+export const TAKE_OF_SQL = "SELECT t.id, t.closed_at, t.track_id FROM party_takes t JOIN party_sessions s ON s.take_id = t.id WHERE s.id = ?1";
+// The next take at the upload station: closed, no song yet, with someone still waiting on it; the
+// oldest closed first (the engineer's next file is theirs).
+export const NEXT_TAKE_SQL = `SELECT t.id, t.closed_at FROM party_takes t
+  WHERE t.closed_at IS NOT NULL AND t.track_id IS NULL
+    AND EXISTS (SELECT 1 FROM party_sessions s WHERE s.take_id = t.id AND s.status = 'out' AND s.done_at IS NULL)
+  ORDER BY t.closed_at, t.id LIMIT 1`;
+export const STATION_TAKES_SQL = `SELECT COUNT(*) AS n FROM party_takes t WHERE t.closed_at IS NOT NULL AND t.track_id IS NULL
+  AND EXISTS (SELECT 1 FROM party_sessions s WHERE s.take_id = t.id AND s.status = 'out' AND s.done_at IS NULL)`;
+// A take's people as the upload puts them on the song: everyone of it at the upload station, in the
+// order they were tapped in. Their one record (guest id), their email (the contact the code is read
+// against) and their name.
+export const TAKE_PEOPLE_SQL = `SELECT s.id AS session_id, g.id AS guest_id, g.email, g.name, g.joined_at FROM party_sessions s JOIN party_guests g ON g.session_id = s.id
+  WHERE s.take_id = ?1 AND s.status = 'out' AND s.done_at IS NULL ORDER BY s.status_at, s.id`;
+// Who is still in the booth now (first names for the booth page, while no take is at the station).
+export const IN_BOOTH_NOW_SQL = "SELECT g.name FROM party_sessions s JOIN party_guests g ON g.session_id = s.id WHERE s.status = 'booth' ORDER BY s.status_at, s.id";
+export const CLAIM_TAKE_SQL = "UPDATE party_takes SET track_id = ?2 WHERE id = ?1 AND track_id IS NULL";
+
 export const GIFS_SQL = "SELECT giphy_id, url, width, height, title FROM party_gifs WHERE removed_at IS NULL ORDER BY added_at, id";
 export const ADD_GIF_SQL = "INSERT INTO party_gifs (giphy_id, url, width, height, title, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT (giphy_id) DO UPDATE SET removed_at = NULL, url = excluded.url";
 export const REMOVE_GIF_SQL = "UPDATE party_gifs SET removed_at = ?2 WHERE giphy_id = ?1 AND removed_at IS NULL";

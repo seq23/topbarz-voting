@@ -15,8 +15,17 @@ import { codeDigits, gatePayload, heldToKeep, pendingRecord, resendLabel, second
 const FIELDS = ["email", "name", "city"];
 const DONE_SHOWN_MS = 900;
 const AFTER_CLOSE_MS = 350;
-const TITLE = { details: "One quick step to count your vote", code: "Enter the code we emailed you" };
-const IDLE = { details: "Count my vote", code: "Check my code" };
+const PLAIN = { title: { details: "One quick step to count your vote", code: "Enter the code we emailed you" }, idle: { details: "Count my vote", code: "Check my code" } };
+// While the holiday party is on: lighter words (Scooter, 18 Nov 2026: "Lighter popup copy - free to
+// vote, low friction"). The 6-digit code is still what counts a vote.
+export const PARTY_GATE = {
+  title: { details: "Voting is free", code: "Check your email" },
+  idle: { details: "Send my code", code: "Count my vote" },
+  fine: "Your email counts your vote and gets you the results. Top Barz updates only if you tick the box.",
+};
+const party = () => document.documentElement?.classList?.contains?.("is-holiday") === true;
+const TITLE = new Proxy({}, { get: (_, k) => (party() ? PARTY_GATE.title : PLAIN.title)[k] });
+const IDLE = new Proxy({}, { get: (_, k) => (party() ? PARTY_GATE.idle : PLAIN.idle)[k] });
 
 // hooks: { onVoter(response), runHeld(action) → Promise<{ ok, done?, after? }>, heldLine(action) → string,
 //          codesOn() → boolean (the server says it emails codes),
@@ -125,6 +134,9 @@ export function createGate(hooks) {
     codeStep.hidden = next !== "code";
     codeActions.hidden = next !== "code";
     title.textContent = TITLE[next];
+    // The fine print's first words, lighter while the party is on (its Privacy note link stays).
+    const fine = document.querySelector?.(".gate-fine")?.firstChild;
+    if (party() && fine?.nodeType === 3) fine.textContent = `${PARTY_GATE.fine} `;
     showAlert("");
     showCodeError("");
     showCodeNote("");

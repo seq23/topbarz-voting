@@ -82,8 +82,16 @@ function parseTime(value) {
   return Number.isFinite(ms) ? ms : null;
 }
 
-// The end time for this environment, in ms. Order: a `settings` row (only where the environment
-// allows it — preview), then the env var VOTING_ENDS_AT, then the constant above.
+// The holiday party's end: NOT SET (Scooter, 18 Nov 2026: "make sure nothing actually closes voting
+// on that date - it was placeholder text. I'll confirm the real cutoff date and time before anything
+// counts down or closes"). While the party is on (HOLIDAY_EVENT) and this is null, nothing closes
+// the vote and nothing counts down: /api/state answers voting_ends_at null. When Scooter sends the
+// cutoff, it goes here, as an ISO time in UTC, through a PR.
+export const PARTY_VOTING_ENDS_AT = null;
+
+// The end time for this environment, in ms (Infinity: no end set). Order: a `settings` row (only
+// where the environment allows it — preview), then the env var VOTING_ENDS_AT, then, while the
+// holiday party is on, PARTY_VOTING_ENDS_AT (null = no end), else the constant above.
 export function votingEndsAtMs(env, settingsValue) {
   if (env?.ALLOW_END_OVERRIDE === "1") {
     const fromSettings = parseTime(settingsValue);
@@ -91,6 +99,7 @@ export function votingEndsAtMs(env, settingsValue) {
   }
   const fromEnv = parseTime(env?.VOTING_ENDS_AT);
   if (fromEnv !== null) return fromEnv;
+  if (env?.HOLIDAY_EVENT === "on") return parseTime(PARTY_VOTING_ENDS_AT) ?? Infinity;
   return Date.parse(VOTING_ENDS_AT);
 }
 

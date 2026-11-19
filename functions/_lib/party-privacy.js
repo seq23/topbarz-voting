@@ -6,10 +6,10 @@ export const PARTY_PRIVACY = {
   description: "What the Top Barz Christmas party collects at sign-up and in the vote, why, and who sees it. Draft.",
   html: `<h1>Privacy note</h1>
   <p class="draft-banner" role="note">DRAFT. This note is checked again with the final contest rules before the party goes live.</p>
-  <p>This is the Top Barz Christmas party at Dick and Jane's. Here is what we collect when you sign up for the booth and when you vote, and why.</p>
+  <p>This is the Top Barz Christmas party at Dick &amp; Jane's. Here is what we collect when you sign up for the booth and when you vote, and why.</p>
   <h2>When you sign up for the booth</h2>
   <ul>
-    <li>Your name, phone number, email and city, and your Instagram if you give it. In a group, each person fills in their own details.</li>
+    <li>Your name, phone number, email and city, and your Instagram if you give it. Everyone signs up on their own.</li>
     <li>We use them to run the line, to text you when it is your turn, to put your song with the right people, to run the contest and to reach the winner.</li>
     <li>The signed-in Top Barz team sees your name, phone, email, city and Instagram on the line. A team member texts you from their own phone when it is your turn.</li>
     <li>Your phone and email are never shown on the site. Next to a song, people see first names only.</li>

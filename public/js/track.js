@@ -8,11 +8,12 @@
 // reads the vote. The device remembers ONE thing, the email typed here (localStorage
 // tbz.booth.email), never the code; the only email it shows is that one (`you.email`).
 //
-// While the holiday party is on (Scooter's preview notes, 17 Nov 2026) the page is simpler: the
-// code is for hearing and downloading, and only the song's own people (the group picked at the
-// upload) see the rest: album artwork, Enter the contest (then the song title and, on a group song,
-// "Confirmed with your group"), and Share. There is no Make public switch: Share publishes the
-// listen page itself.
+// While the holiday party is on (Scooter's preview notes, 17 Nov 2026, and his revision list of
+// 18 Nov) the page is simpler: anyone with the code and their email hears, downloads and sees who
+// has access ("Jeff, John and Scooter have access to this song"); the song's manager, the first
+// person on it to manage it, has the rest: album artwork, Enter the contest (then the song title),
+// and Share. There is no Make public switch: Share publishes the listen page itself. Others on the
+// song are told who manages it, and share it once it is shared.
 import { api } from "./api.js";
 import { $, h } from "./dom.js";
 import { boothShareMessage, detectPlatform, listenLink, safeMediaUrl, smsHref } from "./logic.js";
@@ -20,7 +21,7 @@ import { artworkFor, cleanEmail, cleanPeople, cleanTrack, codeDigits, codeFromSe
 import { createControls, createPlayer } from "./player.js";
 import { COPY } from "./track-copy.js";
 import { festive } from "./festive.js";
-import { LINE_POLL_MS, cleanContest, contestLine, groupLabel } from "./party-rules.js";
+import { LINE_POLL_MS, accessLine, cleanContest, contestLine, managerLine } from "./party-rules.js";
 
 const els = {
   headline: $("tbz-track-headline"),
@@ -68,11 +69,9 @@ const els = {
   contestBox: $("tbz-contest-box"),
   contestLabel: $("tbz-contest-label"),
   contestLine: $("tbz-contest-line"),
-  contestPeople: $("tbz-contest-people"),
   contestMsg: $("tbz-contest-msg"),
-  confirmRow: $("tbz-confirm-row"),
-  confirmBox: $("tbz-confirm-box"),
-  confirmLabel: $("tbz-confirm-label"),
+  access: $("tbz-access"),
+  manager: $("tbz-manager"),
 };
 
 const app = { looking: null, track: null, row: null, platform: detectPlatform(navigator), flipping: false, voting: false, entering: false, contestTimer: null };
@@ -137,8 +136,9 @@ function drawShare() {
   const pub = Boolean(t?.public && t.share_id);
   els.publicBtn.setAttribute("aria-checked", pub ? "true" : "false");
   els.publicNote.textContent = pub ? COPY.publicOn : COPY.publicOff;
-  // The party's page has no switch: anyone on the song can Share, and sharing publishes it.
-  const canShare = t?.contest ? t.contest.you.performer : pub;
+  // The party's page has no switch: the manager's Share publishes it; once it is shared, anyone on
+  // the song can share the same link.
+  const canShare = t?.contest ? (t.contest.you.can_manage || (t.contest.you.performer && pub)) : pub;
   els.share.hidden = !canShare;
   if (!canShare) { els.shareMsg.hidden = true; els.shareMsg.textContent = ""; }
 }
@@ -163,7 +163,7 @@ function say(text) {
   els.msg.hidden = !text;
 }
 // Why the server said no to a change, in the page's words.
-const refusal = (err, fallback) => (err?.status === 403 || err?.code === "not_attached" ? COPY.notAttached : err?.status === 429 || err?.code === "rate_limited" ? COPY.tooMany : fallback);
+const refusal = (err, fallback) => (err?.code === "not_manager" ? err.message || fallback : err?.status === 403 || err?.code === "not_attached" ? COPY.notAttached : err?.status === 429 || err?.code === "rate_limited" ? COPY.tooMany : fallback);
 function clearTrack() {
   if (app.row) { player.drop(app.row.slug); app.row.el.remove(); }
   app.row = null;
@@ -286,28 +286,29 @@ function drawContest() {
   const c = app.track?.contest ?? null;
   clearTimeout(app.contestTimer);
   const performer = Boolean(c?.you.performer);
+  const manages = Boolean(c?.you.can_manage);
   for (const el of [els.publicRow, els.publicNote, els.publicGroup, els.voteRow, els.voteNote]) el.hidden = Boolean(c);
-  els.artRow.hidden = Boolean(c) && !performer;
+  els.artRow.hidden = Boolean(c) && !manages;
+  els.access.hidden = !c;
+  els.access.textContent = c ? accessLine(COPY, c.access) : "";
   els.listenOnly.hidden = !c || performer;
-  els.listenOnly.textContent = c?.nobody ? COPY.noGroupYet : COPY.listenOnly;
-  els.contest.hidden = !performer;
+  els.listenOnly.textContent = COPY.listenOnly;
+  const whoManages = c ? (managerLine(COPY, c) || (performer && c.you.manager ? COPY.youManage : performer && manages ? COPY.firstToManage : "")) : "";
+  els.manager.textContent = whoManages;
+  els.manager.hidden = !whoManages;
+  // The entry's status is everyone's to see; its box is the manager's.
+  els.contest.hidden = !c || c.nobody;
   drawShare();
   if (!c) return;
-  if (performer) {
-    els.contestBox.checked = c.ticked;
-    els.contestBox.disabled = c.closed || Boolean(c.blocked) || app.entering;
-    els.titleForm.hidden = !c.ticked;
-    els.title.disabled = c.closed;
-    els.titleSave.disabled = c.closed;
-    const group = groupLabel(c.people.map((p) => p.first_name).filter(Boolean));
-    els.confirmRow.hidden = !(c.group && c.ticked);
-    els.confirmBox.checked = c.confirmed;
-    els.confirmBox.disabled = c.closed || Boolean(c.blocked) || app.entering;
-    els.confirmLabel.textContent = COPY.contestConfirm.replace("{group}", group);
-    els.contestLine.textContent = contestLine(COPY, c);
-    els.contestLine.dataset.entered = c.entered ? "yes" : "no";
-    els.contestPeople.textContent = c.people.length ? COPY.contestOnSong.replace("{group}", group || COPY.contestSomeone) : "";
-  }
+  els.contestBox.closest(".contest-check").hidden = !manages;
+  els.contestHelp.hidden = !manages;
+  els.contestBox.checked = c.ticked;
+  els.contestBox.disabled = c.closed || Boolean(c.blocked) || app.entering;
+  els.titleForm.hidden = !(manages && c.ticked);
+  els.title.disabled = c.closed;
+  els.titleSave.disabled = c.closed;
+  els.contestLine.textContent = contestLine(COPY, c);
+  els.contestLine.dataset.entered = c.entered ? "yes" : "no";
   app.contestTimer = setTimeout(refreshContest, LINE_POLL_MS);
 }
 async function refreshContest() {
@@ -321,7 +322,7 @@ async function refreshContest() {
   } catch {}
   if (app.track === track) drawContest();
 }
-// Enter (with the rules) or step out; on a group song, the confirmation with the group.
+// Enter (with the rules) or step out: the manager's (first come; the server says who manages it).
 async function sendContest(body, box) {
   const track = app.track;
   if (!track?.contest || app.entering) return;
@@ -329,7 +330,6 @@ async function sendContest(body, box) {
   app.entering = true;
   els.contestMsg.hidden = true;
   els.contestBox.disabled = true;
-  els.confirmBox.disabled = true;
   try {
     const { data } = await api(`/api/booth/tracks/${track.code}/contest`, { method: "POST", body: { email: track.you.email, ...body }, timeout: 10000 });
     if (app.track !== track) return;
@@ -339,14 +339,14 @@ async function sendContest(body, box) {
     box.checked = was;
     els.contestMsg.textContent = err?.code === "not_signed_up" ? COPY.contestSignUp : err?.code === "voting_closed" ? COPY.contestClosed : refusal(err, err?.message || COPY.contestFailed);
     els.contestMsg.hidden = false;
+    if (err?.code === "not_manager") refreshContest();
   } finally {
     app.entering = false;
     if (app.track === track) drawContest();
   }
-  if (app.track === track && track.contest?.ticked && body.enter && !body.group_confirmed) els.title.focus();
+  if (app.track === track && track.contest?.ticked && body.enter) els.title.focus();
 }
 const flipContest = () => sendContest(els.contestBox.checked ? { enter: true, agree: true } : { enter: false }, els.contestBox);
-const flipConfirm = () => sendContest({ enter: true, agree: true, group_confirmed: els.confirmBox.checked }, els.confirmBox);
 async function saveTitle() {
   const track = app.track;
   if (!track?.contest) return;
@@ -372,13 +372,14 @@ async function share() {
   const track = app.track;
   if (!track) return;
   // The party's page: sharing is what makes the listen page (there is no switch).
-  if (track.contest?.you.performer && !(track.public && track.share_id)) {
+  if (track.contest?.you.can_manage && !(track.public && track.share_id)) {
     els.shareMsg.hidden = true;
     try {
       const { data } = await api(`/api/booth/tracks/${track.code}/public`, { method: "POST", body: { email: track.you.email, public: true }, timeout: 10000 });
       if (app.track !== track) return;
       track.public = data?.public === true;
       track.share_id = typeof data?.share_id === "string" ? data.share_id : null;
+      refreshContest(); // the first to share now manages the song
     } catch (err) {
       els.shareMsg.textContent = refusal(err, COPY.publicFailed);
       els.shareMsg.hidden = false;
@@ -448,6 +449,7 @@ async function addArt(file) {
     if (app.track !== track) return;
     track.art_url = url;
     drawArt();
+    if (track.contest) refreshContest(); // the first to add artwork now manages the song
   } catch (err) {
     if (app.track !== track) return;
     els.artMsg.textContent = err?.message || COPY.artFailed;
@@ -471,7 +473,6 @@ els.form.addEventListener("submit", (ev) => {
 });
 els.publicBtn.addEventListener("click", flipPublic);
 els.contestBox.addEventListener("change", flipContest);
-els.confirmBox.addEventListener("change", flipConfirm);
 els.titleForm.addEventListener("submit", (ev) => { ev.preventDefault(); saveTitle(); });
 document.addEventListener("visibilitychange", () => { if (!document.hidden && app.track?.contest) refreshContest(); });
 festive();

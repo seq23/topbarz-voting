@@ -56,7 +56,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const target = targets(args.env);
   // --party: the holiday party's tally, its own songs only (the vote the page shows while the party is on).
   const tracks = (await d1(target, "SELECT id, slug, label, source_name FROM tracks WHERE active = 1")).filter((t) => !args.party || t.source_name.startsWith(PARTY_TRACK_PREFIX));
-  const events = await d1(target, "SELECT e.id, e.track_id, e.action, e.created_at, v.verified FROM like_events e JOIN voters v ON v.id = e.voter_id WHERE v.flagged = 0 ORDER BY e.id");
+  // The party's votes count only after the 6-digit email code (Scooter, 18 Nov 2026), as on the page.
+  const events = (await d1(target, "SELECT e.id, e.track_id, e.action, e.created_at, v.verified FROM like_events e JOIN voters v ON v.id = e.voter_id WHERE v.flagged = 0 ORDER BY e.id")).filter((e) => !args.party || e.verified);
   const commentRows = await d1(target, "SELECT track_id, COUNT(*) AS n FROM comments WHERE hidden = 0 GROUP BY track_id");
   const voters = await d1(target, "SELECT name, email, city, marketing_opt_in, created_at, flagged, flag_reason, verified, unverified_reason FROM voters ORDER BY created_at, id");
   const entries = await d1(target, ENTRIES_SQL);

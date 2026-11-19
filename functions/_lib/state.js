@@ -4,11 +4,17 @@ import { GIFS_SQL, holidayOn, partyTrackClause, toGif } from "./party.js";
 
 export const PHOTO_MANIFEST_KEY = "manifest/photos.json";
 
-// Likes from flagged voters never count, live or in the export.
+// Likes from flagged voters never count, live or in the export. While the holiday party is on, a
+// like counts only once its voter has entered the 6-digit email code (Scooter, 18 Nov 2026: "counted
+// only after the 6-digit email code"): a like from someone let in without one is kept, and counts
+// the moment they verify.
+export const countedLikesClause = (env, alias = "e") => (holidayOn(env)
+  ? `${alias}.voter_id IN (SELECT id FROM voters WHERE flagged = 0 AND verified = 1)`
+  : `${alias}.voter_id NOT IN (SELECT id FROM voters WHERE flagged = 1)`);
 export const tracksWithCountsSql = (env) => `
 SELECT t.slug, t.label, t.audio_key, t.duration_ms, t.sort,
   (SELECT COALESCE(SUM(CASE e.action WHEN 'like' THEN 1 ELSE -1 END), 0) FROM like_events e
-    WHERE e.track_id = t.id AND e.voter_id NOT IN (SELECT id FROM voters WHERE flagged = 1)) AS likes,
+    WHERE e.track_id = t.id AND ${countedLikesClause(env)}) AS likes,
   (SELECT COUNT(*) FROM comments c WHERE c.track_id = t.id AND c.hidden = 0) AS comments
 FROM tracks t WHERE t.active = 1${partyTrackClause(env)} ORDER BY t.sort, t.label, t.id`;
 
@@ -34,7 +40,8 @@ export async function buildState(env, now = Date.now()) {
   const gifs = holiday ? ((await env.DB.prepare(GIFS_SQL).all()).results ?? []).map(toGif) : [];
   return {
     now: new Date(now).toISOString(),
-    voting_ends_at: new Date(endsAt).toISOString(),
+    // null while no end is set (the holiday party until Scooter sends the cutoff).
+    voting_ends_at: Number.isFinite(endsAt) ? new Date(endsAt).toISOString() : null,
     closed,
     voting_starts_at: new Date(startsAt).toISOString(),
     open: !closed && !notOpen,

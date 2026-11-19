@@ -1,6 +1,6 @@
-// The holiday party's pages (Scooter, 17 Nov 2026, with his preview notes): /join (a group on one
-// phone, handed around), /team (four lanes), the contest entry on /track, the upload-station picker
-// on /booth, the gallery GIFs, the festive look with the partners' logos, the QR sign and the draft rules.
+// The holiday party's pages (Scooter, 17 Nov 2026, and his consolidated revision list of 18 Nov
+// 2026): /join (one person each), /team (four lanes, the takes, the re-point), the song on /track
+// (access for everyone with the code, first-come manager), the upload station on /booth, the gallery GIFs, the festive look with the partners' logos, the QR sign and the draft rules.
 // Their pure rules (public/js/party-rules.js, imported as the browser imports it) and what the
 // shipped files keep, show and refuse.
 import assert from "node:assert/strict";
@@ -9,9 +9,9 @@ import path from "node:path";
 import test from "node:test";
 import { joinQrSvg, JOIN_URL } from "../scripts/make-join-qr.mjs";
 import {
-  GROUP_MAX, GUEST_KEY, LINE_POLL_MS, STATUS, TEAM_KEY, UNDO_MS, cleanContest, contestLine, groupLabel, groupSmsHref, isTeamToken, joinPayload, moves, nextTwo, placeWords,
+  GUEST_KEY, LINE_POLL_MS, STATUS, TEAM_KEY, UNDO_MS, accessLine, andList, cleanContest, contestLine, flagWords, groupLabel, groupSmsHref, isTeamToken, joinPayload, managerLine, moves, nextTwo, placeWords,
 } from "../public/js/party-rules.js";
-import { GROUP_MAX as SERVER_GROUP_MAX, LANES } from "../functions/_lib/party.js";
+import { LANES } from "../functions/_lib/party.js";
 import { COPY as JOIN } from "../public/js/join-copy.js";
 import { COPY as TEAM } from "../public/js/team-copy.js";
 import { COPY as TRACK } from "../public/js/track-copy.js";
@@ -20,26 +20,26 @@ import { ROOT } from "./helpers.mjs";
 
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), "utf8");
 
-test("group sign-up on one phone: no codes; the page and the server allow the same group size; every slot is checked, with the slot and the field to fix", () => {
-  assert.equal(GROUP_MAX, SERVER_GROUP_MAX);
+test("individual sign-up (Scooter, 18 Nov 2026): one person, on their own phone, no codes, no group setup; every field checked; back in line with one tap once their song is up", () => {
   const ok = { name: " Jay ", phone: "555 010 2030", email: " Jay@Example.com ", city: "Brooklyn", instagram: "" };
-  const one = joinPayload([ok]);
+  const one = joinPayload(ok);
   assert.equal(one.problem, null);
-  assert.deepEqual(one.body, { guests: [{ name: "Jay", phone: "555 010 2030", email: "jay@example.com", city: "Brooklyn", instagram: "" }], website: "" });
+  assert.deepEqual(one.body, { name: "Jay", phone: "555 010 2030", email: "jay@example.com", city: "Brooklyn", instagram: "", website: "" });
   for (const [field, patch] of [["name", { name: "" }], ["phone", { phone: "12" }], ["email", { email: "jay" }], ["city", { city: "" }]]) {
-    const { problem } = joinPayload([ok, { ...ok, email: "mo@example.com", ...patch }]);
-    assert.deepEqual([problem.slot, problem.field], [1, field]);
+    const { problem } = joinPayload({ ...ok, ...patch });
+    assert.equal(problem.field, field);
     assert.ok(JOIN[problem.key], `${problem.key} has words`);
   }
-  assert.deepEqual(joinPayload([ok, { ...ok, email: "JAY@example.com" }]).problem, { slot: 1, field: "email", key: "sameEmail" });
+  assert.equal(joinPayload(ok, "bot.example").body.website, "bot.example", "the honeypot goes to the server");
   const join = read("public/js/join.js");
   const html = read("public/join.html");
-  assert.ok(!/session_code|group code|\?group=|tbz-join-code|tbz-join-move/i.test(join + html + JSON.stringify(JOIN)), "no group codes anywhere on the sign-up");
-  assert.match(html, /<select id="tbz-join-size"><\/select>/, "how many of you, first");
-  assert.match(join, /if \(app\.at < app\.size - 1\) \{ app\.at \+= 1; drawSlot\(\{ focus: true \}\); return; \}/, "Next moves to the next person; only the last one sends");
-  assert.match(join, /const slot = Number\.isInteger\(err\?\.extra\?\.slot\) \? err\.extra\.slot : app\.at;/, "a refusal goes to the slot it is about");
-  assert.match(JOIN.slotPass, /Pass the phone/);
-  for (const f of ["name", "phone", "email", "city"]) assert.match(html, new RegExp(`id="tbz-join-${f}"[^>]*autocomplete="off"`), `${f}: the phone's autofill would put the first person's details in a friend's slot`);
+  assert.ok(!/session_code|group code|\?group=|tbz-join-code|tbz-join-move|tbz-join-size|Pass the phone/i.test(join + html + JSON.stringify(JOIN)), "no group codes and no group setup anywhere on the sign-up");
+  for (const [f, ac] of [["name", "name"], ["phone", "tel"], ["email", "email"], ["city", "address-level2"]]) assert.match(html, new RegExp(`id="tbz-join-${f}"[^>]*autocomplete="${ac}"`), `${f}: the person's own phone fills in their own details`);
+  // After a session ends, one tap puts the same person back in line, and the page says so.
+  assert.match(html, /<button type="button" id="tbz-join-again" class="btn" hidden><\/button>/);
+  assert.match(join, /els\.again\.hidden = s\.status !== "done";/, "Get back in line shows once their song is done");
+  assert.match(join, /api\("\/api\/party\/rejoin", \{ method: "POST", body: \{ guest_key: app\.key \}/);
+  assert.equal(JOIN.again, "Get back in line");
 });
 
 test("the group's place, the team's four lanes and the two at the top of the line", () => {
@@ -50,7 +50,7 @@ test("the group's place, the team's four lanes and the two at the top of the lin
   assert.equal(placeWords(JOIN, { status: "upload" }), JOIN.placeUpload);
   assert.equal(placeWords(JOIN, { status: "done" }), JOIN.placeDone);
   assert.deepEqual(moves("waiting"), ["booth"]);
-  assert.deepEqual(moves("booth"), ["upload", "waiting"], "red takes a group out of the booth to the upload station");
+  assert.deepEqual(moves("booth"), ["upload", "waiting"], "red takes a person out of the booth to the upload station");
   assert.deepEqual(moves("upload"), ["done", "booth"]);
   assert.deepEqual(moves("done"), ["upload"], "a group marked done by mistake goes back to the upload station");
   const s = (id, status) => ({ id, status });
@@ -60,8 +60,12 @@ test("the group's place, the team's four lanes and the two at the top of the lin
   assert.ok(LINE_POLL_MS <= 5000, "the line refreshes at least every 5 s");
   assert.equal(UNDO_MS, 10000, "Undo stays for 10 s");
   const team = read("public/js/team.js");
-  assert.match(team, /const upload = app\.sessions\.filter\(\(s\) => s\.status === "upload"\);[\s\S]*els\.upload\.replaceChildren\(\.\.\.upload\.map\(card\)\);/, "the upload station is its own lane on the page, apart from the line");
+  assert.match(team, /els\.upload\.replaceChildren\(\s*\.\.\.station\.map\(\(x, i\) => takeCard\(x\.t, x\.people, \{ title: i === 0 \? COPY\.nextUpload : COPY\.laterUpload, contact: true \}\)\),/, "the upload station shows each recording whole, the engineer's next one first, with contacts to check");
   assert.match(read("public/team.html"), /<ol id="tbz-team-upload" class="line"><\/ol>/);
+  assert.match(read("public/team.html"), /<ol id="tbz-team-booth" class="line"><\/ol>/, "the booth is its own lane");
+  assert.equal(andList(["Jeff", "John", "Scooter"]), "Jeff, John and Scooter");
+  assert.equal(flagWords(TEAM, ["test", "stale"]), `${TEAM.flagTest} · ${TEAM.flagStale}`);
+  assert.equal(flagWords(TEAM, []), "");
 });
 
 test("Text them: every number in the group, the words filled in, Messages on the team's own phone; a computer gets none", () => {
@@ -75,42 +79,44 @@ test("Text them: every number in the group, the words filled in, Messages on the
   assert.equal(TEAM.textMessage, "You're up at the Top Barz booth! Come on in.");
 });
 
-test("the contest entry: one line everyone on the song sees the same, naming who ticked and who confirmed; listeners hear and download only; nothing else passes", () => {
-  const c = cleanContest({ on: true, rules_url: "https://evil.example", title: "Sleigh", entered: false, closed: false, group: true, ticked: true, ticked_by: "Jay", confirmed: false, step: "needs_group", you: { performer: true, signed_up: true }, people: [{ first_name: "Jay", you: true, email: "x@y.co" }, { first_name: "Kim" }], blocked: "nope" });
+test("the song on /track (Scooter, 18 Nov 2026): everyone with the code sees who has access; the first to manage keeps the controls; no group confirmation; a song that cannot go in says so in neutral words", () => {
+  const c = cleanContest({ on: true, rules_url: "https://evil.example", title: "Sleigh", entered: false, closed: false, ticked: false, ticked_by: null, step: "not_entered", manager: "Jeff", you: { performer: true, manager: false, can_manage: false, signed_up: true }, access: ["Jeff", "John", "Scooter"], people: [{ first_name: "Jeff", email: "x@y.co" }, { first_name: "John", you: true }], blocked: "nope" });
   assert.equal(c.rules_url, "/holiday-rules", "the rules link is always our own page");
   assert.equal(c.blocked, null);
   assert.ok(!JSON.stringify(c).includes("@"), "no email gets through");
-  assert.equal(contestLine(TRACK, c), "Jay ticked Enter. It goes in the vote once someone on the song confirms it with the group.");
-  assert.equal(contestLine(TRACK, { ...c, entered: true, confirmed: true, confirmed_by: "Kim" }), "Entered by Jay, confirmed with the group by Kim: it's in the vote for Jay & Kim.");
-  assert.equal(contestLine(TRACK, { ...c, group: false, entered: true }), "Entered by Jay: it's in the vote.");
-  assert.equal(contestLine(TRACK, { ...c, ticked: false, ticked_by: null }), TRACK.contestNotYet);
-  // A song that cannot go in says why, never a bare "cannot" (Scooter, 18 Nov 2026).
-  for (const [where, why] of [["file", TRACK.blockedScooterFile], ["title", TRACK.blockedScooterTitle], ["person", TRACK.blockedScooterPerson], [undefined, TRACK.blockedScooterAny]]) {
-    const line = contestLine(TRACK, cleanContest({ on: true, people: [], blocked: "scooter_taylor", blocked_where: where }));
-    assert.equal(line, `${TRACK.contestBlocked} ${why} ${TRACK.blockedScooterRule}`);
-  }
-  assert.equal(contestLine(TRACK, cleanContest({ on: true, people: [], blocked: "test_file_in_production" })), `${TRACK.contestBlocked} ${TRACK.blockedTest}`);
-  assert.equal(cleanContest({ on: true, blocked: "pulled_by_team", blocked_where: "file" }).blocked_where, null, "the where is only Scooter Taylor's rule");
+  assert.ok(!("confirmed" in c) && !("group" in c), "no group confirmation any more");
+  assert.equal(accessLine(TRACK, c.access), "Jeff, John and Scooter have access to this song.");
+  assert.equal(accessLine(TRACK, ["Jeff"]), "Jeff has access to this song.");
+  assert.equal(accessLine(TRACK, []), TRACK.accessNobody);
+  assert.equal(managerLine(TRACK, c), "Jeff manages this song: the artwork, the title and the contest entry. Ask Jeff if you want a change.");
+  assert.equal(managerLine(TRACK, { ...c, you: { ...c.you, manager: true } }), "", "the manager is not told someone else manages it");
+  assert.equal(managerLine(TRACK, { ...c, you: { ...c.you, performer: false } }), "", "a listener gets no manager line");
+  assert.equal(contestLine(TRACK, c), TRACK.contestNotYet);
+  assert.equal(contestLine(TRACK, { ...c, entered: true, ticked: true, ticked_by: "Jeff" }), "Entered by Jeff: it's in the vote.");
+  // Neutral words, never policy framing (Scooter, 18 Nov 2026).
+  assert.equal(contestLine(TRACK, cleanContest({ on: true, blocked: "scooter_taylor" })), "This song was recorded as a test entry for this preview, so it is not eligible for the vote.");
+  assert.equal(contestLine(TRACK, cleanContest({ on: true, blocked: "test_file_in_production", production: true })), TRACK.notEligible);
   assert.equal(contestLine(TRACK, { ...c, blocked: "pulled_by_team" }), TRACK.contestPulled);
+  for (const v of Object.values(TRACK)) assert.ok(!/standing|rule says|policy|Scooter Taylor/i.test(String(v)), `no policy framing: ${v}`);
   assert.equal(cleanContest({ on: false }), null, "no contest, no box");
   assert.equal(cleanContest(undefined), null);
-  // On the page: Enter starts unticked and links the rules in a new tab; the title and the group
-  // confirmation come up after it; there is no Make public switch; a listener sees a plain line.
   const html = read("public/track.html");
   assert.match(html, /<input type="checkbox" id="tbz-contest-box">/);
-  assert.ok(!/id="tbz-(contest|confirm)-box"[^>]*checked/.test(html), "unticked by default");
-  assert.match(html, /<form id="tbz-title-form" class="code-form" novalidate hidden>/);
-  assert.match(html, /<div id="tbz-confirm-row" class="check contest-check" hidden><input type="checkbox" id="tbz-confirm-box">/);
+  assert.ok(!/id="tbz-contest-box"[^>]*checked/.test(html), "unticked by default");
+  assert.ok(!/tbz-confirm-(row|box)/.test(html), "the confirmed-with-your-group box is gone");
+  assert.match(html, /id="tbz-access"/);
+  assert.match(html, /id="tbz-manager"/);
   const js = read("public/js/track.js");
   assert.match(js, /h\("a", \{ href: "\/holiday-rules", target: "_blank", rel: "noopener", text: COPY\.contestRules \}\)/);
-  assert.match(js, /els\.titleForm\.hidden = !c\.ticked;/, "the title comes up once Enter is ticked");
-  assert.match(js, /els\.confirmRow\.hidden = !\(c\.group && c\.ticked\);/, "Confirmed with your group only on a group song, after Enter");
+  assert.match(js, /els\.access\.textContent = c \? accessLine\(COPY, c\.access\) : "";/, "the access list is shown to everyone with the code");
+  assert.match(js, /els\.contestBox\.closest\("\.contest-check"\)\.hidden = !manages;/, "only the manager (or the first to manage) gets the box");
+  assert.match(js, /els\.artRow\.hidden = Boolean\(c\) && !manages;/, "and the artwork");
+  assert.match(js, /els\.titleForm\.hidden = !\(manages && c\.ticked\);/, "the title comes up once Enter is ticked");
   assert.match(js, /const flipContest = \(\) => sendContest\(els\.contestBox\.checked \? \{ enter: true, agree: true \} : \{ enter: false \}, els\.contestBox\);/, "a tick sends the rules agreement");
-  assert.match(js, /const flipConfirm = \(\) => sendContest\(\{ enter: true, agree: true, group_confirmed: els\.confirmBox\.checked \}, els\.confirmBox\);/);
+  assert.ok(!/group_confirmed|confirmBox/.test(js));
   assert.match(js, /for \(const el of \[els\.publicRow, els\.publicNote, els\.publicGroup, els\.voteRow, els\.voteNote\]\) el\.hidden = Boolean\(c\);/, "while the party is on, no Make public switch and no vote switch");
-  assert.match(js, /els\.contest\.hidden = !performer;/, "only the song's own people see the entry");
   assert.match(js, /els\.listenOnly\.hidden = !c \|\| performer;/, "a listener is told they can hear and download");
-  assert.ok(!/guest_key|GUEST_KEY|ownKey/.test(js), "the entry no longer needs the sign-up phone's key");
+  assert.ok(!/guest_key|GUEST_KEY|ownKey/.test(js), "the entry does not need the sign-up phone's key");
   assert.match(js, /app\.contestTimer = setTimeout\(refreshContest, LINE_POLL_MS\);/, "and the status refreshes by itself");
 });
 
@@ -126,21 +132,22 @@ test("what each page keeps on the phone: the guest's key, the team's token and i
   assert.ok(isTeamToken(`t1.12.${"1".repeat(10)}.${"a".repeat(64)}`) && !isTeamToken("v1.12.abc"));
 });
 
-test("the team's page: every status change asks first and can be undone; no swipe can change anything", () => {
+test("the team's page: every change asks first and can be undone; no swipe can change anything; the upload goes to the recording the ambassador's taps made", () => {
   const team = read("public/js/team.js");
   assert.ok(!/touchstart|touchend|touchmove|pointerdown|swipe/i.test(team), "no gestures on the team's page");
   assert.match(team, /onclick: \(\) => ask\(s, to\)/, "a status button only asks");
-  assert.match(team, /els\.confirmYes\.addEventListener\("click", \(\) => \{\s*const p = app\.pending;\s*closeModal\(els\.confirm\);\s*if \(p\?\.group\) assignGroup\(p\.song, p\.group\);\s*else if \(p\?\.person\) removePerson\(p\.song, p\.person\);\s*else if \(p\?\.song\) pullSong\(p\.song, p\.pulled, \{ undoable: true \}\);\s*else if \(p\) change\(p\.s, p\.s\.status, p\.to, \{ undoable: true \}\);\s*\}\);/, "Yes makes the change (a group's status, a song in or out of the vote with Undo, a person off a song, or a group put on a song with nobody on it)");
-  assert.match(team, /onclick: \(\) => askRemove\(song, p\)/, "Remove from this song only asks");
-  assert.match(team, /onclick: \(\) => askAssign\(song, /, "Put this group on it only asks");
-  // While the party is on, an upload with no group picked is asked first, ON the page (Scooter, 18
-  // Nov 2026: the browser's pop-up was easy to miss), and nothing goes up until a button is tapped.
+  assert.match(team, /els\.confirmYes\.addEventListener\("click", \(\) => \{\s*const p = app\.pending;\s*closeModal\(els\.confirm\);\s*if \(p\?\.song\) pullSong\(p\.song, p\.pulled, \{ undoable: true \}\);\s*else if \(p\) change\(p\.s, p\.s\.status, p\.to, \{ undoable: true \}\);\s*\}\);/, "Yes makes the change (a person's status, or a song in or out of the vote with Undo)");
+  assert.match(team, /els\.confirmNote\.textContent = flagged\.map\(\(g\) => COPY\.confirmFlagged/, "a flagged sign-up is named with its email and phone before it moves");
+  assert.match(team, /onclick: \(\) => openRepoint\(s\)/, "Change who's on it opens the re-point, which asks for a note");
+  assert.ok(!/askAssign|askRemove|assignGroup|removePerson/.test(team), "no picking a group at upload and no per-person remove: the re-point replaces them");
+  // The booth sends the recording it showed; a page that went stale is refused, never mis-attached.
   const boothJs = read("public/js/booth.js");
-  assert.match(boothJs, /if \(!els\.groups\.hidden && !app\.group && !walkUpOk\) \{ app\.lastFile = file; show\("walkup"\); els\.walkupPick\.focus\(\); return; \}/);
+  assert.match(boothJs, /if \(party\) xhr\.setRequestHeader\("x-party-take", String\(app\.station\.next\?\.id \?\? "none"\)\);/);
+  assert.match(boothJs, /else if \(body\.error === "take_changed"\) \{ failed\(COPY\.sessionGone\); loadGroups\(\); \}/);
+  assert.match(boothJs, /if \(party && !app\.station\.next && !walkUpOk\) \{ app\.lastFile = file; show\("walkup"\); els\.walkupPick\.focus\(\); return; \}/, "with nobody at the station it asks first, on the page");
   assert.match(boothJs, /els\.walkupGo\.addEventListener\("click", \(\) => \{ const file = app\.lastFile; app\.lastFile = null; upload\(file, \{ walkUpOk: true \}\); \}\);/);
   assert.match(read("public/booth.html"), /<div id="tbz-walkup" class="walkup" role="alert" hidden>[\s\S]*id="tbz-walkup-pick"[\s\S]*id="tbz-walkup-go"/);
   for (const f of ["booth.js", "track.js", "team.js", "join.js", "app.js"]) assert.ok(!/window\.(confirm|alert|prompt)\(/.test(read(`public/js/${f}`)), `${f}: no browser pop-up`);
-  assert.match(team, /p\.in \? null : h\("button"/, "no Remove button for a person who ticked");
   assert.match(team, /els\.undo\.addEventListener\("click", \(\) => \{\s*const u = app\.undo;\s*if \(u\?\.song\) pullSong\(u\.song, u\.pulled, \{ undoable: false \}\);\s*else if \(u\) change\(u\.s, u\.from, u\.to, \{ undoable: false \}\);\s*\}\);/);
   assert.match(team, /onclick: \(\) => askSong\(s, true\)/, "Take out of the vote only asks");
   assert.match(team, /onclick: \(\) => askSong\(s, false\)/, "Put back only asks");
@@ -150,8 +157,8 @@ test("the team's page: every status change asks first and can be undone; no swip
   assert.match(read("public/team.html"), /<meta name="robots" content="noindex">/);
 });
 
-test("the partners: white marks made from the files Scooter sent, one row under the Top Barz logo, each sized by weight within 20 to 46 px; the prize is a marked placeholder; the rules page is a DRAFT, 21 and over, preview only", async () => {
-  assert.deepEqual(HOLIDAY.partners.map((p) => p.name), ["Flow Music", "Dick and Jane's", "Blitz and Bubbles"]);
+test("the partners: white marks made from the files Scooter sent, named with \"&\", one row under the Top Barz logo, each sized by weight within 20 to 46 px; no prize line; the rules page is a DRAFT, 21 and over, preview only", async () => {
+  assert.deepEqual(HOLIDAY.partners.map((p) => p.name), ["Flow Music", "Dick & Jane's", "Blitz & Bubbles"]);
   for (const p of HOLIDAY.partners) {
     assert.ok(p.desktop >= 20 && p.desktop <= 46 && p.mobile >= 20 && p.mobile <= 46, `${p.name}: ${p.mobile}/${p.desktop} px`);
     assert.ok(fs.existsSync(path.join(ROOT, "public", p.src)), p.src);
@@ -188,14 +195,15 @@ test("the partners: white marks made from the files Scooter sent, one row under 
   assert.match(css, /\.logo img \{ width: 116px; \}/, "the Top Barz logo keeps its size (116 px wide, about 102 px tall)");
   assert.ok(!/culturecon/i.test(JSON.stringify(HOLIDAY)), "no CultureCon in the party's words");
   assert.match(HOLIDAY.home.lede, /JUMP IN THE BOOTH/);
-  assert.equal(HOLIDAY.prize, "The winner wins a bar tab at Dick and Jane's.");
-  assert.match(festive, /h\("span", \{ class: "stand-in-mark", text: `\(\$\{HOLIDAY\.prizeMark\}\)` \}\)/, "the prize always shows with its placeholder mark");
+  assert.ok(!("prize" in HOLIDAY) && !("prizeMark" in HOLIDAY), "the prize line is removed until Scooter sends the terms");
+  assert.ok(!/HOLIDAY\.prize/.test(festive), "and nothing draws one");
+  assert.ok(!/Dick and Jane|Blitz and Bubbles/.test(JSON.stringify(HOLIDAY) + read("public/holiday-rules.html") + read("functions/_lib/party-privacy.js")), "the names are written with \"&\"");
   const rules = read("public/holiday-rules.html");
   assert.match(rules, /<meta name="robots" content="noindex">/);
   assert.match(rules, /<p class="draft-banner" role="note">DRAFT\./);
   assert.match(rules, /21 years of age or older/);
   assert.match(rules, /No purchase is necessary/);
-  assert.match(rules, /\[Open: Top Barz is still deciding whether one participant may confirm for the group/, "the waiver question is marked open in the draft");
+  assert.match(rules, /\[Open: whether the participant who enters a song agrees for everyone on it/, "the waiver question is marked open in the draft");
   assert.match(read("functions/holiday-rules.js"), /if \(holidayOn\(context\.env\)\) return context\.next\(\);/, "served only where the party is on");
 });
 
@@ -231,16 +239,25 @@ test("the gallery: the team's GIFs replace the photos while there are any, with 
   assert.match(gallery, /by\.hidden = gifList\.length === 0;/);
   assert.match(read("public/index.html"), /<p id="tbz-gallery-by" class="gif-by gallery-by" hidden>Powered by GIPHY<\/p>/);
   assert.match(read("public/js/app.js"), /gallery\.update\(state\.photos, state\.gifs\);/);
+  // Scooter, 18 Nov 2026: "The front-page GIFs scroll slowly and continuously". A seamless loop that
+  // holds for a finger, the pointer or the keyboard, and never moves with motion turned off.
+  assert.match(gallery, /const DRIFT_PX_PER_S = \d+;/);
+  assert.match(gallery, /strip\.addEventListener\("pointerenter", hold\);/);
+  assert.match(gallery, /strip\.addEventListener\("touchstart", hold, \{ passive: true \}\);/);
+  assert.match(gallery, /strip\.addEventListener\("focusin", hold\);/);
+  assert.match(gallery, /if \(!held && !document\.hidden\)/);
+  assert.match(read("public/css/site.css"), /\.strip\.is-drifting/);
 });
 
-test("the party's dates (Scooter, 18 Nov 2026): Sunday, December 13 and voting ends Friday, December 18, with no cutoff time shown as set", () => {
-  assert.deepEqual(HOLIDAY.dates, { party: "Sunday, December 13", votingEnds: "Friday, December 18", timeMark: "exact time to be confirmed" });
-  assert.equal(HOLIDAY.home.endsPending, "Friday, December 18 (exact time to be confirmed)");
-  assert.equal(HOLIDAY.home.ruleEndsPending, "Voting ends Friday, December 18 (exact time to be confirmed).");
+test("the party's dates (Scooter, 18 Nov 2026): Sunday, December 13; no end date shown, nothing counting down, nothing set to close; no time of day while the cutoff is open", () => {
+  assert.deepEqual(HOLIDAY.dates, { party: "Sunday, December 13" });
+  const all = JSON.stringify(HOLIDAY) + read("public/holiday-rules.html") + read("functions/index.js") + read("public/js/app.js") + read("public/js/festive.js");
+  assert.ok(!/December 18|Dec(ember)?\.? 18|2026-12-1[89]/.test(all), "the December 18 placeholder is gone everywhere");
   assert.ok(HOLIDAY.home.lede.includes(HOLIDAY.dates.party), "the party's day is on the voting page");
-  assert.ok(HOLIDAY.home.notOpen.includes(HOLIDAY.dates.party), "before voting opens, the page names the party night");
-  assert.ok(!/\b\d{1,2}(:\d{2})?\s*(AM|PM)\b/i.test(HOLIDAY.home.endsPending + HOLIDAY.home.ruleEndsPending + HOLIDAY.home.notOpen + HOLIDAY.home.notOpenRefusal), "no time of day while the cutoff is unset");
+  assert.ok(HOLIDAY.home.notOpenRefusal.includes(HOLIDAY.dates.party), "before voting opens, the page names the party night");
+  assert.ok(!/\b\d{1,2}(:\d{2})?\s*(AM|PM)\b/i.test(HOLIDAY.home.notOpen + HOLIDAY.home.notOpenRefusal), "no time of day while the cutoff is unset");
   const rules = read("public/holiday-rules.html");
-  for (const day of ["Sunday, December 13, 2026", "Friday, December 18, 2026"]) assert.ok(rules.includes(day), `the rules draft carries ${day}`);
-  assert.ok(!/the event date, the voting window/.test(rules), "the dates are no longer listed as unknown");
+  assert.ok(rules.includes("Sunday, December 13, 2026"), "the rules draft carries the party day");
+  assert.match(rules, /\[Open: the date and exact time voting ends/, "the end is marked open in the draft");
+  assert.match(read("functions/_lib/config.js"), /export const PARTY_VOTING_ENDS_AT = null;/, "no end is set in code");
 });

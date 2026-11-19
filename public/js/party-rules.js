@@ -1,7 +1,7 @@
-// The holiday party's rules with no screen in them (Scooter, 17 Nov 2026, and his preview notes the
-// same day), shared by /join, /team, /track and the festive look, unit-tested in
-// tests/party-pages.test.mjs: a group's sign-up on one phone, where a group is in line, the team's
-// four lanes, the "Text them" link, and the contest box on /track.
+// The holiday party's rules with no screen in them (Scooter, 17 Nov 2026, and his consolidated
+// revision list of 18 Nov 2026), shared by /join, /team, /track, /booth and the festive look,
+// unit-tested in tests/party-pages.test.mjs: one person's sign-up, where they are in line, the
+// team's four lanes and the takes they make, the "Text them" link, and the song on /track.
 export const SESSION_LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ"; // the server's own (functions/_lib/party.js)
 export const GUEST_KEY = "tbz.party.guest"; // the guest's own key, on their own phone: nothing else is kept
 export const TEAM_KEY = "tbz.team"; // the team token, on that team member's phone
@@ -11,13 +11,30 @@ export const UNDO_MS = 10000;
 
 export const isGuestKey = (s) => typeof s === "string" && /^[0-9a-f]{24}$/.test(s);
 export const isTeamToken = (s) => typeof s === "string" && /^t1\.[1-9][0-9]{0,9}\.[0-9]{10}\.[0-9a-f]{64}$/.test(s);
-export const GROUP_MAX = 10; // the server's own (functions/_lib/party.js)
 
 // "Jay" · "Jay & Mo" · "Jay, Mo & Kim"
 export function groupLabel(names) {
   const n = (names ?? []).filter(Boolean);
   if (n.length <= 1) return n[0] ?? "";
   return `${n.slice(0, -1).join(", ")} & ${n[n.length - 1]}`;
+}
+// "Jeff" · "Jeff and John" · "Jeff, John and Scooter": a sentence's list (Scooter's own wording).
+export function andList(names) {
+  const n = (names ?? []).filter(Boolean);
+  if (n.length <= 1) return n[0] ?? "";
+  return `${n.slice(0, -1).join(", ")} and ${n[n.length - 1]}`;
+}
+// Who has access to a song, in one line everyone with the code sees: "Jeff, John and Scooter have
+// access to this song" (Scooter, 18 Nov 2026).
+export function accessLine(COPY, names) {
+  const n = (names ?? []).filter(Boolean);
+  if (!n.length) return COPY.accessNobody;
+  return (n.length === 1 ? COPY.accessOne : COPY.accessMany).replace("{names}", andList(n));
+}
+// A sign-up the team should look at twice (the server's guestFlags): its words, or "".
+export function flagWords(COPY, flags) {
+  const f = Array.isArray(flags) ? flags : [];
+  return [f.includes("test") ? COPY.flagTest : null, f.includes("stale") ? COPY.flagStale : null].filter(Boolean).join(" · ");
 }
 
 // Where a group is, in words: up now, next, number N, just out (song being saved), done.
@@ -74,15 +91,13 @@ export function clockWords(iso, locale) {
   return new Date(ms).toLocaleTimeString(locale, { hour: "numeric", minute: "2-digit" });
 }
 
-// The sign-up as it is sent: every slot of the group, each person's own (one phone, handed
-// around), with the first problem found ({ slot, field, key }) or null. The server checks it all again.
-export function joinPayload(slots, website = "") {
+// The sign-up as it is sent: ONE person, on their own phone (Scooter, 18 Nov 2026), with the first
+// problem found ({ field, key }) or null. The server checks it all again.
+export function joinPayload(fields, website = "") {
   const t = (v) => String(v ?? "").replace(/\s+/g, " ").trim();
-  const guests = (slots ?? []).map((f) => ({ name: t(f.name), phone: t(f.phone), email: t(f.email).toLowerCase(), city: t(f.city), instagram: t(f.instagram) }));
-  const problem = guests.map(slotProblem).map((p, slot) => (p ? { slot, ...p } : null)).find(Boolean)
-    ?? guests.map((g, i) => (guests.findIndex((o) => o.email === g.email) < i ? { slot: i, field: "email", key: "sameEmail" } : null)).find(Boolean)
-    ?? null;
-  return { body: { guests, website }, problem };
+  const f = fields ?? {};
+  const body = { name: t(f.name), phone: t(f.phone), email: t(f.email).toLowerCase(), city: t(f.city), instagram: t(f.instagram), website };
+  return { body, problem: slotProblem(body) };
 }
 // One slot's first problem, or null.
 export function slotProblem(g) {
@@ -93,11 +108,10 @@ export function slotProblem(g) {
   return null;
 }
 
-// ── The contest box on /track ────────────────────────────────────────────────────────────────
+// ── The song on /track ───────────────────────────────────────────────────────────────────────
 // The server's contest view → what the page draws, or null (no contest here). First names only.
 const BLOCKS = ["scooter_taylor", "test_file_in_production", "pulled_by_team"];
-const STEPS = ["not_entered", "needs_group", "in"];
-const WHERES = ["file", "title", "person"];
+const STEPS = ["not_entered", "in"];
 export function cleanContest(c) {
   if (!c || typeof c !== "object" || c.on !== true) return null;
   const name = (v) => (typeof v === "string" && v.trim() ? v.trim().slice(0, 30) : null);
@@ -106,35 +120,34 @@ export function cleanContest(c) {
     title: typeof c.title === "string" ? c.title.slice(0, 60) : "",
     entered: c.entered === true,
     closed: c.closed === true,
-    group: c.group === true,
     ticked: c.ticked === true,
-    confirmed: c.confirmed === true,
     ticked_by: name(c.ticked_by),
-    confirmed_by: name(c.confirmed_by),
     step: STEPS.includes(c.step) ? c.step : null,
-    you: { performer: c.you?.performer === true, signed_up: c.you?.signed_up === true },
+    manager: name(c.manager),
+    you: { performer: c.you?.performer === true, manager: c.you?.manager === true, can_manage: c.you?.can_manage === true, signed_up: c.you?.signed_up === true },
+    nobody: c.nobody === true,
+    access: (Array.isArray(c.access) ? c.access : []).slice(0, 50).map(name).filter(Boolean),
     people: (Array.isArray(c.people) ? c.people : []).slice(0, 50).map((p) => ({ first_name: name(p?.first_name), you: p?.you === true })),
     blocked: BLOCKS.includes(c.blocked) ? c.blocked : null,
-    blocked_where: c.blocked === "scooter_taylor" && WHERES.includes(c.blocked_where) ? c.blocked_where : null,
+    production: c.production === true,
   };
 }
-// The one line under the box that everyone on the song sees the same way: in or not, and who did
-// what, by first name, so nobody's tick speaks for the group in silence.
+// The one line under the box that everyone with the code sees the same way: in or not, and who
+// entered it. A song that cannot go in says why in neutral words (Scooter, 18 Nov 2026: "This song
+// was recorded as a test entry for this preview, so it is not eligible for the vote." No policy
+// framing, and nothing about who can or cannot enter).
 export function contestLine(COPY, c) {
   if (!c) return "";
-  // A song that cannot go in says why (Scooter, 18 Nov 2026: never a bare "cannot").
   if (c.blocked === "pulled_by_team") return COPY.contestPulled;
-  if (c.blocked === "test_file_in_production") return `${COPY.contestBlocked} ${COPY.blockedTest}`;
-  if (c.blocked === "scooter_taylor") {
-    const which = c.blocked_where === "file" ? COPY.blockedScooterFile : c.blocked_where === "title" ? COPY.blockedScooterTitle : c.blocked_where === "person" ? COPY.blockedScooterPerson : COPY.blockedScooterAny;
-    return `${COPY.contestBlocked} ${which} ${COPY.blockedScooterRule}`;
-  }
-  if (c.blocked) return COPY.contestBlocked;
-  const who = (n) => n || COPY.contestSomeone;
-  const group = groupLabel(c.people.map((p) => p.first_name).filter(Boolean));
-  if (c.entered && c.group) return COPY.contestEnteredGroup.replace("{ticked}", who(c.ticked_by)).replace("{confirmed}", who(c.confirmed_by)).replace("{group}", group);
-  if (c.entered) return COPY.contestEntered.replace("{ticked}", who(c.ticked_by));
+  if (c.blocked === "scooter_taylor" || c.blocked === "test_file_in_production") return c.production ? COPY.notEligible : COPY.testEntry;
+  if (c.blocked) return COPY.notEligible;
+  if (c.entered) return COPY.contestEntered.replace("{ticked}", c.ticked_by || COPY.contestSomeone);
   if (c.closed) return COPY.contestClosed;
-  if (c.ticked && c.group) return COPY.contestNeedsGroup.replace("{ticked}", who(c.ticked_by));
   return COPY.contestNotYet;
+}
+// Who manages the song, for someone on it who does not: "Jeff manages this song …", or "" (they do,
+// or nobody does yet and they can).
+export function managerLine(COPY, c) {
+  if (!c?.you?.performer || c.you.manager || c.you.can_manage || !c.manager) return "";
+  return COPY.managedBy.replace(/\{manager\}/g, c.manager);
 }

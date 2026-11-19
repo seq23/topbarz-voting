@@ -41,34 +41,31 @@ export const COPY = {
   voteAll: "Everyone's in for the vote",
   voteOnlyYou: "Only you so far: the others enter the code with their own email",
   voteFailed: "That did not save. Try again.",
-  // The holiday contest (17 Nov 2026, with Scooter's preview notes), shown only while the party is
-  // on, and only to the song's own people (the group picked when it was uploaded).
-  listenOnly: "You can hear and download this song. Only the people recorded on it can enter it in the contest or share it.",
-  // Uploaded with nobody on it yet (the team puts the group on it from the team page).
-  noGroupYet: "You can hear and download this song. Nobody is on it yet: if you recorded it, ask the Top Barz team to put your group on it, then enter this code again to enter the contest.",
+  // The holiday contest (17 Nov 2026, and Scooter's revision list of 18 Nov), shown only while the
+  // party is on. Anyone with the code and their email hears, downloads and sees who has access; the
+  // song's manager (the first person on it to manage it) has the artwork, the title, the entry and Share.
+  listenOnly: "You can hear and download this song.",
+  accessOne: "{names} has access to this song.",
+  accessMany: "{names} have access to this song.",
+  // Uploaded with nobody on it yet (the team puts its people on it from the team page).
+  accessNobody: "Nobody is on this song yet. If you recorded it, ask the Top Barz team to put you on it, then enter this code again.",
+  managedBy: "{manager} manages this song: the artwork, the title and the contest entry. Ask {manager} if you want a change.",
+  youManage: "You manage this song: the artwork, the title, the contest entry and sharing are yours.",
+  firstToManage: "You're on this song. The first person on it to add artwork, a title or the contest entry manages it.",
   contestTitle: "Enter the contest",
-  contestHelp: "Tick the box to put this song in the vote. If you recorded it with friends, confirm it with your group too.",
+  contestHelp: "Tick the box to put this song in the vote.",
   contestBox: "Enter the contest. I agree to the",
   contestRules: "official rules",
-  contestConfirm: "Confirmed with your group: {group} all want this song in the contest and agree to the rules.",
-  contestOnSong: "On this song: {group}",
   titleLabel: "Song title (its name in the vote)",
   titleSave: "Save title",
   titleSaved: "Title saved",
   contestEntered: "Entered by {ticked}: it's in the vote.",
-  contestEnteredGroup: "Entered by {ticked}, confirmed with the group by {confirmed}: it's in the vote for {group}.",
-  contestNeedsGroup: "{ticked} ticked Enter. It goes in the vote once someone on the song confirms it with the group.",
   contestNotYet: "Not entered yet.",
   contestSomeone: "someone on the song",
-  contestBlocked: "This song cannot go in the contest.",
-  // …and why (Scooter, 18 Nov 2026). Scooter Taylor's own songs are never in the vote: Top Barz's
-  // standing rule since CultureCon, read from the file name, the song title and the people on it.
-  blockedScooterFile: "Its file name is Scooter Taylor's.",
-  blockedScooterTitle: "Its title names Scooter Taylor.",
-  blockedScooterPerson: "Scooter Taylor is one of the people on it.",
-  blockedScooterAny: "It is Scooter Taylor's.",
-  blockedScooterRule: "Scooter Taylor's own songs are never in the vote (a standing Top Barz rule). To try the entry, use a song recorded by a group signed up under other names.",
-  blockedTest: "It is a test file, and test songs never go in the live vote.",
+  // A song that cannot go in, said neutrally (Scooter, 18 Nov 2026: "No policy framing, and nothing
+  // about who can or cannot enter once the real rules are set").
+  testEntry: "This song was recorded as a test entry for this preview, so it is not eligible for the vote.",
+  notEligible: "This song is not eligible for the vote.",
   contestClosed: "Voting has closed, so nothing changes now.",
   contestSignUp: "Sign up at the QR code first, with the same email you used here, then tick the box.",
   contestFailed: "That did not save. Try again.",

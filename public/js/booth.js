@@ -1,6 +1,8 @@
 // The engineer's page (/booth): drop or choose a finished file, watch it go up, read the 4-digit
 // code out to the artist, next file. Under it, today's uploads (GET /api/booth/tracks). The
-// upload is an XMLHttpRequest because fetch has no upload progress. Each row says how many people
+// upload is an XMLHttpRequest because fetch has no upload progress. While the holiday party is on,
+// the page shows whose song the file goes to (the next recording at the upload station) before the
+// drop, and the upload carries which one it showed. Each row says how many people
 // entered its code ("3 people") and "all in" when every one of them opted in to the public vote:
 // counts only, never a name or an address (the log route carries none). Nothing here is part of
 // the vote, and nothing here is remembered on the device.
@@ -32,6 +34,8 @@ const els = {
   groups: $("tbz-groups"),
   groupsTitle: $("tbz-groups-title"),
   groupsList: $("tbz-groups-list"),
+  groupsFlags: $("tbz-groups-flags"),
+  groupsStatus: $("tbz-groups-status"),
   groupsNote: $("tbz-groups-note"),
   walkup: $("tbz-walkup"),
   walkupText: $("tbz-walkup-text"),
@@ -39,7 +43,7 @@ const els = {
   walkupGo: $("tbz-walkup-go"),
 };
 
-const app = { busy: false, lastFile: null, group: "", groups: [] };
+const app = { busy: false, lastFile: null, station: null };
 
 // ── The words (booth-copy.js)
 document.title = `${COPY.headline} | Top Barz`;
@@ -56,25 +60,33 @@ els.walkupText.textContent = COPY.walkUpConfirm;
 els.walkupPick.textContent = COPY.walkUpPick;
 els.walkupGo.textContent = COPY.walkUpGo;
 
-// ── The holiday party: whose song this is, from the groups at the upload station (the team marks
-// a group Out of the booth on /team). The pick goes with the upload, so the song's people are that
-// group from the start, and the group is done.
-function renderGroups() {
-  const ids = app.groups.map((g) => String(g.id));
-  if (app.group && !ids.includes(app.group)) app.group = "";
-  if (!app.group && app.groups.length === 1) app.group = ids[0];
-  const option = (value, text) => h("label", { class: "check" }, h("input", { type: "radio", name: "tbz-group", value, checked: app.group === value, onchange: () => { app.group = value; } }), h("span", { text }));
-  els.groupsList.replaceChildren(...app.groups.map((g) => option(String(g.id), `${g.names} · ${g.size}`)), option("", COPY.walkUp));
-  els.groupsNote.textContent = app.groups.length ? COPY.groupsNote : `${COPY.groupsNone} ${COPY.groupsNote}`;
+// ── The holiday party: whose song this is. The next recording at the upload station (the people the
+// ambassador tapped in and out on /team), shown before the drop; the upload says which one it saw,
+// and the server refuses it if the station changed since (never a song on people nobody saw).
+function renderStation() {
+  const st = app.station;
+  const next = st?.next ?? null;
+  els.groupsTitle.textContent = COPY.groupsTitle;
+  els.groupsList.textContent = next ? next.names : "";
+  els.groupsList.hidden = !next;
+  const flagged = (next?.people ?? []).filter((p) => p.flags?.length);
+  els.groupsFlags.replaceChildren(...flagged.map((p) => h("li", { class: "flag", text: COPY.flagged.replace("{name}", p.first_name).replace("{why}", p.flags.map((f) => (f === "test" ? COPY.flagTest : COPY.flagStale)).join(", ")) })));
+  els.groupsFlags.hidden = flagged.length === 0;
+  const status = next
+    ? (st.queued ? COPY.queued.replace("{n}", String(st.queued)).replace("{s}", st.queued === 1 ? "" : "s") : "")
+    : st?.in_booth?.length ? COPY.inBoothNow.replace("{names}", st.in_booth.join(", ")) : COPY.groupsNone;
+  els.groupsStatus.textContent = status;
+  els.groupsStatus.hidden = !status;
+  els.groupsNote.textContent = COPY.groupsNote;
 }
 async function loadGroups() {
   try {
     const res = await fetch("/api/booth/sessions", { headers: { accept: "application/json" }, credentials: "same-origin" });
     const data = await res.json();
     els.groups.hidden = data?.on !== true;
-    if (data?.on !== true) return;
-    app.groups = Array.isArray(data.sessions) ? data.sessions : [];
-    renderGroups();
+    if (data?.on !== true) { app.station = null; return; }
+    app.station = { next: data.next && Number.isInteger(data.next.id) ? data.next : null, queued: Number(data.queued) || 0, in_booth: Array.isArray(data.in_booth) ? data.in_booth : [] };
+    renderStation();
   } catch {}
 }
 
@@ -101,6 +113,7 @@ function failed(text) {
 }
 function done({ code, file_name: name }) {
   app.busy = false;
+  loadGroups(); // that recording is done: the station shows the next one
   app.lastFile = null;
   els.code.textContent = code;
   els.doneFile.textContent = name;
@@ -114,9 +127,10 @@ function upload(file, { walkUpOk = false } = {}) {
   if (app.busy || !file) return;
   const why = refuseFile(file);
   if (why) { failed(why === "not_audio" ? COPY.notAudio : why === "too_big" ? COPY.tooBig : COPY.empty); return; }
-  // While the party is on, a song with no group picked has nobody on it: asked first, on the page
-  // (never the browser's own pop-up, which is easy to miss), and never uploaded in silence.
-  if (!els.groups.hidden && !app.group && !walkUpOk) { app.lastFile = file; show("walkup"); els.walkupPick.focus(); return; }
+  // While the party is on, a song with nobody at the upload station has nobody on it: asked first,
+  // on the page (never the browser's own pop-up, which is easy to miss), never uploaded in silence.
+  const party = Boolean(app.station);
+  if (party && !app.station.next && !walkUpOk) { app.lastFile = file; show("walkup"); els.walkupPick.focus(); return; }
   app.busy = true;
   app.lastFile = file;
   show("uploading");
@@ -126,14 +140,14 @@ function upload(file, { walkUpOk = false } = {}) {
   xhr.setRequestHeader("x-file-name", encodeURIComponent(file.name));
   xhr.setRequestHeader("content-type", file.type || "application/octet-stream");
   xhr.setRequestHeader("accept", "application/json");
-  if (!els.groups.hidden && app.group) xhr.setRequestHeader("x-party-session", app.group);
+  if (party) xhr.setRequestHeader("x-party-take", String(app.station.next?.id ?? "none"));
   xhr.responseType = "json";
   xhr.timeout = 10 * 60 * 1000;
   xhr.upload.addEventListener("progress", (ev) => { if (ev.lengthComputable) setProgress(ev.loaded / ev.total); });
   xhr.addEventListener("load", () => {
     const body = xhr.response && typeof xhr.response === "object" ? xhr.response : {};
     if (xhr.status === 200 && /^\d{4}$/.test(body.code ?? "") && typeof body.file_name === "string") done(body);
-    else if (body.error === "session_not_in_booth") { failed(COPY.sessionGone); loadGroups(); }
+    else if (body.error === "take_changed") { failed(COPY.sessionGone); loadGroups(); }
     else failed(uploadFailure(COPY, { code: body.error, status: xhr.status, message: body.message }));
   });
   xhr.addEventListener("error", () => failed(uploadFailure(COPY, {})));
@@ -157,12 +171,12 @@ els.zone.addEventListener("drop", (ev) => {
   ev.preventDefault();
   upload(ev.dataTransfer?.files?.[0]);
 });
-// The walk-up question: pick a group (back to the list, the file kept for the next drop) or go on.
+// The walk-up question: wait for the names (nothing uploaded) or go on with nobody on it.
 els.walkupPick.addEventListener("click", () => {
   show("ready");
   els.progressText.textContent = COPY.walkUpHeld;
   els.groups.scrollIntoView({ behavior: "smooth", block: "start" });
-  els.groupsList.querySelector("input")?.focus({ preventScroll: true });
+  loadGroups();
 });
 els.walkupGo.addEventListener("click", () => { const file = app.lastFile; app.lastFile = null; upload(file, { walkUpOk: true }); });
 els.next.addEventListener("click", () => { show("ready"); els.file.focus(); });
@@ -197,4 +211,4 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) { lo
 show("ready");
 loadLog();
 loadGroups();
-setInterval(() => { if (!document.hidden && !app.busy) loadGroups(); }, 10000);
+setInterval(() => { if (!document.hidden && !app.busy) loadGroups(); }, 5000);

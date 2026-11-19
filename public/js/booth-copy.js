@@ -23,19 +23,25 @@ export const COPY = {
   onePerson: "1 person",
   people: "{n} people",
   allIn: "all in",
-  // The holiday party (17 Nov 2026, with Scooter's preview notes): whose song this is, picked from
-  // the groups just out of the booth (the upload station), so the song lands on the right group
-  // even when the next group is already recording. Shown only while the party is on.
-  groupsTitle: "Whose song is this?",
-  groupsNone: "Nobody is at the upload station yet. The team taps Out of the booth on the team page when a group comes out, and the group shows here within a few seconds. Wait for it if you can.",
-  // Uploading with no group picked: asked first, on the page itself (Scooter, 18 Nov 2026: the
-  // browser's own pop-up "is easy to miss"), because nobody can enter that song until the team
-  // puts the right group on it from the team page (Contest songs).
-  walkUpConfirm: "Upload with no group on it? Nobody can enter this song in the contest until the team puts the group that recorded it on the song, from the team page.",
-  walkUpPick: "Pick a group first",
-  walkUpGo: "Upload with no group",
-  walkUpHeld: "Not uploaded. Pick the group whose song this is, then drop the file again.",
-  walkUp: "No group (a walk-up)",
+  // The holiday party (17 Nov 2026, and Scooter's revision list of 18 Nov: "When the engineer
+  // uploads, the song attaches to exactly the people marked out for it - no picking groups at
+  // upload."). The song goes to the people the ambassador tapped in and out for that recording, the
+  // oldest at the upload station first. Shown only while the party is on.
+  groupsTitle: "This song goes to",
+  queued: "{n} more recording{s} waiting after this one.",
+  inBoothNow: "Still in the booth: {names}. They show here once the ambassador taps them out.",
+  groupsNone: "Nobody is at the upload station yet. When the ambassador taps the last person of a recording out of the booth, their names show here within a few seconds.",
+  // A name the team should look at twice (a test sign-up, or one made long ago). First names only here:
+  // the team sees the contact details on the team page.
+  flagTest: "looks like a test sign-up",
+  flagStale: "signed up a long time ago",
+  flagged: "{name}: {why}. If that is not who just recorded, ask the ambassador to fix it on the team page before you upload.",
+  // Uploading with nobody at the upload station: asked first, on the page itself (Scooter, 18 Nov
+  // 2026: the browser's own pop-up "is easy to miss").
+  walkUpConfirm: "Upload with nobody on it? Nobody is at the upload station, so nobody can enter this song in the contest until the team puts its people on it from the team page.",
+  walkUpPick: "Wait for the names",
+  walkUpGo: "Upload with nobody on it",
+  walkUpHeld: "Not uploaded. When the names show above, drop the file again.",
   groupsNote: "Upload an MP3 export if you can: it plays fast on phones on the bar's Wi-Fi.",
-  sessionGone: "That group is not at the upload station any more. Pick the group again.",
+  sessionGone: "The upload station changed since this page looked: check whose song it is above, then drop the file again.",
 };

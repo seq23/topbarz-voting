@@ -4,35 +4,36 @@
 //
 // Guests (open routes, kept safe by what they answer: first names and places, never a phone or an email):
 //   GET  /api/party                  → { on }
-//   POST /api/party/join             { guests: [{ name, phone, email, city, instagram? }, …], website } → 201 { guest_key, you, session }
-//                                    one phone, handed around: each person fills their own slot, and they are one group (1 to 10);
-//                                    a single person may send { name, phone, email, city, instagram?, website }. One active place
-//                                    per email: 409 already_in_line (with the slot) while that email's group is waiting, in the
-//                                    booth or at the upload station; once its song is uploaded (done) the same email signs up again.
+//   POST /api/party/join             { name, phone, email, city, instagram?, website } → 201 { guest_key, you, session }
+//                                    ONE person (Scooter, 18 Nov 2026: everyone signs up on their own). One active place
+//                                    per email: 409 already_in_line, saying where they are, while that person is waiting, in
+//                                    the booth or at the upload station; once their song is uploaded (done) the same email
+//                                    signs up again, on the same record.
 //   POST /api/party/me               { guest_key } → { you, session }   the sign-up phone's page refreshes this
+//   POST /api/party/rejoin           { guest_key } → 201 { guest_key, you, session }   "Get back in line": one tap, the same
+//                                    person and details, once their last place is done (409 already_in_line otherwise)
 // The team (a team token from the emailed code; functions/_lib/team.js):
 //   POST /api/party/team/code        { email } → { sent, email, resend_in_seconds }   only an email on the team list
 //   POST /api/party/team/verify      { email, code } → { token, member: { email } }
-//   GET  /api/party/team/line        → { now, sessions: [{ id, code, status, place, …, guests: [{ name, phone, email, city, instagram, joined_at }] }] }
-//   POST /api/party/team/sessions/<id>/status  { status, from } → { session }   waiting | booth (green) | upload (red: just out, at
-//                                    the upload station) | done; undo is the same call back. The engineer's upload moves upload → done.
+//   GET  /api/party/team/line        → { now, sessions: [{ id, status, place, take_id, …, guests: [{ id, name, phone, email, city, instagram, joined_at, flags }] }], takes: [{ id, closed, uploaded }] }
+//   POST /api/party/team/sessions/<id>/status  { status, from } → { session }   one person: waiting | booth (green: into the
+//                                    open take, or a new one) | upload (red: out; the take closes when its last person is out
+//                                    and waits at the upload station) | done; undo is the same call back.
 //   POST /api/party/team/sessions/<id>/texted  → { texted_at }
 //   GET  /api/party/team/members     → { members: [{ id, email, you }] };  POST { email } adds;  POST …/members/<id>/remove
 //   GET  /api/party/team/gifs        → { gifs };  POST { id, url, width, height, title } adds;  POST …/gifs/<giphy id>/remove
-//   GET  /api/party/team/songs       → { songs: [{ code, label, entered, pulled, pulled_at, people, ticked, members: [{ id, first_name, signed_up, in, attached_at }] }] }   every contest song, entered or not (never an email)
-//   POST /api/party/team/songs/<booth code>/pull  { pulled: true|false } → { song }   "Take out of the vote" / "Put back": the team's
-//                                    safety valve on auto-entry; a pulled song stays out even if everyone ticks again; likes are kept
-//   POST /api/party/team/songs/<booth code>/group  { session_id } → { song }   puts a group on a song uploaded with nobody on it
-//                                    (409 has_people / session_done; the group moves to done, as an upload would have moved it)
-//   POST /api/party/team/songs/<booth code>/people/<id>/remove → { song }   takes off the song someone who has not ticked
-//                                    (409 ticked for someone who has); the song is judged again on the people left
+//   GET  /api/party/team/songs       → { songs: [{ code, label, entered, pulled, manager, members, repoints, … }], guests: [{ id, name, email, phone, flags }] }
+//   POST /api/party/team/songs/<booth code>/pull  { pulled: true|false } → { song }   "Take out of the vote" / "Put back"
+//   POST /api/party/team/songs/<booth code>/people  { guest_ids: [id, …], note } → { song }   re-points the song to exactly
+//                                    those people (Scooter, 18 Nov 2026: "staff can re-point it with a note of who changed what
+//                                    and when"); kept in booth_repoints with the team member, the time, before, after and the note
 import { cleanEmail, isCode } from "../../_lib/booth.js";
-import { ASSIGN_DONE_SQL, ASSIGN_SESSION_SQL, ASSIGN_TAG_SQL, ATTACH_TAGGED_SQL, CONTEST_TRACK_SQL, DETACH_SQL, PERSON_ON_SONG_SQL, PULL_SQL, SESSION_EMAILS_SQL, SONG_PEOPLE_COUNT_SQL, contestClosed, readSong, syncEntry, teamSongs } from "../../_lib/contest.js";
+import { ALL_GUESTS_SQL, ATTACH_PERSON_SQL, CONTEST_PEOPLE_SQL, CONTEST_TRACK_SQL, DETACH_ALL_SQL, DROP_GONE_MANAGER_SQL, GUESTS_BY_ID_SQL, PULL_SQL, REPOINT_LOG_SQL, contestClosed, readSong, syncEntry, teamSongs } from "../../_lib/contest.js";
 import { LIMITS, VERIFICATION, verificationStatus } from "../../_lib/config.js";
 import { HttpError, fail, ipHash, json, readJson, route } from "../../_lib/http.js";
 import {
-  ADD_GIF_SQL, GIFS_SQL, GUEST_BY_EMAIL_SQL, GUEST_BY_KEY_SQL, INSERT_GUEST_SQL, LANE_COLUMNS, LINE_GUESTS_SQL, LINE_SESSIONS_SQL, NEW_SESSION_SQL, REJOIN_GUEST_SQL, REMOVE_GIF_SQL, SESSION_CODE_TRIES, SESSION_NAMES_SQL, SET_STATUS_SQL, STATUS_EVENT_SQL, TEXTED_SQL, VISIT_SQL,
-  firstOf, guestKey, holidayOn, isGuestKey, laneOf, lineOrder, parsePartyGif, parseSignUp, parseStatusChange, randomSessionCode, toGif,
+  ADD_GIF_SQL, CLOSE_TAKE_SQL, GIFS_SQL, GUEST_BY_EMAIL_SQL, GUEST_BY_KEY_SQL, INSERT_GUEST_SQL, LANE_COLUMNS, LINE_GUESTS_SQL, LINE_SESSIONS_SQL, NEW_SESSION_SQL, NEW_TAKE_SQL, OPEN_TAKE_SQL, REJOIN_GUEST_SQL, REMOVE_GIF_SQL, REOPEN_TAKE_SQL, SESSION_CODE_TRIES, SESSION_NAMES_SQL, SET_STATUS_SQL, SET_TAKE_SQL, STATUS_EVENT_SQL, TAKE_OF_SQL, TEXTED_SQL, VISIT_SQL,
+  firstOf, guestFlags, guestKey, holidayOn, isGuestKey, laneOf, lineOrder, parsePartyGif, parseSignUp, parseStatusChange, randomSessionCode, toGif,
 } from "../../_lib/party.js";
 import { assertUnderLimit, limitStatement, maybePrune } from "../../_lib/ratelimit.js";
 import { MEMBER_BY_EMAIL_SQL, STORE_TEAM_CODE_SQL, newCode, releaseTeamSlot, requireMember, signTeamToken, takeTeamSlot, teamCodeEmail, teamCodeHmac, teamCodeLive, teamCodeMatchesAny } from "../../_lib/team.js";
@@ -65,10 +66,10 @@ async function guestView(db, guest) {
   };
 }
 
-// The sign-up: one person, or a group on one phone. Every email is checked before anything is
-// written, so a group is in line whole or not at all. An email already holding an active place is
-// refused with what is happening (never a silent block); an email whose last group is done comes
-// back in line: its one row moves to the new group, and the visit is kept in party_visits.
+// The sign-up: one person, on their own phone. An email already holding an active place is refused
+// with what is happening (never a silent block); an email whose last place is done comes back in
+// line: its one record moves to the new place (the same person, the same id), and the visit is
+// kept in party_visits.
 async function join(context) {
   const { request, env } = context;
   const parsed = parseSignUp(await readJson(request));
@@ -83,8 +84,8 @@ async function join(context) {
   const busy = existing.findIndex((row) => row && laneOf(row) !== "done");
   if (busy >= 0) {
     const lane = laneOf(existing[busy]);
-    const where = lane === "booth" ? "in the booth right now" : lane === "upload" ? "just out of the booth, waiting for their song to be uploaded" : "already in line";
-    throw new HttpError(409, "already_in_line", `${guests.length > 1 ? `Person ${busy + 1} (${guests[busy].name}): this email is` : "This email is"} ${where}. One place at a time: once that group's song is uploaded, the same email can get back in line. If that is wrong, ask the team at the booth.`, { field: "email", slot: busy, lane });
+    const where = lane === "booth" ? "You're in the booth right now with this email" : lane === "upload" ? "You're just out of the booth with this email: the engineer is saving your song" : "This email already has a place in line";
+    throw new HttpError(409, "already_in_line", `${where}. One place at a time: as soon as your song is uploaded you can get back in line here. If that is wrong, ask the team at the booth.`, { field: "email", slot: busy, lane });
   }
   const session = await newSession(db, now);
   const keys = guests.map(() => guestKey());
@@ -102,6 +103,24 @@ async function guestFrom(context, rawKey) {
   const guest = isGuestKey(rawKey) ? await env.DB.prepare(GUEST_BY_KEY_SQL).bind(rawKey).first() : null;
   if (!guest) throw new HttpError(404, "no_guest", "We could not find your sign-up on this phone. Sign up again.");
   return guest;
+}
+// Back in line in one tap: the same record, with the details they gave, in a new place. Only once
+// their last place is done; otherwise they are told where they are.
+async function rejoin(context) {
+  const { request, env } = context;
+  const body = await readJson(request);
+  const db = env.DB;
+  const found = await guestFrom(context, body.guest_key);
+  const lane = laneOf(found);
+  if (lane !== "done") throw new HttpError(409, "already_in_line", lane === "booth" ? "You're in the booth right now." : lane === "upload" ? "You're just out of the booth: the engineer is saving your song. You can get back in line once it is uploaded." : "You already have a place in line.", { lane });
+  const g = await db.prepare("SELECT id, name, phone, city, instagram FROM party_guests WHERE id = ?1").bind(found.id).first();
+  const now = Date.now();
+  const ip = await ipHash(request, env);
+  await limited(db, `party:join:ip:${ip}`, LIMITS.partyJoinsPerIp, "sign-ups");
+  const session = await newSession(db, now);
+  const key = guestKey();
+  await db.batch([db.prepare(REJOIN_GUEST_SQL).bind(g.id, session.id, g.name, g.phone, g.city, g.instagram, key, now, ip), db.prepare(VISIT_SQL).bind(g.id, session.id, now)]);
+  return json({ guest_key: key, ...(await guestView(db, { name: g.name, session_id: session.id, status: "waiting", done_at: null })) }, 201);
 }
 async function me(context) {
   const body = await readJson(context.request);
@@ -163,13 +182,15 @@ async function member(context) {
 }
 async function line(context) {
   const db = context.env.DB;
-  const [sessions, guests] = await db.batch([db.prepare(LINE_SESSIONS_SQL), db.prepare(LINE_GUESTS_SQL)]);
+  const now = Date.now();
+  const [sessions, guests, takes] = await db.batch([db.prepare(LINE_SESSIONS_SQL), db.prepare(LINE_GUESTS_SQL), db.prepare("SELECT id, opened_at, closed_at, track_id FROM party_takes WHERE id IN (SELECT take_id FROM party_sessions WHERE take_id IS NOT NULL AND done_at IS NULL)")]);
   const bySession = new Map();
-  for (const g of guests.results ?? []) bySession.set(g.session_id, [...(bySession.get(g.session_id) ?? []), { id: g.id, name: g.name, first_name: firstOf(g.name), phone: g.phone, email: g.email, city: g.city, instagram: g.instagram, joined_at: new Date(g.joined_at).toISOString() }]);
+  for (const g of guests.results ?? []) bySession.set(g.session_id, [...(bySession.get(g.session_id) ?? []), { id: g.id, name: g.name, first_name: firstOf(g.name), phone: g.phone, email: g.email, city: g.city, instagram: g.instagram, joined_at: new Date(g.joined_at).toISOString(), flags: guestFlags(g, now) }]);
   const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
   return json({
-    now: new Date().toISOString(),
-    sessions: lineOrder((sessions.results ?? []).map((s) => ({ ...s, guests: bySession.get(s.id) ?? [] }))).map((s) => ({ id: s.id, code: s.code, status: s.lane, place: s.place, created_at: iso(s.created_at), status_at: iso(s.status_at), texted_at: iso(s.texted_at), guests: s.guests })),
+    now: new Date(now).toISOString(),
+    sessions: lineOrder((sessions.results ?? []).map((s) => ({ ...s, guests: bySession.get(s.id) ?? [] }))).map((s) => ({ id: s.id, code: s.code, status: s.lane, place: s.place, take_id: s.take_id ?? null, created_at: iso(s.created_at), status_at: iso(s.status_at), texted_at: iso(s.texted_at), guests: s.guests })),
+    takes: (takes.results ?? []).map((t) => ({ id: t.id, opened_at: iso(t.opened_at), closed: t.closed_at !== null, closed_at: iso(t.closed_at), uploaded: t.track_id !== null })),
   });
 }
 async function setStatus(context, id, m) {
@@ -177,6 +198,13 @@ async function setStatus(context, id, m) {
   if (!parsed.ok) throw new HttpError(400, parsed.error, parsed.message);
   const db = context.env.DB;
   const now = Date.now();
+  const { from, status: to } = parsed.value;
+  // Back to the upload station from Done: only while the take's song is not uploaded yet (an undo of
+  // "Done, no song"); a song already uploaded is re-pointed from Contest songs instead.
+  if (from === "done" && to === "upload") {
+    const take = await db.prepare(TAKE_OF_SQL).bind(id).first();
+    if (!take || take.track_id) throw new HttpError(409, "already_uploaded", "This person's song is already uploaded. To put them on a different song, use Change who's on it under Songs.");
+  }
   const [toStatus, toDone] = LANE_COLUMNS[parsed.value.status];
   const [fromStatus, fromDone] = LANE_COLUMNS[parsed.value.from];
   const row = await db.prepare(SET_STATUS_SQL).bind(id, toStatus, toDone ? now : null, now, fromStatus, fromDone ? 0 : 1).first();
@@ -185,8 +213,27 @@ async function setStatus(context, id, m) {
     if (!current) throw new HttpError(404, "no_session", "That group is not in the line.");
     throw new HttpError(409, "changed", "Someone else changed this group a moment ago. The line has been refreshed.", { status: laneOf(current) });
   }
-  await db.prepare(STATUS_EVENT_SQL).bind(id, parsed.value.from, parsed.value.status, m.id, now).run();
+  await db.prepare(STATUS_EVENT_SQL).bind(id, from, to, m.id, now).run();
+  await moveTake(db, id, from, to, now);
   return json({ session: { id, status: laneOf(row), status_at: new Date(row.status_at).toISOString() } });
+}
+// The take follows the taps (Scooter, 18 Nov 2026: "Those taps define who's on the song ... how a
+// session closes, so people marked out of one recording don't carry over into the next upload"):
+// in → the open take (or a new one); out → the take closes once nobody of it is in the booth, and
+// waits at the upload station whole; back to waiting → off the take; back in the booth → the take
+// opens again until its song is uploaded.
+async function moveTake(db, id, from, to, now) {
+  if (to === "booth" && from === "waiting") {
+    await db.prepare("INSERT INTO party_takes (opened_at) SELECT ?1 WHERE NOT EXISTS (SELECT 1 FROM party_takes WHERE closed_at IS NULL AND track_id IS NULL)").bind(now).run();
+    const open = (await db.prepare(OPEN_TAKE_SQL).first()) ?? (await db.prepare(NEW_TAKE_SQL).bind(now).first());
+    await db.prepare(SET_TAKE_SQL).bind(id, open.id).run();
+    return;
+  }
+  const take = await db.prepare(TAKE_OF_SQL).bind(id).first();
+  if (!take) return;
+  if (to === "booth") { await db.prepare(REOPEN_TAKE_SQL).bind(take.id).run(); return; }
+  if (to === "waiting") await db.prepare(SET_TAKE_SQL).bind(id, null).run();
+  if (to === "upload" || to === "waiting") await db.prepare(CLOSE_TAKE_SQL).bind(take.id, now).run();
 }
 async function texted(context, id) {
   const row = await context.env.DB.prepare(TEXTED_SQL).bind(id, Date.now()).first();
@@ -221,9 +268,12 @@ async function removeGif(context, id) {
   return gifs(context);
 }
 
-// ── The team's contest songs: take one out of the vote, or put it back ─────────────────────────
+// ── The team's contest songs: take one out of the vote, put it back, or re-point it ─────────────
 async function songs(context) {
-  return json({ songs: await teamSongs(context.env.DB) });
+  const db = context.env.DB;
+  const now = Date.now();
+  const guests = (await db.prepare(ALL_GUESTS_SQL).all()).results ?? [];
+  return json({ songs: await teamSongs(db), guests: guests.map((g) => ({ id: g.id, name: g.name, email: g.email, phone: g.phone, joined_at: new Date(g.joined_at).toISOString(), flags: guestFlags(g, now) })) });
 }
 const songOf = async (db, code, fallback) => (await teamSongs(db)).find((s) => s.code === code) ?? fallback;
 async function pull(context, code, m) {
@@ -237,52 +287,31 @@ async function pull(context, code, m) {
   await syncEntry(env, await readSong(env.DB, code), now);
   return json({ song: await songOf(env.DB, code, { code, pulled: body.pulled }) });
 }
-// "Remove from this song": someone on a song who has not ticked (a plus-one who only wanted to
-// hear it, an engineer testing the code, a mistyped code) would hold it out of the vote for good.
-// The team takes them off; the song is then judged again on the people left. A person who ticked
-// is refused: their tick is their own consent, and only they untick it.
-async function detach(context, code, personId) {
+// "Change who's on it": the song landed on the wrong people (a stale sign-up tapped in, a mistaken
+// upload), so the team re-points it to exactly the people picked, by their records, with a note.
+// Every re-point is a row in booth_repoints (who, when, before, after, the note), shown on the song.
+// A manager no longer on the song stops managing it. The song is judged again on its new people.
+const NOTE_MAX = 200;
+async function repoint(context, code, m) {
   const { env } = context;
-  const now = Date.now();
-  if (await contestClosed(env, now)) throw new HttpError(403, "voting_closed", "Voting has closed, so songs can no longer go in or come out.");
-  const track = await env.DB.prepare(CONTEST_TRACK_SQL).bind(code).first();
-  if (!track) throw new HttpError(404, "no_song", "No booth song has that code.");
-  const row = await env.DB.prepare(DETACH_SQL).bind(track.id, personId).first();
-  if (!row) {
-    const there = await env.DB.prepare(PERSON_ON_SONG_SQL).bind(track.id, personId).first();
-    if (there) throw new HttpError(409, "ticked", "This person ticked the box themselves, so only they can take their tick back. To keep the song out, use Take out of the vote.");
-    throw new HttpError(404, "no_person", "That person is no longer on this song. The list has been refreshed.");
-  }
-  await syncEntry(env, await readSong(env.DB, code), now);
-  return json({ song: await songOf(env.DB, code, { code }) });
-}
-// "Put this group on the song": the song was uploaded with nobody on it (the engineer uploaded before
-// the team tapped Out, or a walk-up signed up afterwards), so nobody could enter it. The team picks
-// the group that recorded it; its people go on the song exactly as the upload would have put them,
-// and the group moves to done. Refused for a song that already has people or a group (taking the
-// song from them is not the team's call) and for a group whose song is already uploaded.
-async function assignGroup(context, code, m) {
-  const { env } = context;
-  const sessionId = idOf(String((await readJson(context.request)).session_id ?? ""));
-  if (!sessionId) throw new HttpError(400, "bad_session", "Pick the group that recorded this song.");
+  const body = await readJson(context.request);
+  const ids = Array.isArray(body.guest_ids) ? [...new Set(body.guest_ids)] : null;
+  if (!ids || ids.length > 20 || ids.some((v) => !Number.isInteger(v) || v < 1)) throw new HttpError(400, "bad_people", "Pick the people who are on this song.");
+  const note = String(body.note ?? "").replace(/\s+/g, " ").trim().slice(0, NOTE_MAX);
   const now = Date.now();
   if (await contestClosed(env, now)) throw new HttpError(403, "voting_closed", "Voting has closed, so songs can no longer change.");
   const db = env.DB;
   const track = await db.prepare(CONTEST_TRACK_SQL).bind(code).first();
   if (!track) throw new HttpError(404, "no_song", "No booth song has that code.");
-  const count = (await db.prepare(SONG_PEOPLE_COUNT_SQL).bind(track.id).first())?.n ?? 0;
-  if (track.party_session_id || count > 0) throw new HttpError(409, "has_people", "This song already has its people on it. The list has been refreshed.");
-  const session = await db.prepare(ASSIGN_SESSION_SQL).bind(sessionId).first();
-  const emails = session ? (await db.prepare(SESSION_EMAILS_SQL).bind(sessionId).all()).results ?? [] : [];
-  if (!session || emails.length === 0) throw new HttpError(404, "no_session", "That group is not in the line.");
-  if (session.done_at) throw new HttpError(409, "session_done", "That group's song is already uploaded. Pick the group that recorded this one.");
-  const tagged = await db.prepare(ASSIGN_TAG_SQL).bind(track.id, sessionId).run();
-  // The tag is the guard (nobody on the song, no group): only when it took do the people go on.
-  if (!tagged?.meta?.changes) throw new HttpError(409, "has_people", "This song already has its people on it. The list has been refreshed.");
+  const found = ids.length ? await db.batch(ids.map((id) => db.prepare(GUESTS_BY_ID_SQL).bind(id))) : [];
+  const people = found.map((r) => r.results?.[0] ?? null);
+  if (people.some((p) => !p)) throw new HttpError(404, "no_guest", "Someone picked is no longer signed up. The list has been refreshed.");
+  const before = (await db.prepare(CONTEST_PEOPLE_SQL).bind(track.id).all()).results ?? [];
   await db.batch([
-    ...emails.map((r) => db.prepare(ATTACH_TAGGED_SQL).bind(track.id, r.email, now)),
-    db.prepare(ASSIGN_DONE_SQL).bind(sessionId, now),
-    db.prepare(STATUS_EVENT_SQL).bind(sessionId, laneOf(session), "done", m.id, now),
+    db.prepare(DETACH_ALL_SQL).bind(track.id),
+    ...people.map((p, i) => db.prepare(ATTACH_PERSON_SQL).bind(track.id, p.email, now + i, p.id)),
+    db.prepare(DROP_GONE_MANAGER_SQL).bind(track.id),
+    db.prepare(REPOINT_LOG_SQL).bind(track.id, m.id, now, JSON.stringify(before.map((p) => ({ guest_id: p.guest_id ?? null, name: p.name ?? "someone not signed up" }))), JSON.stringify(people.map((p) => ({ guest_id: p.id, name: p.name }))), note),
   ]);
   await syncEntry(env, await readSong(db, code), now);
   return json({ song: await songOf(db, code, { code }) });
@@ -308,6 +337,7 @@ export const onRequest = route({
     if (!holidayOn(context.env)) off();
     if (parts.length === 1 && parts[0] === "join") return join(context);
     if (parts.length === 1 && parts[0] === "me") return me(context);
+    if (parts.length === 1 && parts[0] === "rejoin") return rejoin(context);
     if (parts[0] !== "team") return fail(404, "not_found", "No such API route.");
     if (parts.length === 2 && parts[1] === "code") return teamCode(context);
     if (parts.length === 2 && parts[1] === "verify") return teamVerify(context);
@@ -318,8 +348,7 @@ export const onRequest = route({
     if (parts.length === 4 && parts[1] === "members" && idOf(parts[2]) && parts[3] === "remove") return removeMember(context, idOf(parts[2]), m);
     if (parts.length === 2 && parts[1] === "gifs") return addGif(context);
     if (parts.length === 4 && parts[1] === "songs" && isCode(parts[2]) && parts[3] === "pull") return pull(context, parts[2], m);
-    if (parts.length === 4 && parts[1] === "songs" && isCode(parts[2]) && parts[3] === "group") return assignGroup(context, parts[2], m);
-    if (parts.length === 6 && parts[1] === "songs" && isCode(parts[2]) && parts[3] === "people" && idOf(parts[4]) && parts[5] === "remove") return detach(context, parts[2], idOf(parts[4]));
+    if (parts.length === 4 && parts[1] === "songs" && isCode(parts[2]) && parts[3] === "people") return repoint(context, parts[2], m);
     if (parts.length === 4 && parts[1] === "gifs" && /^[A-Za-z0-9]{1,64}$/.test(parts[2]) && parts[3] === "remove") return removeGif(context, parts[2]);
     return fail(404, "not_found", "No such API route.");
   },

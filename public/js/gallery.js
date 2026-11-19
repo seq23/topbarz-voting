@@ -43,7 +43,7 @@ export function createGallery() {
   // not be 200 presses of Tab before the VOTE button): the arrow keys, Home and End move between
   // photos, and Tab leaves the strip.
   let current = 0; // the photo that is the strip's Tab stop
-  const shots = () => [...strip.querySelectorAll(".shot")];
+  const shots = () => [...strip.querySelectorAll(".shot:not(.shot-copy)")];
   function setCurrent(i, focus = false) {
     const all = shots();
     if (!all.length) return;
@@ -111,6 +111,43 @@ export function createGallery() {
     if (Math.abs(dx) > 48) show(index + (dx < 0 ? 1 : -1));
   }, { passive: true });
 
+  // ── The holiday GIFs drift by, slowly and without end (Scooter, 18 Nov 2026: "The front-page GIFs
+  // scroll slowly and continuously"). The list is drawn twice (the copy hidden from screen readers
+  // and the keyboard) so the strip loops with no jump. It pauses while a finger, the pointer or the
+  // keyboard is on it, while the tab is hidden, and never moves for anyone who turns motion off.
+  const DRIFT_PX_PER_S = 24;
+  let drifting = false;
+  let held = false;
+  let last = 0;
+  let resume = 0;
+  function drift(t) {
+    if (!drifting) return;
+    const dt = last ? Math.min(100, t - last) : 0;
+    last = t;
+    if (!held && !document.hidden) {
+      // One lap: from the first GIF to its copy (gaps and padding included, so the loop never jumps).
+      const copy = strip.querySelector(".shot-copy")?.parentElement;
+      const loop = copy ? copy.offsetLeft - strip.firstElementChild.offsetLeft : 0;
+      let x = strip.scrollLeft + (DRIFT_PX_PER_S * dt) / 1000;
+      if (loop > 0 && x >= loop) x -= loop;
+      strip.scrollLeft = x;
+    }
+    requestAnimationFrame(drift);
+  }
+  const hold = () => { held = true; clearTimeout(resume); };
+  const letGo = (ms = 0) => { clearTimeout(resume); resume = setTimeout(() => { held = false; last = 0; }, ms); };
+  strip.addEventListener("pointerenter", hold);
+  strip.addEventListener("pointerleave", () => letGo());
+  strip.addEventListener("touchstart", hold, { passive: true });
+  strip.addEventListener("touchend", () => letGo(3000), { passive: true });
+  strip.addEventListener("focusin", hold);
+  strip.addEventListener("focusout", () => letGo());
+  function setDrift(on) {
+    strip.classList.toggle("is-drifting", on);
+    if (on && !drifting) { drifting = true; last = 0; requestAnimationFrame(drift); }
+    if (!on) drifting = false;
+  }
+
   return {
     // The words a photo's alt text starts with (the festive look renames CultureCon's).
     rename(photo) { galleryWhat.photo = photo; signature = ""; },
@@ -138,13 +175,22 @@ export function createGallery() {
       if (box.open && !photos.length) close();
       section.hidden = photos.length === 0;
       nav.hidden = photos.length < 2; // one photo: nothing to step through
-      strip.replaceChildren(...photos.map((p, i) => {
+      const drifts = gifList.length > 0 && photos.length > 1 && !reducedMotion();
+      const items = photos.map((p, i) => {
         const img = h("img", { src: p.thumb_url, alt: p.alt, width: p.width, height: p.height, loading: i < 3 ? "eager" : "lazy", decoding: "async", draggable: "false" });
         const btn = h("button", { type: "button", class: "shot" }, img);
         btn.addEventListener("click", () => open(i, btn));
         return h("li", {}, btn);
-      }));
+      });
+      // The second copy, for the loop: the same GIFs, out of reach of the keyboard and screen readers.
+      const copies = drifts ? photos.map((p, i) => {
+        const btn = h("button", { type: "button", class: "shot shot-copy", tabindex: "-1" }, h("img", { src: p.thumb_url, alt: "", width: p.width, height: p.height, loading: "lazy", decoding: "async", draggable: "false" }));
+        btn.addEventListener("click", () => open(i, btn));
+        return h("li", { "aria-hidden": "true" }, btn);
+      }) : [];
+      strip.replaceChildren(...items, ...copies);
       strip.scrollLeft = 0;
+      setDrift(drifts);
       setCurrent(0);
       requestAnimationFrame(arrows);
     },

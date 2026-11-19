@@ -33,11 +33,13 @@
   </section>
 
   <section id="tbz-upload" class="booth" aria-labelledby="tbz-booth-headline">
-    <fieldset id="tbz-groups" class="group groups" hidden>
-      <legend id="tbz-groups-title"></legend>
-      <div id="tbz-groups-list" class="groups-list"></div>
+    <section id="tbz-groups" class="groups" aria-labelledby="tbz-groups-title" aria-live="polite" hidden>
+      <p id="tbz-groups-title" class="next-label"></p>
+      <p id="tbz-groups-list" class="next-names"></p>
+      <ul id="tbz-groups-flags" class="flag-list"></ul>
+      <p id="tbz-groups-status" class="switch-note"></p>
       <p id="tbz-groups-note" class="zone-hint"></p>
-    </fieldset>
+    </section>
     <label id="tbz-zone" class="zone" for="tbz-file">
       <span id="tbz-zone-text" class="zone-text"></span>
       <span id="tbz-zone-hint" class="zone-hint"></span>

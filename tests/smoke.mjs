@@ -446,20 +446,23 @@ try {
   const dressed = await fetch(base + "/");
   const dressedText = await dressed.text();
   ok(dressed.status === 200 && !/culturecon|october 11/i.test(dressedText), `with the party on, GET / has no CultureCon and no October date anywhere, meta tags included${/culturecon/i.test(dressedText) ? ` (found: ${dressedText.match(/.{0,60}culturecon.{0,40}/i)[0]})` : ""}`);
-  ok(dressedText.includes('<meta property="og:title" content="Vote for your favorite Christmas jingle | Top Barz">') && dressedText.includes("Dick and Jane") && dressedText.includes('class="stand-in-mark"') && dressedText.includes("JUMP IN THE BOOTH"), "the link preview and the page carry the party's words and the marked prize placeholder");
+  ok(dressedText.includes('<meta property="og:title" content="Vote for your favorite Christmas jingle | Top Barz">') && /Dick (&amp;|&) Jane/.test(dressedText) && !/stand-in-mark|bar tab/.test(dressedText) && !/December 18/.test(dressedText) && dressedText.includes("JUMP IN THE BOOTH"), "the link preview and the page carry the party's words, with no prize line and no end date (Scooter, 18 Nov 2026)");
   ok((dressed.headers.get("content-security-policy") ?? "").includes("script-src 'self'"), "the dressed page keeps its content security policy");
   const priv = await fetch(base + "/privacy");
   const privText = await priv.text();
   ok(priv.status === 200 && !/culturecon/i.test(privText) && privText.includes("DRAFT") && privText.includes("phone number") && privText.includes("signed-in Top Barz team"), "with the party on, /privacy is the party's DRAFT note (what /join collects, who sees it) with no CultureCon");
-  const g1 = await post("/api/party/join", { guests: [{ name: "Smoke Ava", phone: "555 010 2030", email: "ava@example.com", city: "Brooklyn" }, { name: "Smoke Bo", phone: "555 010 4050", email: "bo@example.com", city: "Queens" }], website: "" });
-  ok(g1.status === 201 && g1.body.session.size === 2 && !("code" in g1.body.session) && !JSON.stringify({ ...g1.body, guest_key: "" }).includes("555"), "POST /api/party/join signs up a group of two on one phone: no group code, no phone in the answer");
-  ok((await post("/api/party/me", { guest_key: g1.body.guest_key })).body?.session?.size === 2, "POST /api/party/me reads it back");
+  const g1 = await post("/api/party/join", { name: "Smoke Ava", phone: "555 010 2030", email: "ava@example.com", city: "Brooklyn", website: "" });
+  ok(g1.status === 201 && g1.body.session.size === 1 && !("code" in g1.body.session) && !JSON.stringify({ ...g1.body, guest_key: "" }).includes("555"), "POST /api/party/join signs up one person: no code, no phone in the answer");
+  ok((await post("/api/party/join", { guests: [{ name: "Smoke Cy", phone: "555 010 6070", email: "cy@example.com", city: "Bronx" }, { name: "Smoke Di", phone: "555 010 8090", email: "di@example.com", city: "Bronx" }], website: "" })).status === 400, "a group sign-up is refused: everyone signs up on their own");
+  ok((await post("/api/party/me", { guest_key: g1.body.guest_key })).body?.session?.status === "waiting", "POST /api/party/me reads it back");
+  await post("/api/party/join", { name: "Smoke Bo", phone: "555 010 4050", email: "bo@example.com", city: "Queens", website: "" });
   const twice = await post("/api/party/join", { name: "Smoke Bo", phone: "555 010 4050", email: "bo@example.com", city: "Queens", website: "" });
   ok(twice.status === 409 && twice.body.error === "already_in_line" && /One place at a time/.test(twice.body.message), "the same email while in line is refused, in words");
   ok((await j("/api/party/team/line")).status === 401, "the team's line refuses anyone not signed in");
   ok((await post("/api/party/team/code", { email: "stranger@example.com" })).body?.error === "not_team", "a team code goes only to an email on the list");
   const atStation = await j("/api/booth/sessions");
-  ok(atStation.body?.on === true && Array.isArray(atStation.body.sessions), "GET /api/booth/sessions answers while the party is on");
+  ok(atStation.body?.on === true && "next" in atStation.body && Array.isArray(atStation.body.in_booth), "GET /api/booth/sessions answers the upload station's next recording while the party is on");
+  ok((await post("/api/party/rejoin", { guest_key: g1.body.guest_key })).body?.error === "already_in_line", "Get back in line while still in line is refused, in words");
   const listener = await enter(up.body.code, "listener@example.com");
   ok(listener.status === 200 && listener.body.download_url && listener.body.contest?.you?.performer === false, "with the party on, a song's code hears and downloads, and a new email is not made one of its performers");
   // /api/state is cached for 5 s under one key, and the local cache outlives the restart: read it

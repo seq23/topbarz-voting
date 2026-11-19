@@ -657,3 +657,22 @@ dialog::backdrop { background: var(--color-backdrop); }
 .faq a, .rules a, .check a { text-decoration: underline; }
 .rules { padding-block: var(--space-6) var(--space-10); }
 .rules h2:not(.page-title) { margin: var(--space-6) 0 0; color: var(--color-accent); }
+
+/* ── The holiday party, Scooter's revision list (18 Nov 2026) ─────────────────────────────────── */
+/* A square VOTE button. */
+.is-holiday .btn-vote { border-radius: 0; }
+/* The GIFs drift by (public/js/gallery.js): no snapping and no centring while they move. */
+.strip.is-drifting { scroll-snap-type: none; }
+.strip.is-drifting li:first-child, .strip.is-drifting li:last-child { margin: 0; }
+/* /track: who has access to the song. */
+.access-line { margin-top: var(--space-3); font-size: var(--text-sm); color: var(--color-ink); }
+/* A sign-up to look at twice (a test, or one made long ago): the team page and the booth page. */
+.flag-note, .flag-list .flag { margin-top: var(--space-1); padding: var(--space-1) var(--space-2); border-left: 3px solid var(--color-stop); background: var(--color-paper-2); color: var(--color-ink); font-size: var(--text-sm); }
+.flag-list { list-style: none; margin: var(--space-2) 0 0; padding: 0; }
+/* One recording on /team: its people together. */
+.take { list-style: none; margin-top: var(--space-3); }
+.take > .line { margin-top: var(--space-2); }
+.repoint-list { list-style: none; margin: var(--space-3) 0; padding: 0; max-height: 50vh; overflow-y: auto; }
+.repoint-list .check { align-items: flex-start; padding: var(--space-2) 0; border-bottom: 1px solid var(--color-paper-2); }
+.repoint-list label { display: flex; flex-direction: column; }
+.repoint-log { font-style: italic; }

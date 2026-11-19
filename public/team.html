@@ -71,6 +71,13 @@
       <div class="next-box"><p id="tbz-team-after-label" class="next-label"></p><p id="tbz-team-after" class="next-names"></p></div>
     </div>
     <p id="tbz-team-line-note" class="list-note" role="status" hidden></p>
+    <section class="board-lane" aria-labelledby="tbz-team-booth-title">
+      <h3 id="tbz-team-booth-title" class="done-title"></h3>
+      <p id="tbz-team-booth-intro" class="switch-note"></p>
+      <p id="tbz-team-booth-none" class="switch-note"></p>
+      <ol id="tbz-team-booth" class="line"></ol>
+    </section>
+    <h3 id="tbz-team-waiting-title" class="done-title"></h3>
     <ol id="tbz-team-line" class="line"></ol>
     <section class="board-lane" aria-labelledby="tbz-team-upload-title">
       <h3 id="tbz-team-upload-title" class="done-title"></h3>
@@ -118,8 +125,22 @@
     <button type="button" id="tbz-team-person-close" class="btn btn-small"></button>
   </dialog>
 
+  <dialog id="tbz-team-repoint" class="gate team-dialog" aria-labelledby="tbz-team-repoint-title">
+    <h2 id="tbz-team-repoint-title"></h2>
+    <p id="tbz-team-repoint-intro" class="switch-note"></p>
+    <div class="field"><label for="tbz-team-repoint-find" id="tbz-team-repoint-find-label"></label><input id="tbz-team-repoint-find" type="search" autocomplete="off" maxlength="60"></div>
+    <ul id="tbz-team-repoint-list" class="repoint-list"></ul>
+    <div class="field"><label for="tbz-team-repoint-note" id="tbz-team-repoint-note-label"></label><input id="tbz-team-repoint-note" type="text" autocomplete="off" maxlength="200"></div>
+    <p id="tbz-team-repoint-msg" class="field-error" role="alert" hidden></p>
+    <div class="confirm-actions">
+      <button type="button" id="tbz-team-repoint-save" class="btn"></button>
+      <button type="button" id="tbz-team-repoint-cancel" class="btn btn-ghost"></button>
+    </div>
+  </dialog>
+
   <dialog id="tbz-team-confirm" class="gate team-dialog" aria-labelledby="tbz-team-confirm-title">
     <h2 id="tbz-team-confirm-title"></h2>
+    <p id="tbz-team-confirm-note" class="flag-note" hidden></p>
     <div class="confirm-actions">
       <button type="button" id="tbz-team-confirm-yes" class="btn"></button>
       <button type="button" id="tbz-team-confirm-no" class="btn btn-ghost"></button>

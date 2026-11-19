@@ -13,7 +13,10 @@
 // "Test …", whose group is a test group, whose people are all test sign-ups, or whose code is in
 // --codes. Never touched: the songs in --keep and everyone and every group on them, the team list,
 // the GIFs, the beats, the CultureCon tracks, and every like and comment (a song taken off goes out
-// of the vote, active = 0, its likes kept as ever). Refuses production. The audio files stay in R2
+// of the vote, active = 0, its likes kept as ever). Since the 18 Nov rebuild a song's people name
+// their sign-up (booth_people.guest_id), so a kept song keeps exactly those people; a deleted song
+// takes its re-point log with it, and a recording (party_takes) left with no song and nobody in it
+// goes too. Refuses production. The audio files stay in R2
 // (reachable only by the key the deleted row held). Prints what it did (first names only) and
 // stops non-zero when a kept song is missing, before anything is written.
 import { fileURLToPath } from "node:url";
@@ -32,9 +35,10 @@ export function selectTestRows({ guests = [], visits = [], tracks = [], people =
   const keptIds = new Set(kept.map((t) => t.id));
   const keptSessions = new Set(kept.map((t) => t.party_session_id).filter((v) => v != null));
   const keptEmails = new Set(people.filter((p) => keptIds.has(p.track_id)).map((p) => norm(p.email)));
+  const keptGuestIds = new Set(people.filter((p) => keptIds.has(p.track_id) && p.guest_id != null).map((p) => p.guest_id));
   const named = new Set(names.map(norm).filter(Boolean));
   const tagged = (s) => !tag || String(s ?? "").includes(tag);
-  const protectedGuest = (g) => keptSessions.has(g.session_id) || keptEmails.has(norm(g.email)) || visits.some((v) => v.guest_id === g.id && keptSessions.has(v.session_id));
+  const protectedGuest = (g) => keptGuestIds.has(g.id) || keptSessions.has(g.session_id) || keptEmails.has(norm(g.email)) || visits.some((v) => v.guest_id === g.id && keptSessions.has(v.session_id));
   const testGuest = (g) => tagged(g.name) && (/^test\b/i.test(String(g.name ?? "").trim()) || isFirstRunEmail(g.email) || named.has(norm(g.name)));
   const G = guests.filter((g) => testGuest(g) && !protectedGuest(g));
   const gIds = new Set(G.map((g) => g.id));
@@ -50,7 +54,7 @@ export function selectTestRows({ guests = [], visits = [], tracks = [], people =
     if (keptIds.has(t.id)) return false;
     const on = people.filter((p) => p.track_id === t.id);
     if (tag) return sSet.has(t.party_session_id) || String(t.file_name ?? "").includes(tag);
-    return extra.has(String(t.code)) || isTestName(String(t.file_name ?? "")) || sSet.has(t.party_session_id) || (on.length > 0 && on.every((p) => gEmails.has(norm(p.email))));
+    return extra.has(String(t.code)) || isTestName(String(t.file_name ?? "")) || sSet.has(t.party_session_id) || (on.length > 0 && on.every((p) => (p.guest_id != null ? gIds.has(p.guest_id) : gEmails.has(norm(p.email)))));
   });
   return { missing, guests: G, sessionIds: S, tracks: B, kept };
 }
@@ -65,7 +69,7 @@ export async function cleanTestData(target, opts = {}) {
   const guests = await d1(target, "SELECT id, session_id, name, email FROM party_guests");
   const visits = await d1(target, "SELECT guest_id, session_id FROM party_visits");
   const tracks = await d1(target, "SELECT id, code, file_name, party_session_id, vote_track_id FROM booth_tracks");
-  const people = await d1(target, "SELECT track_id, email FROM booth_people");
+  const people = await d1(target, "SELECT track_id, email, guest_id FROM booth_people");
   const picked = selectTestRows({ guests, visits, tracks, people }, opts);
   const lines = [];
   if (picked.missing.length) throw new Error(`STOPPED: the song${picked.missing.length > 1 ? "s" : ""} to keep (${picked.missing.join(", ")}) ${picked.missing.length > 1 ? "are" : "is"} not in ${target.db}; nothing was written. Check the code.`);
@@ -78,6 +82,7 @@ export async function cleanTestData(target, opts = {}) {
   const sql = [];
   if (tIds.length) {
     sql.push(`DELETE FROM booth_people WHERE track_id IN (${list(tIds)});`);
+    sql.push(`DELETE FROM booth_repoints WHERE track_id IN (${list(tIds)});`);
     sql.push(`UPDATE tracks SET active = 0 WHERE source_name IN (${list(tIds.map((id) => `booth:${id}`))});`);
     sql.push(`DELETE FROM booth_tracks WHERE id IN (${list(tIds)});`);
   }
@@ -86,6 +91,8 @@ export async function cleanTestData(target, opts = {}) {
   if (gIds.length || picked.sessionIds.length) sql.push(`DELETE FROM party_visits WHERE guest_id IN (${list(gIds.length ? gIds : [-1])}) OR session_id IN (${list(picked.sessionIds.length ? picked.sessionIds : [-1])});`);
   if (gIds.length) sql.push(`DELETE FROM party_guests WHERE id IN (${list(gIds)});`);
   if (picked.sessionIds.length) sql.push(`DELETE FROM party_sessions WHERE id IN (${list(picked.sessionIds)});`);
+  // A recording with no song left and nobody left in it is gone with them.
+  if (sql.length) sql.push("DELETE FROM party_takes WHERE (track_id IS NULL OR track_id NOT IN (SELECT id FROM booth_tracks)) AND id NOT IN (SELECT take_id FROM party_sessions WHERE take_id IS NOT NULL);");
   if (!sql.length) { lines.push("nothing to clean: no test records found."); return { lines, picked }; }
   const keepCheck = picked.kept.length ? `SELECT COUNT(*) AS n FROM booth_tracks WHERE code IN (${list(picked.kept.map((t) => t.code))})` : "SELECT 0 AS n";
   const [{ n }] = await d1(target, `${sql.join("\n")}\n${keepCheck};`);

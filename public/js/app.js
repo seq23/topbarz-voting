@@ -509,7 +509,7 @@ function setClosed(closed) {
   app.closed = closed;
   document.body.dataset.voting = closed ? "closed" : "open";
   els.windowWord.textContent = closed ? "Voting ended" : "Voting ends";
-  els.countdownRow.hidden = closed;
+  els.countdownRow.hidden = closed || app.noEnd;
   els.closedHero.hidden = !closed;
   els.closedNote.hidden = !closed;
   els.vote.textContent = closed ? "LISTEN" : "VOTE";
@@ -522,11 +522,16 @@ function setClosed(closed) {
 }
 
 // The rules' last line follows the window: it never promises an end that has passed.
-// While the holiday party is on, the end is the day Scooter set, with its time marked as not set
-// yet (HOLIDAY.dates), never a time read off the preview's window as if it were final.
-const endsWords = () => (app.holiday ? `${HOLIDAY.dates.votingEnds} (${HOLIDAY.dates.timeMark})` : formatEndsLine(app.endMs));
+const endsWords = () => formatEndsLine(app.endMs);
 function renderRuleEnds() {
   if (Number.isFinite(app.endMs)) els.ruleEnds.textContent = rulesEndLine(app.closed, endsWords());
+}
+// No end set (the holiday party until Scooter sends the cutoff, 18 Nov 2026: "make sure nothing
+// actually closes voting on that date"): no "Voting ends" line, no countdown, no end in the rules.
+function renderNoEnd() {
+  els.ends.closest(".window").hidden = app.noEnd;
+  els.ruleEnds.hidden = app.noEnd;
+  els.countdownRow.hidden = app.noEnd || app.closed;
 }
 
 let spokenMinute = null;
@@ -559,7 +564,8 @@ festive().then((on) => { if (on) gallery.rename(HOLIDAY.home.photoAlt); });
 
 function applyState(state, generatedAt) {
   app.loaded = true;
-  app.endMs = Date.parse(state.voting_ends_at);
+  app.endMs = state.voting_ends_at === null ? NaN : Date.parse(state.voting_ends_at);
+  app.noEnd = state.voting_ends_at === null;
   app.holiday = state.holiday?.on === true;
   app.serverClosed = state.closed === true || generatedAt < app.closedHold;
   app.gateOn = state.gate?.available !== false;
@@ -567,6 +573,7 @@ function applyState(state, generatedAt) {
   app.codesOn = state.verification?.available === true;
   if (Number.isFinite(app.endMs)) els.ends.textContent = endsWords();
   renderRuleEnds();
+  renderNoEnd();
   els.offNote.hidden = app.gateOn;
   const notOpen = state.open === false && state.closed !== true;
   els.notOpenNote.hidden = !notOpen;

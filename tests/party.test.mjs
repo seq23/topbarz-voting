@@ -1,7 +1,7 @@
 // The holiday party (Scooter, 17 Nov 2026, and his consolidated revision list of 18 Nov 2026): the
 // QR sign-up (one person each), the team's line with its four lanes and sign-in, the ambassador's
 // taps making the recording (take) a song lands on, the song managed first come on /track and going
-// into the vote by itself, the team's re-point, the gallery GIFs, verified-only counts, no end date
+// into the vote by itself, the team's re-point, the gallery GIFs, verified-only counts, the end (27 Nov 2026, 11:59 PM ET)
 // and the switch. Against a real local D1 and R2.
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -550,15 +550,17 @@ test("after voting ends nothing moves: the box and the title answer 403 voting_c
   assert.equal((await B(code, "title", { email: "late@gmail.com", title: "x" }, freshIp(), closedEnv)).body.error, "voting_closed");
 });
 
-test("no end set (Scooter, 18 Nov 2026): while the party is on nothing closes and nothing counts down; a vote counts only after the 6-digit code", async () => {
+test("the end (Scooter, 19 Nov 2026): voting closes Friday, November 27 at 11:59 PM ET; nothing after it counts; a vote counts only after the 6-digit code", async () => {
   const { buildState } = await import("../functions/_lib/state.js");
-  const s = await buildState(withRealEnd(env));
-  assert.deepEqual([s.voting_ends_at, s.closed, s.open], [null, false, true], "no end date, open");
+  const before = Date.parse("2026-11-27T12:00:00Z");
+  const s = await buildState(withRealEnd(env), before);
+  assert.deepEqual([s.voting_ends_at, s.closed, s.open], ["2026-11-28T04:59:00.000Z", false, true], "the end is 11:59 PM EST on 27 Nov, and it is open before it");
   const { PARTY_VOTING_ENDS_AT, votingPhase } = await import("../functions/_lib/config.js");
-  assert.equal(PARTY_VOTING_ENDS_AT, null);
-  assert.equal(votingPhase(withRealEnd(env), Date.parse("2026-12-19T12:00:00Z"), null, null).closed, false, "December 18 closes nothing");
-  assert.equal(votingPhase(withRealEnd(env), Date.parse("2030-01-01T00:00:00Z"), null, null).closed, false, "nor any later day");
-  assert.equal(votingPhase(withRealEnd({ ...env, HOLIDAY_EVENT: "off" }), Date.parse("2026-12-19T12:00:00Z"), null, null).closed, true, "production (party off) keeps its own end");
+  assert.equal(PARTY_VOTING_ENDS_AT, "2026-11-28T04:59:00Z");
+  assert.equal(votingPhase(withRealEnd(env), Date.parse("2026-11-28T04:58:59Z"), null, null).closed, false, "a second before: open");
+  assert.equal(votingPhase(withRealEnd(env), Date.parse("2026-11-28T04:59:00Z"), null, null).closed, true, "at 11:59 PM ET: closed");
+  assert.equal((await buildState(withRealEnd(env), Date.parse("2026-11-28T05:00:00Z"))).closed, true, "/api/state says closed after it");
+  assert.equal(votingPhase(withRealEnd({ ...env, HOLIDAY_EVENT: "off" }), Date.parse("2026-11-27T12:00:00Z"), null, null).closed, true, "production (party off) keeps its own end");
   assert.equal(votingPhase({ ...withRealEnd(env), ALLOW_END_OVERRIDE: "1" }, Date.parse("2026-12-19T12:00:00Z"), null, "2026-12-01T00:00:00Z").closed, true, "a preview rehearsal row still closes it");
   // Verified only: an unverified voter's like is kept and not counted; it counts once they verify.
   const token = await teamToken();
@@ -577,6 +579,26 @@ test("no end set (Scooter, 18 Nov 2026): while the party is on nothing closes an
   await env.DB.prepare("UPDATE voters SET verified = 1 WHERE id = ?1").bind(unv.id).run();
   assert.equal((await stateNow()).tracks.find((t) => t.slug === slug).likes, 2, "it counts the moment that voter enters a code");
   assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM like_events e JOIN tracks t ON t.id = e.track_id WHERE t.slug = ?1").bind(slug).first()).n, 2, "nothing was lost");
+  // A code entered after the cutoff adds no vote: a like from before the end whose voter verified
+  // after it is kept and never counted, on the page and in the party's export.
+  const tardy = await mk("tardy.count@gmail.com", 0);
+  assert.equal((await like(tardy.id)).likes, 2, "kept, not counted yet");
+  await env.DB.prepare("UPDATE voters SET verified = 1, verified_at = '2026-11-28T05:10:00.000Z' WHERE id = ?1").bind(tardy.id).run();
+  const countAt = async (now) => (await buildState(withRealEnd(env), now)).tracks.find((t) => t.slug === slug).likes;
+  assert.equal(await countAt(Date.parse("2026-11-28T06:00:00Z")), 2, "verified after 11:59 PM ET: not counted");
+  await env.DB.prepare("UPDATE voters SET verified_at = '2026-11-28T04:58:00.000Z' WHERE id = ?1").bind(tardy.id).run();
+  assert.equal(await countAt(Date.parse("2026-11-28T06:00:00Z")), 3, "verified a minute before: counted");
+  const { partyCounts } = await import("../scripts/export.mjs");
+  const ev = (created_at, verified_at, verified = 1) => ({ created_at, verified_at, verified });
+  assert.equal(partyCounts(ev("2026-11-27T20:00:00Z", "2026-11-27T20:01:00Z")), true, "export: like and code before the end count");
+  assert.equal(partyCounts(ev("2026-11-27T20:00:00Z", "2026-11-28T05:00:00Z")), false, "export: a code after the end does not");
+  assert.equal(partyCounts(ev("2026-11-28T05:00:00Z", "2026-11-27T20:01:00Z")), false, "export: a like after the end does not");
+  assert.equal(partyCounts(ev("2026-11-27T20:00:00Z", null, 0)), false, "export: no code, no count");
+  // After the cutoff the server refuses the like itself (the route reads the same window).
+  const likesRoute = await import("../functions/api/likes.js");
+  const lateVoter = await env.DB.prepare("INSERT INTO voters (name, email, email_key, city, created_at, verified) VALUES ('L', 'late.like@gmail.com', 'late.like@gmail.com', 'Bronx', ?1, 1) RETURNING id").bind(new Date().toISOString()).first();
+  const late = await call(likesRoute.onRequest, { ...env, VOTING_ENDS_AT: "2020-06-01T00:00:00Z" }, { method: "POST", path: "/api/likes", body: { track: slug, liked: true }, token: await signVoterToken(env, lateVoter.id), ip: freshIp() });
+  assert.deepEqual([late.status, late.body.error], [403, "voting_closed"], "a like after the end is refused, not stored");
 });
 
 test("the team's safety valve: Take out of the vote from /team holds even if it is entered again; Put back re-enters; likes kept; team only", async () => {
@@ -686,4 +708,39 @@ test("party on: a pre-party track is not in the vote; party off: it is", async (
   } finally {
     await env.DB.prepare("DELETE FROM tracks WHERE slug IN ('pre-party', 'party-jingle')").run();
   }
+});
+
+test("the demo song (Scooter, 19 Nov 2026: \"make sure I can ... take a song through contest entry and see it appear on the voting page\"): eligible, entered by its singer's email, on the vote, and one run resets it", async () => {
+  const demo = await import("../scripts/demo-song.mjs");
+  assert.match(demo.checkArgs({ env: "production" }).error, /preview only/, "production is refused");
+  assert.match(demo.checkArgs({ env: "preview", name: "Scooter Taylor" }).error, /Scooter Taylor/, "a song with Scooter Taylor on it never goes in the vote");
+  assert.match(demo.checkArgs({ env: "preview", name: "Test Ava" }).error, /Test/);
+  assert.match(demo.checkArgs({ env: "preview", email: "nope" }).error, /email/);
+  assert.deepEqual(demo.checkArgs({ env: "preview" }), { name: "Demo Singer", email: "jingle.demo@example.com" });
+  const wav = demo.jingleWav();
+  assert.deepEqual([wav.toString("ascii", 0, 4), wav.toString("ascii", 8, 12), wav.readUInt32LE(40) === wav.length - 44], ["RIFF", "WAVE", true]);
+  assert.ok(wav.length / (22050 * 2) > 6, "a few seconds of music, not a click");
+  await clearStation();
+  const run = async (stmts) => { for (const sql of stmts) await env.DB.prepare(sql).run(); };
+  const now = Date.now();
+  await run(demo.createStatements({ code: "8642", key: "booth/8642-0011223344556677.wav", size: wav.length, now, name: "Demo Singer", email: "jingle.demo@example.com", guest: "ab".repeat(12), session: "DMQX" }));
+  const found = await env.DB.prepare(demo.FIND_SQL).first();
+  assert.deepEqual(found, { code: "8642", email: "jingle.demo@example.com" }, "the script finds its own song again (a second run resets, never a second song)");
+  const view = (await B("8642", "enter", { email: "jingle.demo@example.com" })).body.contest;
+  assert.deepEqual([view.access, view.you.performer, view.you.can_manage, view.step], [["Demo"], true, true, "not_entered"], "the singer's email manages it; it is not entered yet");
+  assert.deepEqual((await B("8642", "enter", { email: "listener@gmail.com" })).body.contest.you.can_manage, false, "anyone else hears it only");
+  const demoRow = (await get("team/line", { token: await teamToken() })).body.sessions.find((x) => x.guests.some((g) => g.email === "jingle.demo@example.com"));
+  assert.ok(!demoRow || laneOf(demoRow) === "done", "the demo singer holds no place in the line or at the upload station");
+  assert.deepEqual(await station().then((st) => JSON.stringify(st).includes("Demo")), false, "and is never the engineer's next upload");
+  assert.equal((await B("8642", "title", { email: "jingle.demo@example.com", title: "Jingle Demo" })).status, 200);
+  const ticked = await B("8642", "contest", { email: "jingle.demo@example.com", enter: true, agree: true });
+  assert.deepEqual([ticked.status, ticked.body.contest.entered, ticked.body.contest.step], [200, true, "in"], "Enter puts it in");
+  assert.ok(await inVote("Jingle Demo"), "and it is on the voting page");
+  await run(demo.resetStatements({ code: "8642", now: Date.now() }));
+  assert.ok(!(await inVote("Jingle Demo")), "the reset takes it out of the vote");
+  const after = (await B("8642", "enter", { email: "jingle.demo@example.com" })).body.contest;
+  assert.deepEqual([after.ticked, after.manager, after.title, after.you.can_manage], [false, null, "", true], "not entered, nobody manages it, no title: ready to show again");
+  assert.equal((await B("8642", "contest", { email: "jingle.demo@example.com", enter: true, agree: true })).body.contest.entered, true, "and it goes in again");
+  assert.ok(await inVote("Demo") || await inVote("Jingle Demo"), "the same song, back on the voting page");
+  await B("8642", "contest", { email: "jingle.demo@example.com", enter: false });
 });

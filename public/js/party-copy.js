@@ -1,17 +1,20 @@
-// The holiday party's shared words (Scooter, 17 Nov 2026, and his revision list of 18 Nov: "Event
-// names use "&": Dick & Jane's and Blitz & Bubbles", "Remove the prize line for now", "Remove the
-// "Voting ends Friday, December 18" line ... I'll confirm the real cutoff date and time before
-// anything counts down or closes"). No prize and no end date is shown until he sends them. The partner logos are white versions of the marks Scooter sent (scripts/make-partner-logos.mjs),
+// The holiday party's shared words (Scooter, 17 Nov 2026, his revision list of 18 Nov: "Event names
+// use "&": Dick & Jane's and Blitz & Bubbles", and his decisions of 19 Nov: "Voting closes Friday,
+// November 27 at 11:59pm Eastern. Restore the countdown with the cutoff date and time visible",
+// "Use "Prize details TBD" for now"). The partner logos are white versions of the marks Scooter sent (scripts/make-partner-logos.mjs),
 // sized by visual weight rather than one shared height (his note: 20 to 46 px each, none reading
 // bigger than the rest), in one row under "in partnership with".
 export const HOLIDAY = {
   title: "Top Barz Christmas Party",
-  // The dates (Scooter, 18 Nov 2026): the party is Sunday, December 13. The end of voting is NOT set
-  // (his later note the same day: the December 18 line "was placeholder text"): nothing shows an end
-  // date, nothing counts down and nothing closes (PARTY_VOTING_ENDS_AT in functions/_lib/config.js).
+  // The dates: the party is Sunday, December 13 (18 Nov 2026). Voting closes Friday, November 27 at
+  // 11:59 PM Eastern (19 Nov 2026); the moment itself is PARTY_VOTING_ENDS_AT in
+  // functions/_lib/config.js, and the page says it in this zone.
   dates: {
     party: "Sunday, December 13",
+    zone: "America/New_York",
   },
+  // The prize line, Scooter's words until he confirms the terms with the partners (19 Nov 2026).
+  prize: "Prize details TBD",
   partnersWith: "in partnership with",
   // height: on a desktop; mobile: on a phone (px). Order as Scooter wrote it.
   partners: [

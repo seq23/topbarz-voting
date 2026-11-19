@@ -446,7 +446,7 @@ try {
   const dressed = await fetch(base + "/");
   const dressedText = await dressed.text();
   ok(dressed.status === 200 && !/culturecon|october 11/i.test(dressedText), `with the party on, GET / has no CultureCon and no October date anywhere, meta tags included${/culturecon/i.test(dressedText) ? ` (found: ${dressedText.match(/.{0,60}culturecon.{0,40}/i)[0]})` : ""}`);
-  ok(dressedText.includes('<meta property="og:title" content="Vote for your favorite Christmas jingle | Top Barz">') && /Dick (&amp;|&) Jane/.test(dressedText) && !/stand-in-mark|bar tab/.test(dressedText) && !/December 18/.test(dressedText) && dressedText.includes("JUMP IN THE BOOTH"), "the link preview and the page carry the party's words, with no prize line and no end date (Scooter, 18 Nov 2026)");
+  ok(dressedText.includes('<meta property="og:title" content="Vote for your favorite Christmas jingle | Top Barz">') && /Dick (&amp;|&) Jane/.test(dressedText) && !/stand-in-mark|bar tab/.test(dressedText) && !/December 18/.test(dressedText) && dressedText.includes("JUMP IN THE BOOTH") && dressedText.includes("Prize details TBD") && dressedText.includes('<strong id="tbz-ends">Friday, November 27 at 11:59 PM EST</strong>') && !/id="tbz-countdown-row"[^>]*hidden/.test(dressedText), "the link preview and the page carry the party's words, \"Prize details TBD\", the end in Eastern time and the countdown (Scooter, 19 Nov 2026)");
   ok((dressed.headers.get("content-security-policy") ?? "").includes("script-src 'self'"), "the dressed page keeps its content security policy");
   const priv = await fetch(base + "/privacy");
   const privText = await priv.text();

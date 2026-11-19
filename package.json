@@ -28,7 +28,8 @@
     "party-window": "node scripts/party-window.mjs",
     "first-run": "node scripts/first-run.mjs",
     "make-partner-logos": "node scripts/make-partner-logos.mjs",
-    "clean-test-data": "node scripts/clean-test-data.mjs"
+    "clean-test-data": "node scripts/clean-test-data.mjs",
+    "demo-song": "node scripts/demo-song.mjs"
   },
   "devDependencies": {
     "qrcode": "^1.5.4",

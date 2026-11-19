@@ -938,10 +938,11 @@ test("closed: nothing on the page still promises a future end, and a like that a
   assert.ok(read("index.html").includes(`<li id="tbz-rule-ends">${rulesEndLine(false, ends)}</li>`), "the rules line as shipped is the open one, from the same function");
   const app = read("js/app.js");
   assert.match(app, /els\.ruleEnds\.textContent = rulesEndLine\(app\.closed, endsWords\(\)\)/);
-  // The line is the server's end time. With no end set (the party, until Scooter sends the cutoff,
-  // 18 Nov 2026: "make sure nothing actually closes voting on that date") there is no end line, no
-  // countdown and no end in the rules: /api/state answers voting_ends_at null.
-  assert.match(app, /const endsWords = \(\) => formatEndsLine\(app\.endMs\);/);
+  // The line is the server's end time (in Eastern while the holiday party is on). With no end set
+  // (/api/state answers voting_ends_at null) there is no end line, no countdown and no end in the rules.
+  assert.match(app, /const endsWords = \(\) => formatEndsLine\(app\.endMs, app\.holiday \? HOLIDAY\.dates\.zone : undefined\);/);
+  assert.equal(formatEndsLine(Date.parse("2026-11-28T04:59:00Z"), "America/New_York"), "Friday, November 27 at 11:59 PM EST");
+  assert.equal(formatEndsLine(Date.parse("2026-10-12T06:59:00Z")), "Sunday, October 11 at 11:59 PM PDT", "CultureCon's line is unchanged");
   assert.match(app, /app\.noEnd = state\.voting_ends_at === null;/);
   assert.match(/function renderNoEnd\(\) \{[\s\S]*?\n\}/.exec(app)[0], /els\.ends\.closest\("\.window"\)\.hidden = app\.noEnd;\s*els\.ruleEnds\.hidden = app\.noEnd;\s*els\.countdownRow\.hidden = app\.noEnd \|\| app\.closed;/);
   assert.match(/function setClosed\(closed\) \{[\s\S]*?\n\}/.exec(app)[0], /els\.countdownRow\.hidden = closed \|\| app\.noEnd;/, "closing never brings back a countdown with no end");

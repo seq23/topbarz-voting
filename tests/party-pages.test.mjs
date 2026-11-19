@@ -157,7 +157,7 @@ test("the team's page: every change asks first and can be undone; no swipe can c
   assert.match(read("public/team.html"), /<meta name="robots" content="noindex">/);
 });
 
-test("the partners: white marks made from the files Scooter sent, named with \"&\", one row under the Top Barz logo, each sized by weight within 20 to 46 px; no prize line; the rules page is a DRAFT, 21 and over, preview only", async () => {
+test("the partners: white marks made from the files Scooter sent, named with \"&\", one row under the Top Barz logo, each sized by weight within 20 to 46 px; the prize reads \"Prize details TBD\"; the rules page is a DRAFT, 21 and over, preview only", async () => {
   assert.deepEqual(HOLIDAY.partners.map((p) => p.name), ["Flow Music", "Dick & Jane's", "Blitz & Bubbles"]);
   for (const p of HOLIDAY.partners) {
     assert.ok(p.desktop >= 20 && p.desktop <= 46 && p.mobile >= 20 && p.mobile <= 46, `${p.name}: ${p.mobile}/${p.desktop} px`);
@@ -195,8 +195,10 @@ test("the partners: white marks made from the files Scooter sent, named with \"&
   assert.match(css, /\.logo img \{ width: 116px; \}/, "the Top Barz logo keeps its size (116 px wide, about 102 px tall)");
   assert.ok(!/culturecon/i.test(JSON.stringify(HOLIDAY)), "no CultureCon in the party's words");
   assert.match(HOLIDAY.home.lede, /JUMP IN THE BOOTH/);
-  assert.ok(!("prize" in HOLIDAY) && !("prizeMark" in HOLIDAY), "the prize line is removed until Scooter sends the terms");
-  assert.ok(!/HOLIDAY\.prize/.test(festive), "and nothing draws one");
+  assert.equal(HOLIDAY.prize, "Prize details TBD", "Scooter's words until he confirms the terms (19 Nov 2026)");
+  assert.ok(!/bar tab/i.test(JSON.stringify(HOLIDAY)), "no promised prize anywhere");
+  assert.match(festive, /prize\.textContent = HOLIDAY\.prize;/, "the page writes it in place of CultureCon's prize");
+  assert.match(read("functions/index.js"), /\.on\('section\[aria-labelledby="tbz-prize-title"\] p', text\(HOLIDAY\.prize\)\)/, "and so does the server, before any script runs");
   assert.ok(!/Dick and Jane|Blitz and Bubbles/.test(JSON.stringify(HOLIDAY) + read("public/holiday-rules.html") + read("functions/_lib/party-privacy.js")), "the names are written with \"&\"");
   const rules = read("public/holiday-rules.html");
   assert.match(rules, /<meta name="robots" content="noindex">/);
@@ -249,15 +251,22 @@ test("the gallery: the team's GIFs replace the photos while there are any, with 
   assert.match(read("public/css/site.css"), /\.strip\.is-drifting/);
 });
 
-test("the party's dates (Scooter, 18 Nov 2026): Sunday, December 13; no end date shown, nothing counting down, nothing set to close; no time of day while the cutoff is open", () => {
-  assert.deepEqual(HOLIDAY.dates, { party: "Sunday, December 13" });
+test("the party's dates: Sunday, December 13 (18 Nov 2026); voting closes Friday, November 27 at 11:59 PM Eastern, shown with the countdown (19 Nov 2026)", async () => {
+  assert.deepEqual(HOLIDAY.dates, { party: "Sunday, December 13", zone: "America/New_York" });
   const all = JSON.stringify(HOLIDAY) + read("public/holiday-rules.html") + read("functions/index.js") + read("public/js/app.js") + read("public/js/festive.js");
   assert.ok(!/December 18|Dec(ember)?\.? 18|2026-12-1[89]/.test(all), "the December 18 placeholder is gone everywhere");
   assert.ok(HOLIDAY.home.lede.includes(HOLIDAY.dates.party), "the party's day is on the voting page");
   assert.ok(HOLIDAY.home.notOpenRefusal.includes(HOLIDAY.dates.party), "before voting opens, the page names the party night");
-  assert.ok(!/\b\d{1,2}(:\d{2})?\s*(AM|PM)\b/i.test(HOLIDAY.home.notOpen + HOLIDAY.home.notOpenRefusal), "no time of day while the cutoff is unset");
   const rules = read("public/holiday-rules.html");
   assert.ok(rules.includes("Sunday, December 13, 2026"), "the rules draft carries the party day");
-  assert.match(rules, /\[Open: the date and exact time voting ends/, "the end is marked open in the draft");
-  assert.match(read("functions/_lib/config.js"), /export const PARTY_VOTING_ENDS_AT = null;/, "no end is set in code");
+  assert.ok(rules.includes("Voting closes Friday, November 27, 2026 at 11:59 PM Eastern Time."), "and the cutoff");
+  assert.ok(!/\[Open: the date and exact time voting ends/.test(rules), "the end is no longer marked open");
+  const { PARTY_VOTING_ENDS_AT } = await import("../functions/_lib/config.js");
+  const { formatEndsLine } = await import("../public/js/logic.js");
+  assert.equal(formatEndsLine(Date.parse(PARTY_VOTING_ENDS_AT), HOLIDAY.dates.zone), "Friday, November 27 at 11:59 PM EST", "the moment in code is 11:59 PM Eastern on the 27th");
+  const app = read("public/js/app.js");
+  assert.match(app, /const endsWords = \(\) => formatEndsLine\(app\.endMs, app\.holiday \? HOLIDAY\.dates\.zone : undefined\);/, "the page says it in Eastern time while the party is on");
+  const index = read("functions/index.js");
+  assert.match(index, /\.on\("#tbz-ends", text\(ends\)\)/, "the server writes the end line before any script runs");
+  assert.match(index, /\.on\("#tbz-countdown-row", ends \? \{\} : hide\)/, "and keeps the countdown row");
 });

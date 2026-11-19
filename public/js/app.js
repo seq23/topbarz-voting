@@ -522,12 +522,12 @@ function setClosed(closed) {
 }
 
 // The rules' last line follows the window: it never promises an end that has passed.
-const endsWords = () => formatEndsLine(app.endMs);
+const endsWords = () => formatEndsLine(app.endMs, app.holiday ? HOLIDAY.dates.zone : undefined);
 function renderRuleEnds() {
   if (Number.isFinite(app.endMs)) els.ruleEnds.textContent = rulesEndLine(app.closed, endsWords());
 }
-// No end set (the holiday party until Scooter sends the cutoff, 18 Nov 2026: "make sure nothing
-// actually closes voting on that date"): no "Voting ends" line, no countdown, no end in the rules.
+// No end set (/api/state answers voting_ends_at null): no "Voting ends" line, no countdown, no end in
+// the rules. The holiday party has one (Scooter, 19 Nov 2026: Friday, November 27 at 11:59 PM ET).
 function renderNoEnd() {
   els.ends.closest(".window").hidden = app.noEnd;
   els.ruleEnds.hidden = app.noEnd;

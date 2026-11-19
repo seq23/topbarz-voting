@@ -4,7 +4,7 @@
 // prints one line starting FIRST_RUN OK when every step passed.
 //   node scripts/first-run.mjs --url https://<branch>.topbarz-voting.pages.dev   (or FIRST_RUN_URL)
 // Steps: every changed page loads with no placeholder text or error (and the partner logos load);
-// the party is on and no end date is set; two people sign up, each on their own (no codes, no group
+// the party is on, the end (27 Nov, 11:59 PM ET), the prize line and the updates box are as Scooter set them; two people sign up, each on their own (no codes, no group
 // setup), and a reload still shows the first; the same email cannot sign up again while in line
 // ("already in line", said, not a silent block); with nobody at the upload station, a walk-up
 // upload's code lets someone hear and download but never puts them on the song; the team's line
@@ -17,6 +17,8 @@
 // one tap puts the first person back in line.
 // Test data only: "Test …" names, @example.com addresses; production refuses it (and the party
 // is off there).
+import { PARTY_VOTING_ENDS_AT } from "../functions/_lib/config.js";
+const PARTY_END = new Date(Date.parse(PARTY_VOTING_ENDS_AT)).toISOString();
 const arg = (name) => { const i = process.argv.indexOf(`--${name}`); return i > 0 ? process.argv[i + 1] : undefined; };
 const base = String(arg("url") ?? process.env.FIRST_RUN_URL ?? "").replace(/\/$/, "");
 if (!/^https?:\/\//.test(base)) { console.error("FIRST_RUN FAILED: give the preview address: --url https://… (or FIRST_RUN_URL)"); process.exit(2); }
@@ -49,10 +51,17 @@ const party = await req("/api/party");
 if (party.json?.on !== true) fail(`the party is not switched on here (/api/party: ${party.text.slice(0, 80)})`);
 ok("the holiday party is on");
 
-if (party.json?.voting_ends_at) fail(`an end date is set (${party.json.voting_ends_at}); Scooter has not set one`);
+// The end (Scooter, 19 Nov 2026): Friday, November 27 at 11:59 PM Eastern, on the page with the
+// countdown, beside "Prize details TBD" and an unticked, optional "Send me Top Barz updates".
 const state0 = await req("/api/state");
-if (state0.json?.voting_ends_at) fail(`/api/state carries an end date (${state0.json.voting_ends_at}): run npm run party-window -- --env preview --starts <ISO> --no-end`);
-ok("no end date is set: nothing counts down and nothing closes");
+if (state0.json?.voting_ends_at !== PARTY_END) fail(`/api/state ends at ${state0.json?.voting_ends_at}, not ${PARTY_END} (11:59 PM ET, 27 Nov): a preview settings row may override it (npm run party-window -- --env preview --clear)`);
+if (state0.json?.closed !== false && Date.now() < Date.parse(PARTY_END)) fail("/api/state says voting is closed before the end");
+const home = await req("/", { headers: { accept: "text/html" } });
+if (!home.text.includes('<strong id="tbz-ends">Friday, November 27 at 11:59 PM EST</strong>')) fail("the voting page does not show the cutoff (Friday, November 27 at 11:59 PM EST)");
+if (/id="tbz-countdown-row"[^>]*hidden/.test(home.text)) fail("the countdown row is hidden");
+if (!home.text.includes("Prize details TBD")) fail("the voting page does not say Prize details TBD");
+if (!/<input id="tbz-gate-optin" name="marketing_opt_in" type="checkbox">/.test(home.text) || /tbz-gate-optin[^>]*(checked|required)/.test(home.text)) fail("Send me Top Barz updates must ship unticked and optional");
+ok("voting ends Friday, November 27 at 11:59 PM EST, shown with the countdown; Prize details TBD; the updates box unticked and optional");
 
 // 2. Two people, each signing up on their own, and a reload.
 const tag = `${Date.now().toString(36)}`;

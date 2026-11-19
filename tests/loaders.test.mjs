@@ -159,7 +159,7 @@ test("contacts CSV: one row per voter, quoted properly, formulas defused", () =>
   assert.ok(csv[4].endsWith(",no (unknown)"), "a voter with no reason on file is named, never shown as verified");
   // The export reads the two new columns from the database it is pointed at.
   const exportSource = fs.readFileSync(path.join(ROOT, "scripts", "export.mjs"), "utf8");
-  assert.match(exportSource, /SELECT e\.id, e\.track_id, e\.action, e\.created_at, v\.verified FROM like_events e JOIN voters v ON v\.id = e\.voter_id WHERE v\.flagged = 0 ORDER BY e\.id/);
+  assert.match(exportSource, /SELECT e\.id, e\.track_id, e\.action, e\.created_at, v\.verified, v\.verified_at FROM like_events e JOIN voters v ON v\.id = e\.voter_id WHERE v\.flagged = 0 ORDER BY e\.id/);
   assert.match(exportSource, /flag_reason, verified, unverified_reason FROM voters/);
   assert.equal(csvCell("+1 555"), "'+1 555");
 });

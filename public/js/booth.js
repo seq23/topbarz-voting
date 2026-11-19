@@ -1,6 +1,8 @@
 // The engineer's page (/booth): drop or choose a finished file, watch it go up, read the 4-digit
 // code out to the artist, next file. Under it, today's uploads (GET /api/booth/tracks). The
-// upload is an XMLHttpRequest because fetch has no upload progress. Each row says how many people
+// upload is an XMLHttpRequest because fetch has no upload progress. While the holiday party is on,
+// the page shows whose song the file goes to (the next recording at the upload station) before the
+// drop, and the upload carries which one it showed. Each row says how many people
 // entered its code ("3 people") and "all in" when every one of them opted in to the public vote:
 // counts only, never a name or an address (the log route carries none). Nothing here is part of
 // the vote, and nothing here is remembered on the device.
@@ -29,9 +31,19 @@ const els = {
   logTitle: $("tbz-log-title"),
   logNote: $("tbz-log-note"),
   logList: $("tbz-log-list"),
+  groups: $("tbz-groups"),
+  groupsTitle: $("tbz-groups-title"),
+  groupsList: $("tbz-groups-list"),
+  groupsFlags: $("tbz-groups-flags"),
+  groupsStatus: $("tbz-groups-status"),
+  groupsNote: $("tbz-groups-note"),
+  walkup: $("tbz-walkup"),
+  walkupText: $("tbz-walkup-text"),
+  walkupPick: $("tbz-walkup-pick"),
+  walkupGo: $("tbz-walkup-go"),
 };
 
-const app = { busy: false, lastFile: null };
+const app = { busy: false, lastFile: null, station: null, asking: null };
 
 // ── The words (booth-copy.js)
 document.title = `${COPY.headline} | Top Barz`;
@@ -43,6 +55,43 @@ els.doneTitle.textContent = COPY.doneTitle;
 els.next.textContent = COPY.next;
 els.retry.textContent = COPY.retry;
 els.logTitle.textContent = COPY.logTitle;
+els.groupsTitle.textContent = COPY.groupsTitle;
+els.walkupText.textContent = COPY.walkUpConfirm;
+els.walkupPick.textContent = COPY.walkUpPick;
+els.walkupGo.textContent = COPY.walkUpGo;
+
+// ── The holiday party: whose song this is. The next recording at the upload station (the people the
+// ambassador tapped in and out on /team), shown before the drop; the upload says which one it saw,
+// and the server refuses it if the station changed since (never a song on people nobody saw).
+function renderStation() {
+  const st = app.station;
+  const next = st?.next ?? null;
+  els.groupsTitle.textContent = COPY.groupsTitle;
+  els.groupsList.textContent = next ? next.names : "";
+  els.groupsList.hidden = !next;
+  const flagged = (next?.people ?? []).filter((p) => p.flags?.length);
+  els.groupsFlags.replaceChildren(...flagged.map((p) => h("li", { class: "flag", text: COPY.flagged.replace("{name}", p.first_name).replace("{why}", p.flags.map((f) => (f === "test" ? COPY.flagTest : COPY.flagStale)).join(", ")) })));
+  els.groupsFlags.hidden = flagged.length === 0;
+  // The song being recorded now: its whole group, in the booth or already out.
+  const rec = st?.recording ?? [];
+  const recording = rec.length ? COPY.recordingNow.replace("{names}", rec.map((p) => `${p.first_name} (${p.in_booth ? COPY.inBooth : COPY.outOfBooth})`).join(", ")) : "";
+  const status = next
+    ? [st.queued ? COPY.queued.replace("{n}", String(st.queued)).replace("{s}", st.queued === 1 ? "" : "s") : "", recording].filter(Boolean).join(" ")
+    : recording || (st?.in_booth?.length ? COPY.inBoothNow.replace("{names}", st.in_booth.join(", ")) : COPY.groupsNone);
+  els.groupsStatus.textContent = status;
+  els.groupsStatus.hidden = !status;
+  els.groupsNote.textContent = COPY.groupsNote;
+}
+async function loadGroups() {
+  try {
+    const res = await fetch("/api/booth/sessions", { headers: { accept: "application/json" }, credentials: "same-origin" });
+    const data = await res.json();
+    els.groups.hidden = data?.on !== true;
+    if (data?.on !== true) { app.station = null; return; }
+    app.station = { next: data.next && Number.isInteger(data.next.id) && typeof data.next.key === "string" ? data.next : null, queued: Number(data.queued) || 0, in_booth: Array.isArray(data.in_booth) ? data.in_booth : [], recording: Array.isArray(data.recording) ? data.recording.filter((p) => typeof p?.first_name === "string") : [] };
+    renderStation();
+  } catch {}
+}
 
 // ── States: ready (the zone), uploading (the bar), done (the code), failed (the line + retry) ──
 function show(state) {
@@ -51,6 +100,7 @@ function show(state) {
   els.progress.hidden = state !== "uploading";
   els.done.hidden = state !== "done";
   els.failed.hidden = state !== "failed";
+  els.walkup.hidden = state !== "walkup";
   if (state !== "uploading") { els.progressText.textContent = ""; setProgress(0); }
 }
 function setProgress(fraction) {
@@ -66,6 +116,7 @@ function failed(text) {
 }
 function done({ code, file_name: name }) {
   app.busy = false;
+  loadGroups(); // that recording is done: the station shows the next one
   app.lastFile = null;
   els.code.textContent = code;
   els.doneFile.textContent = name;
@@ -75,10 +126,26 @@ function done({ code, file_name: name }) {
 }
 
 // ── The upload
-function upload(file) {
+// While the party is on, nothing goes up before the engineer answers ON the page (never the
+// browser's own pop-up, which is easy to miss): the names at the upload station, "Yes, it's them"
+// or "Not them"; or, with nobody there, "Upload with nobody on it" or "Wait for the names". The
+// upload carries the station's key as it was when they said yes, so a change since is refused.
+function askFirst(file) {
+  const next = app.station.next;
+  app.lastFile = file;
+  app.asking = next ? { key: next.key } : { key: "none" };
+  els.walkupText.textContent = next ? `${COPY.confirmGroup.replace("{file}", file.name).replace("{names}", next.names)} ${COPY.confirmGroupNote}` : COPY.walkUpConfirm;
+  els.walkupGo.textContent = next ? COPY.confirmGroupGo : COPY.walkUpGo;
+  els.walkupPick.textContent = next ? COPY.confirmGroupNo : COPY.walkUpPick;
+  show("walkup");
+  (next ? els.walkupGo : els.walkupPick).focus();
+}
+function upload(file, { confirmed = null } = {}) {
   if (app.busy || !file) return;
   const why = refuseFile(file);
   if (why) { failed(why === "not_audio" ? COPY.notAudio : why === "too_big" ? COPY.tooBig : COPY.empty); return; }
+  const party = Boolean(app.station);
+  if (party && !confirmed) { askFirst(file); return; }
   app.busy = true;
   app.lastFile = file;
   show("uploading");
@@ -88,12 +155,14 @@ function upload(file) {
   xhr.setRequestHeader("x-file-name", encodeURIComponent(file.name));
   xhr.setRequestHeader("content-type", file.type || "application/octet-stream");
   xhr.setRequestHeader("accept", "application/json");
+  if (party) xhr.setRequestHeader("x-party-take", confirmed);
   xhr.responseType = "json";
   xhr.timeout = 10 * 60 * 1000;
   xhr.upload.addEventListener("progress", (ev) => { if (ev.lengthComputable) setProgress(ev.loaded / ev.total); });
   xhr.addEventListener("load", () => {
     const body = xhr.response && typeof xhr.response === "object" ? xhr.response : {};
     if (xhr.status === 200 && /^\d{4}$/.test(body.code ?? "") && typeof body.file_name === "string") done(body);
+    else if (body.error === "take_changed") { failed(COPY.sessionGone); loadGroups(); }
     else failed(uploadFailure(COPY, { code: body.error, status: xhr.status, message: body.message }));
   });
   xhr.addEventListener("error", () => failed(uploadFailure(COPY, {})));
@@ -117,6 +186,16 @@ els.zone.addEventListener("drop", (ev) => {
   ev.preventDefault();
   upload(ev.dataTransfer?.files?.[0]);
 });
+// The question: not them / wait for the names (nothing uploaded), or go on.
+els.walkupPick.addEventListener("click", () => {
+  const held = app.asking?.key && app.asking.key !== "none" ? COPY.confirmGroupHeld : COPY.walkUpHeld;
+  app.asking = null;
+  show("ready");
+  els.progressText.textContent = held;
+  els.groups.scrollIntoView({ behavior: "smooth", block: "start" });
+  loadGroups();
+});
+els.walkupGo.addEventListener("click", () => { const file = app.lastFile; const key = app.asking?.key ?? "none"; app.asking = null; app.lastFile = null; upload(file, { confirmed: key }); });
 els.next.addEventListener("click", () => { show("ready"); els.file.focus(); });
 els.retry.addEventListener("click", () => {
   if (app.lastFile) upload(app.lastFile);
@@ -144,7 +223,9 @@ async function loadLog() {
     els.logNote.hidden = false;
   }
 }
-document.addEventListener("visibilitychange", () => { if (!document.hidden) loadLog(); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { loadLog(); loadGroups(); } });
 
 show("ready");
 loadLog();
+loadGroups();
+setInterval(() => { if (!document.hidden && !app.busy) loadGroups(); }, 5000);

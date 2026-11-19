@@ -1,0 +1,375 @@
+// The holiday party (Scooter, 17 Nov 2026): the QR sign-up, the booth sessions, the team's line.
+// Every route answers 404 party_off while HOLIDAY_EVENT is not "on" (production, until go-live),
+// except GET /api/party, which says whether it is on.
+//
+// Guests (open routes, kept safe by what they answer: first names and places, never a phone or an email):
+//   GET  /api/party                  → { on }
+//   POST /api/party/join             { name, phone, email, city, instagram?, website } → 201 { guest_key, you, session }
+//                                    ONE person (Scooter, 18 Nov 2026: everyone signs up on their own). One active place
+//                                    per email: 409 already_in_line, saying where they are, while that person is waiting, in
+//                                    the booth or at the upload station; once their song is uploaded (done) the same email
+//                                    signs up again, on the same record.
+//   POST /api/party/me               { guest_key } → { you, session }   the sign-up phone's page refreshes this
+//   POST /api/party/rejoin           { guest_key } → 201 { guest_key, you, session }   "Get back in line": one tap, the same
+//                                    person and details, once their last place is done (409 already_in_line otherwise)
+// The team (a team token from the emailed code; functions/_lib/team.js):
+//   POST /api/party/team/code        { email } → { sent, email, resend_in_seconds }   only an email on the team list
+//   POST /api/party/team/verify      { email, code } → { token, member: { email } }
+//   GET  /api/party/team/line        → { now, sessions: [{ id, status, place, take_id, …, guests: [{ id, name, phone, email, city, instagram, joined_at, flags }] }], takes: [{ id, closed, uploaded }] }
+//   POST /api/party/team/sessions/<id>/status  { status, from, song? } → { session }   one person: waiting | booth (green:
+//                                    onto the recording that is open, or a new one; when everyone of the open recording is out
+//                                    and its song is not uploaded, `song: "same" | "new"` says which, else 409 which_song) |
+//                                    upload (red: out; the recording waits at the upload station once nobody of it is in the
+//                                    booth, and stays open to the rest of its group until its song is uploaded) | done; undo
+//                                    is the same call back.
+//   POST /api/party/team/sessions/<id>/texted  → { texted_at }
+//   GET  /api/party/team/members     → { members: [{ id, email, you }] };  POST { email } adds;  POST …/members/<id>/remove
+//   GET  /api/party/team/gifs        → { gifs };  POST { id, url, width, height, title } adds;  POST …/gifs/<giphy id>/remove
+//   GET  /api/party/team/songs       → { songs: [{ code, label, entered, pulled, changed, members, repoints, … }], guests: [{ id, name, email, phone, flags }] }
+//   POST /api/party/team/songs/<booth code>/pull  { pulled: true|false } → { song }   "Take out of the vote" / "Put back"
+//   POST /api/party/team/songs/<booth code>/people  { guest_ids: [id, …], note } → { song }   re-points the song to exactly
+//                                    those people (Scooter, 18 Nov 2026: "staff can re-point it with a note of who changed what
+//                                    and when"); kept in booth_repoints with the team member, the time, before, after and the note
+import { cleanEmail, isCode } from "../../_lib/booth.js";
+import { ALL_GUESTS_SQL, ATTACH_PERSON_SQL, CONTEST_PEOPLE_SQL, CONTEST_TRACK_SQL, DETACH_ALL_SQL, GUESTS_BY_ID_SQL, PULL_SQL, REPOINT_LOG_SQL, contestClosed, readSong, syncEntry, teamSongs } from "../../_lib/contest.js";
+import { LIMITS, VERIFICATION, verificationStatus } from "../../_lib/config.js";
+import { HttpError, fail, ipHash, json, readJson, route } from "../../_lib/http.js";
+import {
+  ADD_GIF_SQL, CLOSE_TAKE_SQL, END_TAKE_SQL, GIFS_SQL, GUEST_BY_EMAIL_SQL, GUEST_BY_KEY_SQL, INSERT_GUEST_SQL, LANE_COLUMNS, LINE_GUESTS_SQL, LINE_SESSIONS_SQL, NEW_SESSION_SQL, NEW_TAKE_SQL, OPEN_TAKE_SQL, REJOIN_GUEST_SQL, REMOVE_GIF_SQL, REOPEN_TAKE_SQL, SESSION_CODE_TRIES, SESSION_NAMES_SQL, SET_STATUS_SQL, SET_TAKE_SQL, STATUS_EVENT_SQL, TAKE_OF_SQL, TAKE_PEOPLE_SQL, TEXTED_SQL, VISIT_SQL,
+  firstOf, groupLabel, guestFlags, guestKey, holidayOn, isGuestKey, laneOf, lineOrder, parsePartyGif, parseSignUp, parseStatusChange, randomSessionCode, toGif,
+} from "../../_lib/party.js";
+import { assertUnderLimit, limitStatement, maybePrune } from "../../_lib/ratelimit.js";
+import { MEMBER_BY_EMAIL_SQL, STORE_TEAM_CODE_SQL, newCode, releaseTeamSlot, requireMember, signTeamToken, takeTeamSlot, teamCodeEmail, teamCodeHmac, teamCodeLive, teamCodeMatchesAny } from "../../_lib/team.js";
+import { sendMail } from "../../_lib/verify.js";
+
+const segments = (params) => (Array.isArray(params?.path) ? params.path : [params?.path]).filter((s) => typeof s === "string" && s !== "");
+const off = () => { throw new HttpError(404, "party_off", "Nothing on right now."); };
+const limited = async (db, key, limit, what) => assertUnderLimit(await limitStatement(db, key, limit).all(), limit, what);
+
+// ── Guests ─────────────────────────────────────────────────────────────────────────────────────
+// A new session with a fresh 4-letter code (kept as the group's id on the team's line; nobody types
+// it). The UNIQUE constraint settles a collision; retried.
+async function newSession(db, now) {
+  for (let i = 0; i < SESSION_CODE_TRIES; i++) {
+    const row = await db.prepare(NEW_SESSION_SQL).bind(randomSessionCode(), now).first();
+    if (row) return row;
+  }
+  throw new HttpError(503, "no_code_free", "Could not start a place in line right now. Try again in a moment.");
+}
+// What the sign-up phone sees of its group: first names and the place.
+async function guestView(db, guest) {
+  const [names, sessions, guests] = await db.batch([db.prepare(SESSION_NAMES_SQL).bind(guest.session_id), db.prepare(LINE_SESSIONS_SQL), db.prepare("SELECT session_id FROM party_guests")]);
+  const bySession = new Map();
+  for (const g of guests.results ?? []) bySession.set(g.session_id, [...(bySession.get(g.session_id) ?? []), g]);
+  const line = lineOrder((sessions.results ?? []).map((s) => ({ ...s, guests: bySession.get(s.id) ?? [] })));
+  const mine = line.find((s) => s.id === guest.session_id);
+  return {
+    you: { first_name: firstOf(guest.name) },
+    session: { status: mine?.lane ?? laneOf(guest) ?? "waiting", place: mine?.place ?? null, names: (names.results ?? []).map((r) => firstOf(r.name)), size: (names.results ?? []).length },
+  };
+}
+
+// The sign-up: one person, on their own phone. An email already holding an active place is refused
+// with what is happening (never a silent block); an email whose last place is done comes back in
+// line: its one record moves to the new place (the same person, the same id), and the visit is
+// kept in party_visits.
+async function join(context) {
+  const { request, env } = context;
+  const parsed = parseSignUp(await readJson(request));
+  if (!parsed.ok) throw new HttpError(400, parsed.error, parsed.message, { field: parsed.field, slot: parsed.slot ?? 0 });
+  const { guests } = parsed.value;
+  const db = env.DB;
+  const now = Date.now();
+  const ip = await ipHash(request, env);
+  await limited(db, `party:join:ip:${ip}`, LIMITS.partyJoinsPerIp, "sign-ups");
+  const found = await db.batch(guests.map((g) => db.prepare(GUEST_BY_EMAIL_SQL).bind(g.email)));
+  const existing = found.map((r) => r.results?.[0] ?? null);
+  const busy = existing.findIndex((row) => row && laneOf(row) !== "done");
+  if (busy >= 0) {
+    const lane = laneOf(existing[busy]);
+    const where = lane === "booth" ? "You're in the booth right now with this email" : lane === "upload" ? "You're just out of the booth with this email: the engineer is saving your song" : "This email already has a place in line";
+    throw new HttpError(409, "already_in_line", `${where}. One place at a time: as soon as your song is uploaded you can get back in line here. If that is wrong, ask the team at the booth.`, { field: "email", slot: busy, lane });
+  }
+  const session = await newSession(db, now);
+  const keys = guests.map(() => guestKey());
+  await db.batch(guests.map((g, i) => existing[i]
+    ? db.prepare(REJOIN_GUEST_SQL).bind(existing[i].id, session.id, g.name, g.phone, g.city, g.instagram, keys[i], now + i, ip)
+    : db.prepare(INSERT_GUEST_SQL).bind(session.id, g.name, g.phone, g.email, g.city, g.instagram, keys[i], now + i, ip)));
+  const ids = await db.batch(guests.map((g) => db.prepare("SELECT id FROM party_guests WHERE email = ?1").bind(g.email)));
+  await db.batch(ids.map((r, i) => db.prepare(VISIT_SQL).bind(r.results[0].id, session.id, now + i)));
+  maybePrune(context);
+  return json({ guest_key: keys[0], ...(await guestView(db, { name: guests[0].name, session_id: session.id, status: "waiting", done_at: null })) }, 201);
+}
+async function guestFrom(context, rawKey) {
+  const { request, env } = context;
+  await limited(env.DB, `party:read:ip:${await ipHash(request, env)}`, LIMITS.partyReadsPerIp, "requests");
+  const guest = isGuestKey(rawKey) ? await env.DB.prepare(GUEST_BY_KEY_SQL).bind(rawKey).first() : null;
+  if (!guest) throw new HttpError(404, "no_guest", "We could not find your sign-up on this phone. Sign up again.");
+  return guest;
+}
+// Back in line in one tap: the same record, with the details they gave, in a new place. Only once
+// their last place is done; otherwise they are told where they are.
+async function rejoin(context) {
+  const { request, env } = context;
+  const body = await readJson(request);
+  const db = env.DB;
+  const found = await guestFrom(context, body.guest_key);
+  const lane = laneOf(found);
+  if (lane !== "done") throw new HttpError(409, "already_in_line", lane === "booth" ? "You're in the booth right now." : lane === "upload" ? "You're just out of the booth: the engineer is saving your song. You can get back in line once it is uploaded." : "You already have a place in line.", { lane });
+  const g = await db.prepare("SELECT id, name, phone, city, instagram FROM party_guests WHERE id = ?1").bind(found.id).first();
+  const now = Date.now();
+  const ip = await ipHash(request, env);
+  await limited(db, `party:join:ip:${ip}`, LIMITS.partyJoinsPerIp, "sign-ups");
+  const session = await newSession(db, now);
+  const key = guestKey();
+  await db.batch([db.prepare(REJOIN_GUEST_SQL).bind(g.id, session.id, g.name, g.phone, g.city, g.instagram, key, now, ip), db.prepare(VISIT_SQL).bind(g.id, session.id, now)]);
+  return json({ guest_key: key, ...(await guestView(db, { name: g.name, session_id: session.id, status: "waiting", done_at: null })) }, 201);
+}
+async function me(context) {
+  const body = await readJson(context.request);
+  return json(await guestView(context.env.DB, await guestFrom(context, body.guest_key)));
+}
+
+// ── The team's sign-in ───────────────────────────────────────────────────────────────────────
+async function teamCode(context) {
+  const { request, env } = context;
+  const body = await readJson(request);
+  const email = cleanEmail(body.email);
+  if (!email) throw new HttpError(400, "bad_email", "Enter your email.", { field: "email" });
+  const db = env.DB;
+  const nowS = Math.floor(Date.now() / 1000);
+  await limited(db, `team:code:ip:${await ipHash(request, env)}`, LIMITS.teamCodesPerIp, "codes");
+  const member = await db.prepare(MEMBER_BY_EMAIL_SQL).bind(email).first();
+  if (!member) throw new HttpError(403, "not_team", "That email is not on the team list. Ask a team member to add you.", { field: "email" });
+  if (!verificationStatus(env).available) throw new HttpError(503, "code_unavailable", "We could not send your code right now. Try again in a little while.");
+  const slot = await takeTeamSlot(env, member.id, nowS);
+  if (slot.refused === "cooldown") return json({ sent: false, email, resend_in_seconds: slot.wait });
+  if (slot.refused === "hourly") throw new HttpError(429, "code_limit", "That is 3 codes this hour. Use the last one, or try again later.", { retry_after_seconds: slot.wait });
+  if (slot.refused === "budget") {
+    const hours = Math.max(1, Math.round(slot.wait / 3600));
+    throw new HttpError(429, "code_budget", `Today's sign-in emails are used up. Try again in about ${hours} hour${hours === 1 ? "" : "s"}, or use a phone that is already signed in.`, { retry_after_seconds: slot.wait });
+  }
+  if (slot.refused) throw new HttpError(503, "code_unavailable", "We could not send your code right now. Try again in a little while.");
+  const code = newCode();
+  await db.prepare(STORE_TEAM_CODE_SQL).bind(member.id, await teamCodeHmac(env, member.id, code), nowS + VERIFICATION.codeTtl, nowS).run();
+  const sent = await sendMail(env, email, teamCodeEmail(code));
+  if (!sent.ok) {
+    if (sent.sent === "no") await releaseTeamSlot(db, slot.slot);
+    throw new HttpError(503, "code_unavailable", "We could not send your code right now. Try again in a little while.");
+  }
+  return json({ sent: true, email, resend_in_seconds: VERIFICATION.resendCooldown, expires_in_seconds: VERIFICATION.codeTtl });
+}
+async function teamVerify(context) {
+  const { request, env } = context;
+  const body = await readJson(request);
+  const email = cleanEmail(body.email);
+  const code = String(body.code ?? "").replace(/[\s-]/g, "");
+  if (!email || !/^\d{6}$/.test(code)) throw new HttpError(400, "invalid_code", "Enter the 6 digits from the email.");
+  const db = env.DB;
+  const nowS = Math.floor(Date.now() / 1000);
+  await limited(db, `team:verify:ip:${await ipHash(request, env)}`, LIMITS.teamVerifyPerIp, "tries");
+  const member = await db.prepare(MEMBER_BY_EMAIL_SQL).bind(email).first();
+  const stored = member ? await db.prepare("UPDATE team_codes SET attempts = attempts + 1 WHERE member_id = ?1 RETURNING code_hmac, expires_at, prev_code_hmac, prev_expires_at, attempts").bind(member.id).first() : null;
+  if (!teamCodeLive(stored, nowS)) throw new HttpError(410, "code_expired", "That code has run out. Send a new one.");
+  if (stored.attempts > VERIFICATION.maxTries) throw new HttpError(410, "code_exhausted", "Too many wrong tries for that code. Send a new one.");
+  if (!(await teamCodeMatchesAny(env, member.id, code, stored, nowS))) throw new HttpError(400, "wrong_code", `That code is not right. ${VERIFICATION.maxTries - stored.attempts} tries left.`, { tries_left: VERIFICATION.maxTries - stored.attempts });
+  await db.prepare("DELETE FROM team_codes WHERE member_id = ?1").bind(member.id).run();
+  return json({ token: await signTeamToken(env, member.id, nowS), member: { email: member.email } });
+}
+
+// ── The team's line ──────────────────────────────────────────────────────────────────────────
+async function member(context) {
+  const m = await requireMember(context.request, context.env);
+  await limited(context.env.DB, `team:member:${m.id}`, LIMITS.teamPerMember, "requests");
+  return m;
+}
+async function line(context) {
+  const db = context.env.DB;
+  const now = Date.now();
+  const [sessions, guests, takes] = await db.batch([db.prepare(LINE_SESSIONS_SQL), db.prepare(LINE_GUESTS_SQL), db.prepare("SELECT id, opened_at, closed_at, track_id FROM party_takes WHERE id IN (SELECT take_id FROM party_sessions WHERE take_id IS NOT NULL AND done_at IS NULL)")]);
+  const bySession = new Map();
+  for (const g of guests.results ?? []) bySession.set(g.session_id, [...(bySession.get(g.session_id) ?? []), { id: g.id, name: g.name, first_name: firstOf(g.name), phone: g.phone, email: g.email, city: g.city, instagram: g.instagram, joined_at: new Date(g.joined_at).toISOString(), flags: guestFlags(g, now) }]);
+  const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
+  return json({
+    now: new Date(now).toISOString(),
+    sessions: lineOrder((sessions.results ?? []).map((s) => ({ ...s, guests: bySession.get(s.id) ?? [] }))).map((s) => ({ id: s.id, code: s.code, status: s.lane, place: s.place, take_id: s.take_id ?? null, created_at: iso(s.created_at), status_at: iso(s.status_at), texted_at: iso(s.texted_at), guests: s.guests })),
+    takes: (takes.results ?? []).map((t) => ({ id: t.id, opened_at: iso(t.opened_at), closed: t.closed_at !== null, closed_at: iso(t.closed_at), uploaded: t.track_id !== null })),
+  });
+}
+async function setStatus(context, id, m) {
+  const parsed = parseStatusChange(await readJson(context.request));
+  if (!parsed.ok) throw new HttpError(400, parsed.error, parsed.message);
+  const db = context.env.DB;
+  const now = Date.now();
+  const { from, status: to, song } = parsed.value;
+  // Back to the upload station from Done: only while the take's song is not uploaded yet (an undo of
+  // "Done, no song"); a song already uploaded is re-pointed from Contest songs instead.
+  if (from === "done" && to === "upload") {
+    const take = await db.prepare(TAKE_OF_SQL).bind(id).first();
+    if (!take || take.track_id) throw new HttpError(409, "already_uploaded", "This person's song is already uploaded. To put them on a different song, use Change who's on it under Songs.");
+  }
+  const joining = to === "booth" && from === "waiting" ? await whichTake(db, song) : null;
+  const [toStatus, toDone] = LANE_COLUMNS[parsed.value.status];
+  const [fromStatus, fromDone] = LANE_COLUMNS[parsed.value.from];
+  const row = await db.prepare(SET_STATUS_SQL).bind(id, toStatus, toDone ? now : null, now, fromStatus, fromDone ? 0 : 1).first();
+  if (!row) {
+    const current = await db.prepare("SELECT status, done_at FROM party_sessions WHERE id = ?1").bind(id).first();
+    if (!current) throw new HttpError(404, "no_session", "That group is not in the line.");
+    throw new HttpError(409, "changed", "Someone else changed this group a moment ago. The line has been refreshed.", { status: laneOf(current) });
+  }
+  await db.prepare(STATUS_EVENT_SQL).bind(id, from, to, m.id, now).run();
+  if (joining) await joinTake(db, id, joining, now);
+  else await moveTake(db, id, to, now);
+  return json({ session: { id, status: laneOf(row), status_at: new Date(row.status_at).toISOString() } });
+}
+// Into the booth: which recording this person is on (Scooter, 19 Nov 2026: "When Carlos and Scooter
+// go into the booth and leave one after the other, the upload should belong to both"). Someone of
+// the open recording still in the booth → that one. Everyone of it out, its song not uploaded yet →
+// the server cannot know whether this is Scooter recording his verse of Carlos's song or the next
+// group, so the team says (song: "same" | "new"), and without that answer it asks (409 which_song,
+// with the first names, so the page can put the question). Nobody on it, or none open → a new one.
+// → { join: <take id> } or { fresh: true, end: <take id to end> | null }.
+async function whichTake(db, song) {
+  const open = await db.prepare(OPEN_TAKE_SQL).first();
+  if (!open) return { fresh: true, end: null };
+  if (open.in_booth > 0 || open.out_waiting === 0) return { join: open.id };
+  if (song === "same") return { join: open.id };
+  if (song === "new") return { fresh: true, end: open.id };
+  const names = (await db.prepare(TAKE_PEOPLE_SQL).bind(open.id).all()).results ?? [];
+  const label = groupLabel(names.map((p) => firstOf(p.name)));
+  throw new HttpError(409, "which_song", `${label}'s song is not uploaded yet. Is this person on the same song, or a new one?`, { names: label });
+}
+async function joinTake(db, id, joining, now) {
+  if (joining.join) { await db.prepare(SET_TAKE_SQL).bind(id, joining.join).run(); return; }
+  if (joining.end) await db.prepare(END_TAKE_SQL).bind(joining.end, now).run();
+  await db.prepare(NEW_TAKE_SQL).bind(now).run();
+  await db.prepare(SET_TAKE_SQL).bind(id, (await db.prepare(OPEN_TAKE_SQL).first()).id).run();
+}
+// The other taps: out → still on the recording (it waits at the upload station once nobody of it
+// is in the booth, and is still open to the rest of the group); back to waiting → off it; back in
+// the booth → it opens again until its song is uploaded; done with no song → if nobody of it is
+// left waiting, it takes nobody else in.
+async function moveTake(db, id, to, now) {
+  const take = await db.prepare(TAKE_OF_SQL).bind(id).first();
+  if (!take) return;
+  if (to === "booth") await db.prepare(REOPEN_TAKE_SQL).bind(take.id).run();
+  if (to === "waiting") await db.prepare(SET_TAKE_SQL).bind(id, null).run();
+  if (to === "done") await db.prepare(CLOSE_TAKE_SQL).bind(take.id, now).run();
+}
+async function texted(context, id) {
+  const row = await context.env.DB.prepare(TEXTED_SQL).bind(id, Date.now()).first();
+  if (!row) throw new HttpError(404, "no_session", "That group is not in the line.");
+  return json({ texted_at: new Date(row.texted_at).toISOString() });
+}
+async function members(context, m) {
+  const rows = (await context.env.DB.prepare("SELECT id, email, added_at FROM team_members WHERE removed_at IS NULL ORDER BY added_at, id").all()).results ?? [];
+  return json({ members: rows.map((r) => ({ id: r.id, email: r.email, you: r.id === m.id })) });
+}
+async function addMember(context, m) {
+  const email = cleanEmail((await readJson(context.request)).email);
+  if (!email) throw new HttpError(400, "bad_email", "Enter an email address that works.");
+  await context.env.DB.prepare("INSERT INTO team_members (email, added_at, added_by) VALUES (?1, ?2, ?3) ON CONFLICT (email) DO UPDATE SET removed_at = NULL").bind(email, Date.now(), m.id).run();
+  return members(context, m);
+}
+async function removeMember(context, id, m) {
+  if (id === m.id) throw new HttpError(409, "not_yourself", "You cannot take yourself off the team. Ask another team member.");
+  await context.env.DB.prepare("UPDATE team_members SET removed_at = ?2 WHERE id = ?1 AND removed_at IS NULL").bind(id, Date.now()).run();
+  return members(context, m);
+}
+const gifs = async (context) => json({ gifs: ((await context.env.DB.prepare(GIFS_SQL).all()).results ?? []).map(toGif) });
+async function addGif(context) {
+  const parsed = parsePartyGif(await readJson(context.request));
+  if (!parsed.ok) throw new HttpError(400, parsed.error, parsed.message);
+  const g = parsed.value;
+  await context.env.DB.prepare(ADD_GIF_SQL).bind(g.id, g.url, g.width, g.height, g.title, Date.now()).run();
+  return gifs(context);
+}
+async function removeGif(context, id) {
+  await context.env.DB.prepare(REMOVE_GIF_SQL).bind(id, Date.now()).run();
+  return gifs(context);
+}
+
+// ── The team's contest songs: take one out of the vote, put it back, or re-point it ─────────────
+async function songs(context) {
+  const db = context.env.DB;
+  const now = Date.now();
+  const guests = (await db.prepare(ALL_GUESTS_SQL).all()).results ?? [];
+  return json({ songs: await teamSongs(db), guests: guests.map((g) => ({ id: g.id, name: g.name, email: g.email, phone: g.phone, joined_at: new Date(g.joined_at).toISOString(), flags: guestFlags(g, now) })) });
+}
+const songOf = async (db, code, fallback) => (await teamSongs(db)).find((s) => s.code === code) ?? fallback;
+async function pull(context, code, m) {
+  const body = await readJson(context.request);
+  if (typeof body.pulled !== "boolean") throw new HttpError(400, "bad_pull", "Send { pulled: true } or { pulled: false }.");
+  const { env } = context;
+  const now = Date.now();
+  if (await contestClosed(env, now)) throw new HttpError(403, "voting_closed", "Voting has closed, so songs can no longer go in or come out.");
+  const row = await env.DB.prepare(PULL_SQL).bind(code, body.pulled ? now : null, body.pulled ? m.id : null).first();
+  if (!row) throw new HttpError(404, "no_song", "That song has not been in the vote.");
+  await syncEntry(env, await readSong(env.DB, code), now);
+  return json({ song: await songOf(env.DB, code, { code, pulled: body.pulled }) });
+}
+// "Change who's on it": the song landed on the wrong people (a stale sign-up tapped in, a mistaken
+// upload), so the team re-points it to exactly the people picked, by their records, with a note.
+// Every re-point is a row in booth_repoints (who, when, before, after, the note), shown on the song.
+// The new people hold the song's controls (everyone on a song does). The song is judged again on its new people.
+const NOTE_MAX = 200;
+async function repoint(context, code, m) {
+  const { env } = context;
+  const body = await readJson(context.request);
+  const ids = Array.isArray(body.guest_ids) ? [...new Set(body.guest_ids)] : null;
+  if (!ids || ids.length > 20 || ids.some((v) => !Number.isInteger(v) || v < 1)) throw new HttpError(400, "bad_people", "Pick the people who are on this song.");
+  const note = String(body.note ?? "").replace(/\s+/g, " ").trim().slice(0, NOTE_MAX);
+  const now = Date.now();
+  if (await contestClosed(env, now)) throw new HttpError(403, "voting_closed", "Voting has closed, so songs can no longer change.");
+  const db = env.DB;
+  const track = await db.prepare(CONTEST_TRACK_SQL).bind(code).first();
+  if (!track) throw new HttpError(404, "no_song", "No booth song has that code.");
+  const found = ids.length ? await db.batch(ids.map((id) => db.prepare(GUESTS_BY_ID_SQL).bind(id))) : [];
+  const people = found.map((r) => r.results?.[0] ?? null);
+  if (people.some((p) => !p)) throw new HttpError(404, "no_guest", "Someone picked is no longer signed up. The list has been refreshed.");
+  const before = (await db.prepare(CONTEST_PEOPLE_SQL).bind(track.id).all()).results ?? [];
+  await db.batch([
+    db.prepare(DETACH_ALL_SQL).bind(track.id),
+    ...people.map((p, i) => db.prepare(ATTACH_PERSON_SQL).bind(track.id, p.email, now + i, p.id)),
+    db.prepare(REPOINT_LOG_SQL).bind(track.id, m.id, now, JSON.stringify(before.map((p) => ({ guest_id: p.guest_id ?? null, name: p.name ?? "someone not signed up" }))), JSON.stringify(people.map((p) => ({ guest_id: p.id, name: p.name }))), note),
+  ]);
+  await syncEntry(env, await readSong(db, code), now);
+  return json({ song: await songOf(db, code, { code }) });
+}
+
+const idOf = (s) => (/^[1-9][0-9]{0,9}$/.test(s ?? "") ? Number(s) : null);
+export const onRequest = route({
+  async GET(context) {
+    const parts = segments(context.params);
+    // GET /api/party (this catch-all also takes the bare path): whether the party is on here.
+    if (parts.length === 0) return json({ on: holidayOn(context.env) }, 200, { "cache-control": "public, max-age=30" });
+    if (!holidayOn(context.env)) off();
+    if (parts[0] !== "team") return fail(404, "not_found", "No such API route.");
+    const m = await member(context);
+    if (parts.length === 2 && parts[1] === "line") return line(context);
+    if (parts.length === 2 && parts[1] === "members") return members(context, m);
+    if (parts.length === 2 && parts[1] === "gifs") return gifs(context);
+    if (parts.length === 2 && parts[1] === "songs") return songs(context);
+    return fail(404, "not_found", "No such API route.");
+  },
+  async POST(context) {
+    const parts = segments(context.params);
+    if (!holidayOn(context.env)) off();
+    if (parts.length === 1 && parts[0] === "join") return join(context);
+    if (parts.length === 1 && parts[0] === "me") return me(context);
+    if (parts.length === 1 && parts[0] === "rejoin") return rejoin(context);
+    if (parts[0] !== "team") return fail(404, "not_found", "No such API route.");
+    if (parts.length === 2 && parts[1] === "code") return teamCode(context);
+    if (parts.length === 2 && parts[1] === "verify") return teamVerify(context);
+    const m = await member(context);
+    if (parts.length === 4 && parts[1] === "sessions" && idOf(parts[2]) && parts[3] === "status") return setStatus(context, idOf(parts[2]), m);
+    if (parts.length === 4 && parts[1] === "sessions" && idOf(parts[2]) && parts[3] === "texted") return texted(context, idOf(parts[2]));
+    if (parts.length === 2 && parts[1] === "members") return addMember(context, m);
+    if (parts.length === 4 && parts[1] === "members" && idOf(parts[2]) && parts[3] === "remove") return removeMember(context, idOf(parts[2]), m);
+    if (parts.length === 2 && parts[1] === "gifs") return addGif(context);
+    if (parts.length === 4 && parts[1] === "songs" && isCode(parts[2]) && parts[3] === "pull") return pull(context, parts[2], m);
+    if (parts.length === 4 && parts[1] === "songs" && isCode(parts[2]) && parts[3] === "people") return repoint(context, parts[2], m);
+    if (parts.length === 4 && parts[1] === "gifs" && /^[A-Za-z0-9]{1,64}$/.test(parts[2]) && parts[3] === "remove") return removeGif(context, parts[2]);
+    return fail(404, "not_found", "No such API route.");
+  },
+});

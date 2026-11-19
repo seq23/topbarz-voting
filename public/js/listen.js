@@ -9,6 +9,7 @@ import { safeMediaUrl } from "./logic.js";
 import { artworkFor, cleanListen, shareIdFromPath } from "./booth-rules.js";
 import { createControls, createPlayer } from "./player.js";
 import { COPY } from "./listen-copy.js";
+import { festive } from "./festive.js";
 
 const els = {
   wait: $("tbz-listen-wait"),
@@ -81,3 +82,4 @@ async function load() {
   }
 }
 load();
+festive();

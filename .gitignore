@@ -6,3 +6,4 @@ exports/
 # Loader work files (re-encoded audio, resized photos).
 .work/
 .DS_Store
+design/

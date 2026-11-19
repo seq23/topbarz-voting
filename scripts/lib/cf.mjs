@@ -38,9 +38,26 @@ async function wrangler(args, opts = {}) {
       ...opts,
     });
   } catch (err) {
+    // With --json, wrangler's failure is a JSON object on stdout ({"error":{"text":…,"notes":[…]}}):
+    // the line filter below caught only its first line, `"error": {` (first-run, 18 Nov 2026).
+    const why = wranglerJsonError(err.stdout);
+    if (why) throw new Error(`wrangler ${args.slice(0, 3).join(" ")} failed: ${why}`);
     const said = `${err.stderr ?? ""}\n${err.stdout ?? ""}`.split("\n").map((l) => l.trim()).filter((l) => /error|not exist|not found|denied|authenticat/i.test(l)).slice(0, 3).join(" | ");
     throw new Error(`wrangler ${args.slice(0, 3).join(" ")} failed: ${said || err.message.split("\n")[0]}`);
   }
+}
+
+// wrangler --json's error object → one plain line, or "" when stdout carries none.
+export function wranglerJsonError(stdout) {
+  const s = String(stdout ?? "");
+  const at = s.indexOf("{");
+  if (at < 0) return "";
+  try {
+    const e = JSON.parse(s.slice(at))?.error;
+    if (!e) return "";
+    const notes = (e.notes ?? []).map((n) => n?.text).filter(Boolean);
+    return [e.text, ...notes].filter(Boolean).join(" | ").replace(/\s+/g, " ").slice(0, 300);
+  } catch { return ""; }
 }
 
 // A loader that fails says one plain line and exits non-zero (never a stack dump, never exit 0).

@@ -33,6 +33,13 @@
   </section>
 
   <section id="tbz-upload" class="booth" aria-labelledby="tbz-booth-headline">
+    <section id="tbz-groups" class="groups" aria-labelledby="tbz-groups-title" aria-live="polite" hidden>
+      <p id="tbz-groups-title" class="next-label"></p>
+      <p id="tbz-groups-list" class="next-names"></p>
+      <ul id="tbz-groups-flags" class="flag-list"></ul>
+      <p id="tbz-groups-status" class="switch-note"></p>
+      <p id="tbz-groups-note" class="zone-hint"></p>
+    </section>
     <label id="tbz-zone" class="zone" for="tbz-file">
       <span id="tbz-zone-text" class="zone-text"></span>
       <span id="tbz-zone-hint" class="zone-hint"></span>
@@ -47,6 +54,13 @@
       <p id="tbz-code" class="booth-code" tabindex="-1"></p>
       <p id="tbz-done-file" class="done-file"></p>
       <button type="button" id="tbz-next" class="btn"></button>
+    </div>
+    <div id="tbz-walkup" class="walkup" role="alert" hidden>
+      <p id="tbz-walkup-text"></p>
+      <div class="walkup-actions">
+        <button type="button" id="tbz-walkup-pick" class="btn btn-small"></button>
+        <button type="button" id="tbz-walkup-go" class="btn btn-small"></button>
+      </div>
     </div>
     <div id="tbz-failed" class="failed" role="alert" hidden>
       <p id="tbz-failed-text"></p>

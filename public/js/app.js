@@ -3,6 +3,8 @@
 import { api, forgetVoter, keepOwn, loadOwn, loadVoter, OWN_KEY, ownCounts, saveVoter, VOTER_KEY } from "./api.js";
 import { createThread } from "./comments.js";
 import { $, h, icon, reducedMotion } from "./dom.js";
+import { festive } from "./festive.js";
+import { HOLIDAY } from "./party-copy.js";
 import { createGallery } from "./gallery.js";
 import { createGate } from "./gate.js";
 import {
@@ -507,7 +509,7 @@ function setClosed(closed) {
   app.closed = closed;
   document.body.dataset.voting = closed ? "closed" : "open";
   els.windowWord.textContent = closed ? "Voting ended" : "Voting ends";
-  els.countdownRow.hidden = closed;
+  els.countdownRow.hidden = closed || app.noEnd;
   els.closedHero.hidden = !closed;
   els.closedNote.hidden = !closed;
   els.vote.textContent = closed ? "LISTEN" : "VOTE";
@@ -520,8 +522,16 @@ function setClosed(closed) {
 }
 
 // The rules' last line follows the window: it never promises an end that has passed.
+const endsWords = () => formatEndsLine(app.endMs, app.holiday ? HOLIDAY.dates.zone : undefined);
 function renderRuleEnds() {
-  if (Number.isFinite(app.endMs)) els.ruleEnds.textContent = rulesEndLine(app.closed, formatEndsLine(app.endMs));
+  if (Number.isFinite(app.endMs)) els.ruleEnds.textContent = rulesEndLine(app.closed, endsWords());
+}
+// No end set (/api/state answers voting_ends_at null): no "Voting ends" line, no countdown, no end in
+// the rules. The holiday party has one (Scooter, 19 Nov 2026: Friday, November 27 at 11:59 PM ET).
+function renderNoEnd() {
+  els.ends.closest(".window").hidden = app.noEnd;
+  els.ruleEnds.hidden = app.noEnd;
+  els.countdownRow.hidden = app.noEnd || app.closed;
 }
 
 let spokenMinute = null;
@@ -550,16 +560,20 @@ function votingClosedByServer() {
 
 // ── /api/state
 const gallery = createGallery();
+festive().then((on) => { if (on) gallery.rename(HOLIDAY.home.photoAlt); });
 
 function applyState(state, generatedAt) {
   app.loaded = true;
-  app.endMs = Date.parse(state.voting_ends_at);
+  app.endMs = state.voting_ends_at === null ? NaN : Date.parse(state.voting_ends_at);
+  app.noEnd = state.voting_ends_at === null;
+  app.holiday = state.holiday?.on === true;
   app.serverClosed = state.closed === true || generatedAt < app.closedHold;
   app.gateOn = state.gate?.available !== false;
   app.giphyOn = state.giphy?.available === true;
   app.codesOn = state.verification?.available === true;
-  if (Number.isFinite(app.endMs)) els.ends.textContent = formatEndsLine(app.endMs);
+  if (Number.isFinite(app.endMs)) els.ends.textContent = endsWords();
   renderRuleEnds();
+  renderNoEnd();
   els.offNote.hidden = app.gateOn;
   const notOpen = state.open === false && state.closed !== true;
   els.notOpenNote.hidden = !notOpen;
@@ -567,7 +581,7 @@ function applyState(state, generatedAt) {
     app.notOpen = notOpen;
     for (const card of app.cards.values()) { card.renderLike(); card.renderCounts(); }
   }
-  gallery.update(state.photos);
+  gallery.update(state.photos, state.gifs);
   renderTracks(Array.isArray(state.tracks) ? state.tracks : [], generatedAt);
   renderWindow();
   applyDeepLink();

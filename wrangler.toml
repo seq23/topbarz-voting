@@ -10,6 +10,9 @@ APP_ENV = "production"
 # The 6-digit email code at the gate: "on" or "off". It also needs the Pages secret RESEND_API_KEY;
 # /api/state names which is missing. See RUNBOOK.md, "Email verification".
 EMAIL_VERIFICATION = "on"
+# The holiday party (17 Nov 2026): /join, /team and the contest box on /track. "off" in production
+# until Scooter says go live; "on" in preview. See RUNBOOK.md, "The holiday party".
+HOLIDAY_EVENT = "off"
 
 [[d1_databases]]
 binding = "DB"
@@ -30,6 +33,7 @@ APP_ENV = "preview"
 # without a deploy. See RUNBOOK.md, "Prove the voting window".
 ALLOW_END_OVERRIDE = "1"
 EMAIL_VERIFICATION = "on"
+HOLIDAY_EVENT = "on"
 
 [[env.preview.d1_databases]]
 binding = "DB"

@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#000000">
+<meta name="color-scheme" content="dark">
+<title>Get in line for the booth | Top Barz</title>
+<meta name="description" content="Sign up for the Top Barz booth at the holiday party. We text you when it is your turn.">
+<link rel="icon" type="image/png" href="/img/favicon.png">
+<link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
+<link rel="preload" href="/fonts/dela-gothic-one-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/epilogue-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/css/site.css">
+<link rel="modulepreload" href="/js/dom.js">
+<link rel="modulepreload" href="/js/api.js">
+<link rel="modulepreload" href="/js/logic.js">
+<link rel="modulepreload" href="/js/festive.js">
+<link rel="modulepreload" href="/js/party-copy.js">
+<link rel="modulepreload" href="/js/party-rules.js">
+<link rel="modulepreload" href="/js/join-copy.js">
+<script type="module" src="/js/join.js"></script>
+</head>
+<body>
+<a class="skip" href="#tbz-join-form">Skip to the sign-up</a>
+
+<header class="top">
+  <a class="logo" href="https://www.topbarz.xyz/"><img src="/img/logo.png" width="212" height="186" alt="Top Barz"></a>
+  <h1 class="slogan">JUMP IN THE BOOTH</h1>
+</header>
+
+<main>
+  <p id="tbz-join-loading" class="list-note" role="status">Loading…</p>
+
+  <section id="tbz-join-off" class="empty" hidden>
+    <p id="tbz-join-off-title" class="empty-title"></p>
+    <p id="tbz-join-off-note"></p>
+  </section>
+
+  <section id="tbz-join-intro" class="intro" hidden>
+    <h2 id="tbz-join-headline" class="page-title"></h2>
+    <p id="tbz-join-lede" class="lede"></p>
+  </section>
+
+  <form id="tbz-join-form" class="booth" hidden novalidate>
+    <h3 id="tbz-join-slot-title" class="done-title" tabindex="-1"></h3>
+    <div class="field"><label for="tbz-join-name" id="tbz-join-name-label"></label><input id="tbz-join-name" type="text" autocomplete="name" maxlength="80" enterkeyhint="next" aria-describedby="tbz-join-error"></div>
+    <div class="field"><label for="tbz-join-phone" id="tbz-join-phone-label"></label><input id="tbz-join-phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="40" enterkeyhint="next" aria-describedby="tbz-join-error"></div>
+    <div class="field"><label for="tbz-join-email" id="tbz-join-email-label"></label><input id="tbz-join-email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="254" enterkeyhint="next" aria-describedby="tbz-join-error"></div>
+    <div class="field"><label for="tbz-join-city" id="tbz-join-city-label"></label><input id="tbz-join-city" type="text" autocomplete="address-level2" maxlength="80" enterkeyhint="next" aria-describedby="tbz-join-error"></div>
+    <div class="field"><label for="tbz-join-instagram" id="tbz-join-instagram-label"></label><input id="tbz-join-instagram" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="60" aria-describedby="tbz-join-error"></div>
+    <div class="hp" aria-hidden="true"><label for="tbz-join-website">Website</label><input id="tbz-join-website" type="text" name="website" tabindex="-1" autocomplete="off"></div>
+    <p id="tbz-join-error" class="field-error" role="alert" hidden></p>
+    <button type="submit" id="tbz-join-send" class="btn btn-gate"></button>
+  </form>
+
+  <section id="tbz-join-done" class="found" aria-labelledby="tbz-join-done-title" hidden>
+    <h2 id="tbz-join-done-title" tabindex="-1"></h2>
+    <p id="tbz-join-hello" class="lede"></p>
+    <p id="tbz-join-place" class="place" role="status"></p>
+    <p id="tbz-join-next" class="switch-note"></p>
+    <p id="tbz-join-refresh" class="list-note" role="status" hidden></p>
+    <button type="button" id="tbz-join-again" class="btn" hidden></button>
+    <button type="button" id="tbz-join-forget" class="link-btn"></button>
+  </section>
+  <noscript><p class="list-note">This page needs JavaScript to sign you up. Turn it on and reload.</p></noscript>
+</main>
+
+<footer class="foot">
+  <div class="foot-inner">
+    <section class="foot-block" aria-labelledby="tbz-join-contact">
+      <h2 id="tbz-join-contact">Contact</h2>
+      <p>Questions? Ask the team at the booth, or message Top Barz on Instagram.</p>
+      <p class="foot-links">
+        <a href="https://www.instagram.com/topbarz.xyz" rel="noopener">@topbarz.xyz on Instagram</a>
+        <a href="/privacy">Privacy note</a>
+      </p>
+    </section>
+    <p class="foot-mark">Top Barz</p>
+  </div>
+</footer>
+</body>
+</html>

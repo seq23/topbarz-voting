@@ -3,10 +3,11 @@
 //   · mail goes out through Resend (env RESEND_API_KEY; the key never reaches a browser or a log);
 //   · before any send, the domain must be able to receive mail (one DNS-over-HTTPS lookup, cached
 //     per domain in D1), which keeps bounces off the shared mail account;
-//   · every send is a row in email_sends, so the daily budget (config.js, sendBudget), the per-email hourly cap and the
+//   · every send is a row in email_sends (the team's sign-in codes: team_code_sends, counted in the
+//     same daily budget), so the daily budget (config.js, sendBudget), the per-email hourly cap and the
 //     resend cooldown are counted over true rolling windows.
 // The rules about who gets a token are in functions/api/voters.js and functions/api/voters/verify.js.
-import { VERIFICATION, sendBudget } from "./config.js";
+import { VERIFICATION, voterSendBudget } from "./config.js";
 
 const enc = new TextEncoder();
 const toHex = (bytes) => [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -53,8 +54,10 @@ export function codeEmail(code) {
 // → { ok: true } or { ok: false, sent: "no" | "unknown" }. "no" = the service answered and refused
 // (4xx, 429 included): nothing went out, so the send is not counted against the budget. "unknown"
 // = a 5xx, a timeout or a network error: it may have gone out, so it stays counted.
-export async function sendCode(env, to, code) {
-  const mail = codeEmail(code);
+export const sendCode = (env, to, code) => sendMail(env, to, codeEmail(code));
+
+// One email through the mail service (the voters' codes here, the team's codes in team.js).
+export async function sendMail(env, to, mail) {
   let res;
   try {
     res = await fetch(env.RESEND_ENDPOINT || VERIFICATION.resendEndpoint, {
@@ -126,7 +129,7 @@ export async function takeSendSlot(env, voterId, nowS) {
   const [statsRes, codeRes, slotRes] = await db.batch([
     db.prepare(
       `SELECT
-        (SELECT COUNT(*) FROM email_sends WHERE counted = 1 AND sent_at > ?2) AS day,
+        (SELECT COUNT(*) FROM email_sends WHERE counted = 1 AND sent_at > ?2) + (SELECT COUNT(*) FROM team_code_sends WHERE counted = 1 AND sent_at > ?2) AS day,
         (SELECT COUNT(*) FROM email_sends WHERE counted = 1 AND voter_id = ?1 AND sent_at > ?3) AS hour,
         (SELECT MIN(sent_at) FROM email_sends WHERE counted = 1 AND voter_id = ?1 AND sent_at > ?3) AS hour_first,
         (SELECT MAX(sent_at) FROM email_sends WHERE counted = 1 AND voter_id = ?1) AS last`,
@@ -134,11 +137,11 @@ export async function takeSendSlot(env, voterId, nowS) {
     db.prepare("SELECT expires_at, attempts FROM email_codes WHERE voter_id = ?1").bind(voterId),
     db.prepare(
       `INSERT INTO email_sends (voter_id, sent_at) SELECT ?1, ?2 WHERE
-        (SELECT COUNT(*) FROM email_sends WHERE counted = 1 AND sent_at > ?3) < ?4
+        (SELECT COUNT(*) FROM email_sends WHERE counted = 1 AND sent_at > ?3) + (SELECT COUNT(*) FROM team_code_sends WHERE counted = 1 AND sent_at > ?3) < ?4
         AND (SELECT COUNT(*) FROM email_sends WHERE counted = 1 AND voter_id = ?1 AND sent_at > ?5) < ?6
         AND NOT EXISTS (SELECT 1 FROM email_sends WHERE counted = 1 AND voter_id = ?1 AND sent_at > ?7)
        RETURNING id`,
-    ).bind(voterId, nowS, nowS - 86400, sendBudget(env), nowS - 3600, V.sendsPerEmailPerHour, nowS - V.resendCooldown),
+    ).bind(voterId, nowS, nowS - 86400, voterSendBudget(env), nowS - 3600, V.sendsPerEmailPerHour, nowS - V.resendCooldown),
   ]);
   const stats = statsRes.results[0];
   const code = codeRes.results[0] ?? null;
@@ -159,9 +162,12 @@ export async function storeCode(env, db, voterId, code, nowS) {
   await db
     .prepare(
       `INSERT INTO email_codes (voter_id, code_hmac, expires_at, attempts) VALUES (?1, ?2, ?3, 0)
-       ON CONFLICT (voter_id) DO UPDATE SET code_hmac = excluded.code_hmac, expires_at = excluded.expires_at, attempts = 0`,
+       ON CONFLICT (voter_id) DO UPDATE SET
+         prev_code_hmac = CASE WHEN email_codes.expires_at > ?4 THEN email_codes.code_hmac ELSE NULL END,
+         prev_expires_at = CASE WHEN email_codes.expires_at > ?4 THEN email_codes.expires_at ELSE NULL END,
+         code_hmac = excluded.code_hmac, expires_at = excluded.expires_at, attempts = 0`,
     )
-    .bind(voterId, await codeHmac(env, voterId, code), nowS + VERIFICATION.codeTtl)
+    .bind(voterId, await codeHmac(env, voterId, code), nowS + VERIFICATION.codeTtl, nowS)
     .run();
 }
 

@@ -141,6 +141,12 @@ test("before the start: the server refuses likes and comments, whatever the brow
     assert.equal(res.body.error, "voting_not_open");
     assert.match(res.body.message, /Sunday, October 11, at 10 AM ET/);
   }
+  // While the party is on, the refusal names the party night and no time of day (Scooter, 18 Nov 2026).
+  for (const res of await act({ ...early, HOLIDAY_EVENT: "on" })) {
+    assert.equal(res.body.error, "voting_not_open");
+    assert.match(res.body.message, /Sunday, December 13/);
+    assert.doesNotMatch(res.body.message, /October|\b\d{1,2}(:\d{2})?\s*(AM|PM)\b/i);
+  }
   assert.equal((await call(likes.onRequest, early, { method: "POST", path: "/api/likes", token: voter.token, body: { track: "brian" } })).body.error, "voting_not_open", "a toggle too");
   assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM like_events").first()).n, eventsBefore);
   assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM comments").first()).n, commentsBefore);

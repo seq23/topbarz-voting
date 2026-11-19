@@ -9,12 +9,15 @@
 // ("already in line", said, not a silent block); with nobody at the upload station, a walk-up
 // upload's code lets someone hear and download but never puts them on the song; the team's line
 // refuses anyone not signed in. With FIRST_RUN_TEAM_TOKEN (a team token from signing in on that
-// preview) it also plays the team's side: both tapped into the booth are one recording, which is
-// not at the upload station until the last of them is tapped out; the engineer's upload lands on
-// exactly those two and marks them done; both see "have access"; the first to tick Enter manages
-// the song and it is in the vote within 12 s with no script run; the other gets not_manager; a
-// reload reads entered; unticking takes it out (the run leaves nothing in the preview's vote); and
-// one tap puts the first person back in line. With --demo <code> it plays Scooter's demo on that
+// preview) it also plays the team's side, as Scooter's group did on 19 Nov 2026: the first person
+// records and comes out; the second goes in while the song is not uploaded, the line asks "same song
+// or new?" and the answer "same" puts them on the same recording, which is not at the upload station
+// while anyone of it is in the booth; the engineer's upload (with the key of the names confirmed)
+// lands on both and marks them done; both see "have access" and both have the controls; one ticks
+// Enter and it is in the vote within 12 s with no script run; the other withdraws it for everyone
+// and the line says who; the other enters it again; a reload reads entered with who last changed it;
+// unticking takes it out (the run leaves nothing in the preview's vote); and one tap puts the first
+// person back in line. With --demo <code> it plays Scooter's demo on that
 // song too, and with --demo <code> --demo-only only that (see below).
 // Test data only: "Test …" names, @example.com addresses; production refuses it (and the party
 // is off there).
@@ -82,7 +85,7 @@ async function playDemo() {
   const c = opened.json?.contest;
   if (opened.status !== 200 || !opened.json?.download_url) fail(`the demo song ${demoCode} with ${email}: ${opened.status} ${opened.text.slice(0, 160)}`);
   if (c?.blocked) fail(`the demo song ${demoCode} cannot go in the contest: ${JSON.stringify(c.blocked).slice(0, 160)}`);
-  if (c?.you?.can_manage !== true) fail(`${email} cannot manage the demo song ${demoCode} (manager: ${c?.manager}): run npm run demo-song -- --env preview to reset it`);
+  if (c?.you?.can_manage !== true) fail(`${email} does not have the demo song ${demoCode}'s controls: run npm run demo-song -- --env preview (with --host <that email> for your own) to set it up`);
   demoAs = c.you.host === true ? "the host's own email" : "the demo singer's email";
   ok(`the demo song ${demoCode} opens with ${demoAs}: hear, download, and the controls are theirs`);
   if (c.entered) {
@@ -138,6 +141,7 @@ const uploadSong = (name, headers = {}) => req("/api/booth/tracks", { method: "P
 const station0 = await req("/api/booth/sessions");
 if (station0.json?.on !== true) fail(`the upload station does not answer: ${station0.status} ${station0.text.slice(0, 120)}`);
 if (station0.json.next) fail(`a recording (${station0.json.next.names}) is already waiting at the upload station; upload it or move it on /team first`);
+if (station0.json.recording?.length) fail(`a recording is under way (${station0.json.recording.map((p) => p.first_name).join(", ")}): play this once the booth is free`);
 const stale = await uploadSong(`Test - Stale ${tag}.mp3`, { "x-party-take": "999999999" });
 if (stale.status !== 409 || stale.json?.error !== "take_changed") fail(`an upload for a recording the station no longer shows answered ${stale.status}`);
 const walk = await uploadSong(`Test - Walk up ${tag}.mp3`, { "x-party-take": "none" });
@@ -160,28 +164,35 @@ if (token) {
   const sA = find(l.json?.sessions, guestA);
   const sB = find(l.json?.sessions, guestB);
   if (!sA || !sB || sA.id === sB.id) fail("the team's line does not show the two sign-ups as a card each");
-  const lane = async (s, status, from) => (await req(`/api/party/team/sessions/${s.id}/status`, { method: "POST", headers: auth, body: { status, from } })).json?.session?.status;
-  if ((await lane(sA, "booth", "waiting")) !== "booth" || (await lane(sB, "booth", "waiting")) !== "booth") fail("green did not take");
+  const move = (s, status, from, song) => req(`/api/party/team/sessions/${s.id}/status`, { method: "POST", headers: auth, body: { status, from, ...(song ? { song } : {}) } });
+  const lane = async (s, status, from, song) => (await move(s, status, from, song)).json?.session?.status;
+  // Ava records her part and comes out; Bo goes in for his part of the same song (one after the other).
+  if ((await lane(sA, "booth", "waiting")) !== "booth" || (await lane(sA, "upload", "booth")) !== "upload") fail("green or red did not take");
+  const asked = await move(sB, "booth", "waiting");
+  if (asked.status !== 409 || asked.json?.error !== "which_song") fail(`with Ava's song not uploaded and the booth empty, Bo's green tap was not asked "same song or new?": ${asked.status} ${asked.text.slice(0, 120)}`);
+  if ((await lane(sB, "booth", "waiting", "same")) !== "booth") fail("Same song did not take");
   const l2 = await req("/api/party/team/line", { headers: auth });
   const [tA, tB] = [find(l2.json.sessions, guestA)?.take_id, find(l2.json.sessions, guestB)?.take_id];
-  if (!tA || tA !== tB) fail(`the two tapped in are not one recording (takes ${tA}, ${tB})`);
-  if ((await lane(sA, "upload", "booth")) !== "upload") fail("red did not take");
-  if ((await req("/api/booth/sessions")).json?.next) fail("the recording reached the upload station while someone in it was still in the booth");
-  if ((await lane(sB, "upload", "booth")) !== "upload") fail("red did not take for the last one out");
+  if (!tA || tA !== tB) fail(`Ava and Bo are not one recording (takes ${tA}, ${tB})`);
+  const during = (await req("/api/booth/sessions")).json;
+  if (during?.next || during?.recording?.length !== 2) fail(`while Bo records, the booth page should show the whole recording and nothing at the station: ${JSON.stringify(during).slice(0, 200)}`);
+  if ((await lane(sB, "upload", "booth")) !== "upload") fail("red did not take for Bo");
   const station = (await req("/api/booth/sessions")).json;
-  if (station?.next?.id !== tA || station.next.size !== 2) fail(`the upload station does not show the recording of 2: ${JSON.stringify(station?.next)}`);
-  ok("signed in as the team: both tapped green are one recording; it waits at the upload station only once the last of them is tapped out");
-  const up = await uploadSong(`Test - First run ${tag}.mp3`, { "x-party-take": String(tA) });
+  if (station?.next?.id !== tA || station.next.size !== 2 || station.next.key !== `${tA}.2`) fail(`the upload station does not show the recording of 2: ${JSON.stringify(station?.next)}`);
+  ok("signed in as the team: Ava, then Bo for the same song (the line asks same song or new) are one recording; the booth page shows both, and the engineer confirms both names");
+  const up = await uploadSong(`Test - First run ${tag}.mp3`, { "x-party-take": station.next.key });
   if (up.status !== 200 || up.json?.tagged !== true) fail(`the upload for the recording: ${up.status} ${up.text.slice(0, 120)}`);
   const code = up.json.code;
   const l3 = await req("/api/party/team/line", { headers: auth });
   if (find(l3.json.sessions, guestA)?.status !== "done" || find(l3.json.sessions, guestB)?.status !== "done") fail("the upload did not mark both done");
-  const seen = await req(`/api/booth/tracks/${code}/enter`, { method: "POST", body: { email: guestB.email } });
-  if (seen.json?.contest?.you?.performer !== true || seen.json.contest.access?.length !== 2) fail(`the song's access list: ${seen.text.slice(0, 160)}`);
-  ok(`the song (${code}) landed on exactly those two, both are done, and the track page lists both as having access`);
+  for (const g of [guestA, guestB]) {
+    const seen = await req(`/api/booth/tracks/${code}/enter`, { method: "POST", body: { email: g.email } });
+    if (seen.json?.contest?.you?.performer !== true || seen.json.contest.you.can_manage !== true || seen.json.contest.access?.length !== 2) fail(`${g.email} on the song: ${seen.text.slice(0, 160)}`);
+  }
+  ok(`the song (${code}) belongs to both, not just the last one out: both are done, both are listed as having access, both have the controls`);
   const tick = await req(`/api/booth/tracks/${code}/contest`, { method: "POST", body: { email: guestA.email, enter: true, agree: true } });
   if (tick.json?.error === "voting_closed" || tick.json?.error === "voting_not_open") fail("the preview's voting window is closed: run npm run party-window -- --env preview --starts <ISO> --no-end");
-  if (tick.status !== 200 || tick.json.contest.entered !== true || tick.json.contest.you?.manager !== true) fail(`the first Enter: ${tick.status} ${tick.text.slice(0, 160)}`);
+  if (tick.status !== 200 || tick.json.contest.entered !== true || tick.json.contest.changed?.action !== "entered") fail(`Ava's Enter: ${tick.status} ${tick.text.slice(0, 160)}`);
   const label = "Test & Test";
   const inVote = async (want) => {
     for (let i = 0; i < 12; i++) {
@@ -192,12 +203,17 @@ if (token) {
     return false;
   };
   if (!(await inVote(true))) fail("entered, but the song did not show in /api/state within 12 s");
-  ok("the first to tick Enter manages the song, and it is in the vote (/api/state) with no script run and no group confirmation");
-  const other = await req(`/api/booth/tracks/${code}/contest`, { method: "POST", body: { email: guestB.email, enter: false } });
-  if (other.status !== 403 || other.json?.error !== "not_manager") fail(`the other person could change the entry: ${other.status} ${other.text.slice(0, 120)}`);
-  const again = await req(`/api/booth/tracks/${code}/contest-status`, { method: "POST", body: { email: guestB.email } });
-  if (again.json?.contest?.entered !== true || again.json.contest.manager !== "Test") fail("after a reload the song no longer reads entered, with its manager");
-  ok(`the other person keeps access but not the controls: "${other.json.message}"`);
+  ok("Ava ticks Enter and the song is in the vote (/api/state) with no script run and no group confirmation");
+  const out = await req(`/api/booth/tracks/${code}/contest`, { method: "POST", body: { email: guestB.email, enter: false } });
+  if (out.status !== 200 || out.json?.contest?.entered !== false || out.json.contest.changed?.action !== "withdrawn" || !(await inVote(false))) fail(`Bo's withdraw: ${out.status} ${out.text.slice(0, 160)}`);
+  const seenByA = await req(`/api/booth/tracks/${code}/contest-status`, { method: "POST", body: { email: guestA.email } });
+  if (seenByA.json?.contest?.changed?.action !== "withdrawn") fail("Ava's page does not say the song was withdrawn");
+  ok("Bo withdraws it for everyone: out of the vote, and Ava's page says who withdrew it");
+  const back2 = await req(`/api/booth/tracks/${code}/contest`, { method: "POST", body: { email: guestB.email, enter: true, agree: true } });
+  if (back2.json?.contest?.entered !== true || !(await inVote(true))) fail("Bo could not enter it again");
+  const again = await req(`/api/booth/tracks/${code}/contest-status`, { method: "POST", body: { email: guestA.email } });
+  if (again.json?.contest?.entered !== true || again.json.contest.changed?.action !== "entered" || !/^\/#/.test(again.json.contest.vote_url ?? "")) fail("after a reload the song no longer reads entered, with who entered it and its link on the voting page");
+  ok("entered again by Bo: the same song is back in the vote, and a reload shows who last changed it and View Contest's link to it");
   const untick = await req(`/api/booth/tracks/${code}/contest`, { method: "POST", body: { email: guestA.email, enter: false } });
   if (untick.json?.contest?.entered !== false || !(await inVote(false))) fail("unticking did not take the song out of the vote");
   ok("unticked: the song left the vote for everyone (this run leaves nothing in the preview's vote)");
@@ -218,4 +234,4 @@ try {
 } catch (err) {
   cleaned = `; its test rows are still there (${String(err.message).split("\n")[0].slice(0, 120)}): npm run clean-test-data -- --env preview --keep <demo code>`;
 }
-console.log(`FIRST_RUN OK ${base}: ${step} steps${cleaned}${token ? "" : " (the team's emailed-code sign-in is a person's step: set FIRST_RUN_TEAM_TOKEN to cover the team's line, the recording, the upload station and the manager's entry too)"}`);
+console.log(`FIRST_RUN OK ${base}: ${step} steps${cleaned}${token ? "" : " (the team's emailed-code sign-in is a person's step: set FIRST_RUN_TEAM_TOKEN to cover the team's line, the recording, the upload station and the shared entry too)"}`);

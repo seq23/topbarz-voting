@@ -43,7 +43,7 @@ const els = {
   walkupGo: $("tbz-walkup-go"),
 };
 
-const app = { busy: false, lastFile: null, station: null };
+const app = { busy: false, lastFile: null, station: null, asking: null };
 
 // ── The words (booth-copy.js)
 document.title = `${COPY.headline} | Top Barz`;
@@ -72,9 +72,12 @@ function renderStation() {
   const flagged = (next?.people ?? []).filter((p) => p.flags?.length);
   els.groupsFlags.replaceChildren(...flagged.map((p) => h("li", { class: "flag", text: COPY.flagged.replace("{name}", p.first_name).replace("{why}", p.flags.map((f) => (f === "test" ? COPY.flagTest : COPY.flagStale)).join(", ")) })));
   els.groupsFlags.hidden = flagged.length === 0;
+  // The song being recorded now: its whole group, in the booth or already out.
+  const rec = st?.recording ?? [];
+  const recording = rec.length ? COPY.recordingNow.replace("{names}", rec.map((p) => `${p.first_name} (${p.in_booth ? COPY.inBooth : COPY.outOfBooth})`).join(", ")) : "";
   const status = next
-    ? (st.queued ? COPY.queued.replace("{n}", String(st.queued)).replace("{s}", st.queued === 1 ? "" : "s") : "")
-    : st?.in_booth?.length ? COPY.inBoothNow.replace("{names}", st.in_booth.join(", ")) : COPY.groupsNone;
+    ? [st.queued ? COPY.queued.replace("{n}", String(st.queued)).replace("{s}", st.queued === 1 ? "" : "s") : "", recording].filter(Boolean).join(" ")
+    : recording || (st?.in_booth?.length ? COPY.inBoothNow.replace("{names}", st.in_booth.join(", ")) : COPY.groupsNone);
   els.groupsStatus.textContent = status;
   els.groupsStatus.hidden = !status;
   els.groupsNote.textContent = COPY.groupsNote;
@@ -85,7 +88,7 @@ async function loadGroups() {
     const data = await res.json();
     els.groups.hidden = data?.on !== true;
     if (data?.on !== true) { app.station = null; return; }
-    app.station = { next: data.next && Number.isInteger(data.next.id) ? data.next : null, queued: Number(data.queued) || 0, in_booth: Array.isArray(data.in_booth) ? data.in_booth : [] };
+    app.station = { next: data.next && Number.isInteger(data.next.id) && typeof data.next.key === "string" ? data.next : null, queued: Number(data.queued) || 0, in_booth: Array.isArray(data.in_booth) ? data.in_booth : [], recording: Array.isArray(data.recording) ? data.recording.filter((p) => typeof p?.first_name === "string") : [] };
     renderStation();
   } catch {}
 }
@@ -123,14 +126,26 @@ function done({ code, file_name: name }) {
 }
 
 // ── The upload
-function upload(file, { walkUpOk = false } = {}) {
+// While the party is on, nothing goes up before the engineer answers ON the page (never the
+// browser's own pop-up, which is easy to miss): the names at the upload station, "Yes, it's them"
+// or "Not them"; or, with nobody there, "Upload with nobody on it" or "Wait for the names". The
+// upload carries the station's key as it was when they said yes, so a change since is refused.
+function askFirst(file) {
+  const next = app.station.next;
+  app.lastFile = file;
+  app.asking = next ? { key: next.key } : { key: "none" };
+  els.walkupText.textContent = next ? `${COPY.confirmGroup.replace("{file}", file.name).replace("{names}", next.names)} ${COPY.confirmGroupNote}` : COPY.walkUpConfirm;
+  els.walkupGo.textContent = next ? COPY.confirmGroupGo : COPY.walkUpGo;
+  els.walkupPick.textContent = next ? COPY.confirmGroupNo : COPY.walkUpPick;
+  show("walkup");
+  (next ? els.walkupGo : els.walkupPick).focus();
+}
+function upload(file, { confirmed = null } = {}) {
   if (app.busy || !file) return;
   const why = refuseFile(file);
   if (why) { failed(why === "not_audio" ? COPY.notAudio : why === "too_big" ? COPY.tooBig : COPY.empty); return; }
-  // While the party is on, a song with nobody at the upload station has nobody on it: asked first,
-  // on the page (never the browser's own pop-up, which is easy to miss), never uploaded in silence.
   const party = Boolean(app.station);
-  if (party && !app.station.next && !walkUpOk) { app.lastFile = file; show("walkup"); els.walkupPick.focus(); return; }
+  if (party && !confirmed) { askFirst(file); return; }
   app.busy = true;
   app.lastFile = file;
   show("uploading");
@@ -140,7 +155,7 @@ function upload(file, { walkUpOk = false } = {}) {
   xhr.setRequestHeader("x-file-name", encodeURIComponent(file.name));
   xhr.setRequestHeader("content-type", file.type || "application/octet-stream");
   xhr.setRequestHeader("accept", "application/json");
-  if (party) xhr.setRequestHeader("x-party-take", String(app.station.next?.id ?? "none"));
+  if (party) xhr.setRequestHeader("x-party-take", confirmed);
   xhr.responseType = "json";
   xhr.timeout = 10 * 60 * 1000;
   xhr.upload.addEventListener("progress", (ev) => { if (ev.lengthComputable) setProgress(ev.loaded / ev.total); });
@@ -171,14 +186,16 @@ els.zone.addEventListener("drop", (ev) => {
   ev.preventDefault();
   upload(ev.dataTransfer?.files?.[0]);
 });
-// The walk-up question: wait for the names (nothing uploaded) or go on with nobody on it.
+// The question: not them / wait for the names (nothing uploaded), or go on.
 els.walkupPick.addEventListener("click", () => {
+  const held = app.asking?.key && app.asking.key !== "none" ? COPY.confirmGroupHeld : COPY.walkUpHeld;
+  app.asking = null;
   show("ready");
-  els.progressText.textContent = COPY.walkUpHeld;
+  els.progressText.textContent = held;
   els.groups.scrollIntoView({ behavior: "smooth", block: "start" });
   loadGroups();
 });
-els.walkupGo.addEventListener("click", () => { const file = app.lastFile; app.lastFile = null; upload(file, { walkUpOk: true }); });
+els.walkupGo.addEventListener("click", () => { const file = app.lastFile; const key = app.asking?.key ?? "none"; app.asking = null; app.lastFile = null; upload(file, { confirmed: key }); });
 els.next.addEventListener("click", () => { show("ready"); els.file.focus(); });
 els.retry.addEventListener("click", () => {
   if (app.lastFile) upload(app.lastFile);

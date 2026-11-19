@@ -65,6 +65,29 @@ export function moves(status) {
   return ["upload"];
 }
 
+// The recordings not uploaded yet, each with its people still on it (in the booth or out, waiting
+// on the upload) and whether any of them is in the booth: one being recorded, or at the upload
+// station once everyone of it is out (the oldest first). A group often records one verse at a time,
+// so a recording stays open after the booth empties (Scooter, 19 Nov 2026).
+export function recordings(takes, sessions) {
+  return (takes ?? []).filter((t) => !t.uploaded)
+    .map((t) => {
+      const people = (sessions ?? []).filter((s) => s.take_id === t.id && (s.status === "booth" || s.status === "upload"));
+      return { t, people, inBooth: people.some((s) => s.status === "booth") };
+    })
+    .filter((r) => r.people.length)
+    .sort((a, b) => Date.parse(a.t.opened_at) - Date.parse(b.t.opened_at) || a.t.id - b.t.id);
+}
+// Before a green tap: the first names of the open recording when it must be asked "same song or new?"
+// (it is not ended, nobody of it is in the booth, its song is not uploaded), else "" (no question:
+// someone of it is in the booth, so the person joins it; or none is open, so it is a new one).
+export function songQuestion(takes, sessions) {
+  const open = recordings(takes, sessions).filter((r) => !r.t.closed);
+  const last = open[open.length - 1];
+  if (!last || last.inBooth) return "";
+  return groupLabel(last.people.flatMap((s) => (s.guests ?? []).map((g) => g.first_name)));
+}
+
 // The two at the top of the team's line: "Next up" and "After that" (after any group in the booth).
 export function nextTwo(sessions) {
   const waiting = (sessions ?? []).filter((s) => s.status === "waiting");
@@ -112,9 +135,13 @@ export function slotProblem(g) {
 // The server's contest view → what the page draws, or null (no contest here). First names only.
 const BLOCKS = ["scooter_taylor", "test_file_in_production", "pulled_by_team"];
 const STEPS = ["not_entered", "in"];
+// The voting page, or one song on it ("/#<slug>"): nothing else is followed from the server.
+const voteUrl = (u) => (typeof u === "string" && /^\/(#[a-z0-9-]{1,60})?$/.test(u) ? u : "/");
 export function cleanContest(c) {
   if (!c || typeof c !== "object" || c.on !== true) return null;
   const name = (v) => (typeof v === "string" && v.trim() ? v.trim().slice(0, 30) : null);
+  const ch = c.changed && typeof c.changed === "object" && ["entered", "withdrawn"].includes(c.changed.action) && Number.isFinite(Date.parse(c.changed.at))
+    ? { action: c.changed.action, by: name(c.changed.by), at: c.changed.at } : null;
   return {
     rules_url: "/holiday-rules",
     title: typeof c.title === "string" ? c.title.slice(0, 60) : "",
@@ -122,32 +149,32 @@ export function cleanContest(c) {
     closed: c.closed === true,
     ticked: c.ticked === true,
     ticked_by: name(c.ticked_by),
+    changed: ch,
     step: STEPS.includes(c.step) ? c.step : null,
-    manager: name(c.manager),
-    you: { performer: c.you?.performer === true, manager: c.you?.manager === true, can_manage: c.you?.can_manage === true, signed_up: c.you?.signed_up === true },
+    you: { performer: c.you?.performer === true, can_manage: c.you?.can_manage === true, signed_up: c.you?.signed_up === true },
     nobody: c.nobody === true,
     access: (Array.isArray(c.access) ? c.access : []).slice(0, 50).map(name).filter(Boolean),
     people: (Array.isArray(c.people) ? c.people : []).slice(0, 50).map((p) => ({ first_name: name(p?.first_name), you: p?.you === true })),
     blocked: BLOCKS.includes(c.blocked) ? c.blocked : null,
     production: c.production === true,
+    vote_url: voteUrl(c.vote_url),
   };
 }
-// The one line under the box that everyone with the code sees the same way: in or not, and who
-// entered it. A song that cannot go in says why in neutral words (Scooter, 18 Nov 2026: "This song
-// was recorded as a test entry for this preview, so it is not eligible for the vote." No policy
-// framing, and nothing about who can or cannot enter).
-export function contestLine(COPY, c) {
+// The one line under the box that everyone with the code sees the same way: in or not, and who last
+// entered or withdrew it, and when (Scooter, 19 Nov 2026: "Show who last changed it"). A song that
+// cannot go in says why in neutral words (Scooter, 18 Nov 2026: "This song was recorded as a test
+// entry for this preview, so it is not eligible for the vote." No policy framing, and nothing about
+// who can or cannot enter). `clock` turns the server's time into the phone's "9:42 PM".
+export function contestLine(COPY, c, clock = clockWords) {
   if (!c) return "";
   if (c.blocked === "pulled_by_team") return COPY.contestPulled;
   if (c.blocked === "scooter_taylor" || c.blocked === "test_file_in_production") return c.production ? COPY.notEligible : COPY.testEntry;
   if (c.blocked) return COPY.notEligible;
-  if (c.entered) return COPY.contestEntered.replace("{ticked}", c.ticked_by || COPY.contestSomeone);
+  const ch = c.changed;
+  const time = ch ? clock(ch.at) : "";
+  const fill = (line, who) => line.replace("{who}", who || COPY.contestSomeone).replace("{time}", time);
+  if (c.entered) return ch?.action === "entered" && time ? fill(COPY.contestEnteredAt, ch.by) : fill(COPY.contestEntered, c.ticked_by);
   if (c.closed) return COPY.contestClosed;
+  if (ch?.action === "withdrawn" && time) return fill(COPY.contestWithdrawn, ch.by);
   return COPY.contestNotYet;
-}
-// Who manages the song, for someone on it who does not: "Jeff manages this song …", or "" (they do,
-// or nobody does yet and they can).
-export function managerLine(COPY, c) {
-  if (!c?.you?.performer || c.you.manager || c.you.can_manage || !c.manager) return "";
-  return COPY.managedBy.replace(/\{manager\}/g, c.manager);
 }

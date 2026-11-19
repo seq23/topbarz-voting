@@ -8,12 +8,13 @@
 // reads the vote. The device remembers ONE thing, the email typed here (localStorage
 // tbz.booth.email), never the code; the only email it shows is that one (`you.email`).
 //
-// While the holiday party is on (Scooter's preview notes, 17 Nov 2026, and his revision list of
-// 18 Nov) the page is simpler: anyone with the code and their email hears, downloads and sees who
-// has access ("Jeff, John and Scooter have access to this song"); the song's manager, the first
-// person on it to manage it, has the rest: album artwork, Enter the contest (then the song title),
-// and Share. There is no Make public switch: Share publishes the listen page itself. Others on the
-// song are told who manages it, and share it once it is shared.
+// While the holiday party is on (Scooter's preview notes, 17 Nov 2026, and his notes of 18 and 19 Nov)
+// the page is simpler: anyone with the code and their email hears, downloads and sees who has access
+// ("Jeff, John and Scooter have access to this song"); everyone on the song (the people the
+// ambassador tapped in for it) has the rest: album artwork, Enter the contest (then the song title),
+// and Share. The entry is the whole song's: anyone on it enters or withdraws it for everyone, and the
+// line under it says who last did, and when. There is no Make public switch: Share publishes the
+// listen page itself. The buttons are small and square: Download Song, Share Song, View Contest.
 import { api } from "./api.js";
 import { $, h } from "./dom.js";
 import { boothShareMessage, detectPlatform, listenLink, safeMediaUrl, smsHref } from "./logic.js";
@@ -21,7 +22,7 @@ import { artworkFor, cleanEmail, cleanPeople, cleanTrack, codeDigits, codeFromSe
 import { createControls, createPlayer } from "./player.js";
 import { COPY } from "./track-copy.js";
 import { festive } from "./festive.js";
-import { LINE_POLL_MS, accessLine, cleanContest, contestLine, managerLine } from "./party-rules.js";
+import { LINE_POLL_MS, accessLine, cleanContest, contestLine } from "./party-rules.js";
 
 const els = {
   headline: $("tbz-track-headline"),
@@ -71,7 +72,9 @@ const els = {
   contestLine: $("tbz-contest-line"),
   contestMsg: $("tbz-contest-msg"),
   access: $("tbz-access"),
-  manager: $("tbz-manager"),
+  onSong: $("tbz-on-song"),
+  viewContest: $("tbz-view-contest"),
+  actions: document.querySelector(".found-actions"),
 };
 
 const app = { looking: null, track: null, row: null, platform: detectPlatform(navigator), flipping: false, voting: false, entering: false, contestTimer: null };
@@ -105,6 +108,7 @@ els.titleSave.textContent = COPY.titleSave;
 els.contestHelp.textContent = COPY.contestHelp;
 els.contestLabel.replaceChildren(`${COPY.contestBox} `, h("a", { href: "/holiday-rules", target: "_blank", rel: "noopener", text: COPY.contestRules }), ".");
 els.listenOnly.textContent = COPY.listenOnly;
+els.viewContest.textContent = COPY.viewContest;
 
 // ── The player: one for the page
 const player = createPlayer((slug, audio) => {
@@ -136,8 +140,8 @@ function drawShare() {
   const pub = Boolean(t?.public && t.share_id);
   els.publicBtn.setAttribute("aria-checked", pub ? "true" : "false");
   els.publicNote.textContent = pub ? COPY.publicOn : COPY.publicOff;
-  // The party's page has no switch: the manager's Share publishes it; once it is shared, anyone on
-  // the song can share the same link.
+  // The party's page has no switch: Share by anyone on the song publishes it; once it is shared,
+  // anyone with the code can share the same link.
   const canShare = t?.contest ? (t.contest.you.can_manage || (t.contest.you.performer && pub)) : pub;
   els.share.hidden = !canShare;
   if (!canShare) { els.shareMsg.hidden = true; els.shareMsg.textContent = ""; }
@@ -163,7 +167,7 @@ function say(text) {
   els.msg.hidden = !text;
 }
 // Why the server said no to a change, in the page's words.
-const refusal = (err, fallback) => (err?.code === "not_manager" ? err.message || fallback : err?.status === 403 || err?.code === "not_attached" ? COPY.notAttached : err?.status === 429 || err?.code === "rate_limited" ? COPY.tooMany : fallback);
+const refusal = (err, fallback) => (err?.status === 403 || err?.code === "not_attached" ? COPY.notAttached : err?.status === 429 || err?.code === "rate_limited" ? COPY.tooMany : fallback);
 function clearTrack() {
   if (app.row) { player.drop(app.row.slug); app.row.el.remove(); }
   app.row = null;
@@ -287,16 +291,22 @@ function drawContest() {
   clearTimeout(app.contestTimer);
   const performer = Boolean(c?.you.performer);
   const manages = Boolean(c?.you.can_manage);
+  // The party's three square buttons; off (production), the page's own two as before.
+  els.actions.classList.toggle("is-square", Boolean(c));
+  els.download.textContent = c ? COPY.downloadSong : COPY.download;
+  els.share.textContent = c ? COPY.shareSong : COPY.share;
+  els.viewContest.hidden = !c;
+  if (c) els.viewContest.href = c.vote_url;
   for (const el of [els.publicRow, els.publicNote, els.publicGroup, els.voteRow, els.voteNote]) el.hidden = Boolean(c);
   els.artRow.hidden = Boolean(c) && !manages;
   els.access.hidden = !c;
   els.access.textContent = c ? accessLine(COPY, c.access) : "";
   els.listenOnly.hidden = !c || performer;
   els.listenOnly.textContent = COPY.listenOnly;
-  const whoManages = c ? (managerLine(COPY, c) || (performer && c.you.manager ? COPY.youManage : performer && manages ? COPY.firstToManage : "")) : "";
-  els.manager.textContent = whoManages;
-  els.manager.hidden = !whoManages;
-  // The entry's status is everyone's to see; its box is the manager's.
+els.viewContest.textContent = COPY.viewContest;
+  els.onSong.textContent = manages ? COPY.youreOn : "";
+  els.onSong.hidden = !manages;
+  // The entry's status is everyone's to see; its box is everyone's on the song.
   els.contest.hidden = !c || c.nobody;
   drawShare();
   if (!c) return;
@@ -322,7 +332,7 @@ async function refreshContest() {
   } catch {}
   if (app.track === track) drawContest();
 }
-// Enter (with the rules) or step out: the manager's (first come; the server says who manages it).
+// Enter (with the rules) or withdraw: anyone on the song, for everyone on it.
 async function sendContest(body, box) {
   const track = app.track;
   if (!track?.contest || app.entering) return;
@@ -339,7 +349,6 @@ async function sendContest(body, box) {
     box.checked = was;
     els.contestMsg.textContent = err?.code === "not_signed_up" ? COPY.contestSignUp : err?.code === "voting_closed" ? COPY.contestClosed : refusal(err, err?.message || COPY.contestFailed);
     els.contestMsg.hidden = false;
-    if (err?.code === "not_manager") refreshContest();
   } finally {
     app.entering = false;
     if (app.track === track) drawContest();
@@ -379,7 +388,6 @@ async function share() {
       if (app.track !== track) return;
       track.public = data?.public === true;
       track.share_id = typeof data?.share_id === "string" ? data.share_id : null;
-      refreshContest(); // the first to share now manages the song
     } catch (err) {
       els.shareMsg.textContent = refusal(err, COPY.publicFailed);
       els.shareMsg.hidden = false;
@@ -449,7 +457,6 @@ async function addArt(file) {
     if (app.track !== track) return;
     track.art_url = url;
     drawArt();
-    if (track.contest) refreshContest(); // the first to add artwork now manages the song
   } catch (err) {
     if (app.track !== track) return;
     els.artMsg.textContent = err?.message || COPY.artFailed;

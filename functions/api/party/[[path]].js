@@ -16,24 +16,27 @@
 //   POST /api/party/team/code        { email } → { sent, email, resend_in_seconds }   only an email on the team list
 //   POST /api/party/team/verify      { email, code } → { token, member: { email } }
 //   GET  /api/party/team/line        → { now, sessions: [{ id, status, place, take_id, …, guests: [{ id, name, phone, email, city, instagram, joined_at, flags }] }], takes: [{ id, closed, uploaded }] }
-//   POST /api/party/team/sessions/<id>/status  { status, from } → { session }   one person: waiting | booth (green: into the
-//                                    open take, or a new one) | upload (red: out; the take closes when its last person is out
-//                                    and waits at the upload station) | done; undo is the same call back.
+//   POST /api/party/team/sessions/<id>/status  { status, from, song? } → { session }   one person: waiting | booth (green:
+//                                    onto the recording that is open, or a new one; when everyone of the open recording is out
+//                                    and its song is not uploaded, `song: "same" | "new"` says which, else 409 which_song) |
+//                                    upload (red: out; the recording waits at the upload station once nobody of it is in the
+//                                    booth, and stays open to the rest of its group until its song is uploaded) | done; undo
+//                                    is the same call back.
 //   POST /api/party/team/sessions/<id>/texted  → { texted_at }
 //   GET  /api/party/team/members     → { members: [{ id, email, you }] };  POST { email } adds;  POST …/members/<id>/remove
 //   GET  /api/party/team/gifs        → { gifs };  POST { id, url, width, height, title } adds;  POST …/gifs/<giphy id>/remove
-//   GET  /api/party/team/songs       → { songs: [{ code, label, entered, pulled, manager, members, repoints, … }], guests: [{ id, name, email, phone, flags }] }
+//   GET  /api/party/team/songs       → { songs: [{ code, label, entered, pulled, changed, members, repoints, … }], guests: [{ id, name, email, phone, flags }] }
 //   POST /api/party/team/songs/<booth code>/pull  { pulled: true|false } → { song }   "Take out of the vote" / "Put back"
 //   POST /api/party/team/songs/<booth code>/people  { guest_ids: [id, …], note } → { song }   re-points the song to exactly
 //                                    those people (Scooter, 18 Nov 2026: "staff can re-point it with a note of who changed what
 //                                    and when"); kept in booth_repoints with the team member, the time, before, after and the note
 import { cleanEmail, isCode } from "../../_lib/booth.js";
-import { ALL_GUESTS_SQL, ATTACH_PERSON_SQL, CONTEST_PEOPLE_SQL, CONTEST_TRACK_SQL, DETACH_ALL_SQL, DROP_GONE_MANAGER_SQL, GUESTS_BY_ID_SQL, PULL_SQL, REPOINT_LOG_SQL, contestClosed, readSong, syncEntry, teamSongs } from "../../_lib/contest.js";
+import { ALL_GUESTS_SQL, ATTACH_PERSON_SQL, CONTEST_PEOPLE_SQL, CONTEST_TRACK_SQL, DETACH_ALL_SQL, GUESTS_BY_ID_SQL, PULL_SQL, REPOINT_LOG_SQL, contestClosed, readSong, syncEntry, teamSongs } from "../../_lib/contest.js";
 import { LIMITS, VERIFICATION, verificationStatus } from "../../_lib/config.js";
 import { HttpError, fail, ipHash, json, readJson, route } from "../../_lib/http.js";
 import {
-  ADD_GIF_SQL, CLOSE_TAKE_SQL, GIFS_SQL, GUEST_BY_EMAIL_SQL, GUEST_BY_KEY_SQL, INSERT_GUEST_SQL, LANE_COLUMNS, LINE_GUESTS_SQL, LINE_SESSIONS_SQL, NEW_SESSION_SQL, NEW_TAKE_SQL, OPEN_TAKE_SQL, REJOIN_GUEST_SQL, REMOVE_GIF_SQL, REOPEN_TAKE_SQL, SESSION_CODE_TRIES, SESSION_NAMES_SQL, SET_STATUS_SQL, SET_TAKE_SQL, STATUS_EVENT_SQL, TAKE_OF_SQL, TEXTED_SQL, VISIT_SQL,
-  firstOf, guestFlags, guestKey, holidayOn, isGuestKey, laneOf, lineOrder, parsePartyGif, parseSignUp, parseStatusChange, randomSessionCode, toGif,
+  ADD_GIF_SQL, CLOSE_TAKE_SQL, END_TAKE_SQL, GIFS_SQL, GUEST_BY_EMAIL_SQL, GUEST_BY_KEY_SQL, INSERT_GUEST_SQL, LANE_COLUMNS, LINE_GUESTS_SQL, LINE_SESSIONS_SQL, NEW_SESSION_SQL, NEW_TAKE_SQL, OPEN_TAKE_SQL, REJOIN_GUEST_SQL, REMOVE_GIF_SQL, REOPEN_TAKE_SQL, SESSION_CODE_TRIES, SESSION_NAMES_SQL, SET_STATUS_SQL, SET_TAKE_SQL, STATUS_EVENT_SQL, TAKE_OF_SQL, TAKE_PEOPLE_SQL, TEXTED_SQL, VISIT_SQL,
+  firstOf, groupLabel, guestFlags, guestKey, holidayOn, isGuestKey, laneOf, lineOrder, parsePartyGif, parseSignUp, parseStatusChange, randomSessionCode, toGif,
 } from "../../_lib/party.js";
 import { assertUnderLimit, limitStatement, maybePrune } from "../../_lib/ratelimit.js";
 import { MEMBER_BY_EMAIL_SQL, STORE_TEAM_CODE_SQL, newCode, releaseTeamSlot, requireMember, signTeamToken, takeTeamSlot, teamCodeEmail, teamCodeHmac, teamCodeLive, teamCodeMatchesAny } from "../../_lib/team.js";
@@ -198,13 +201,14 @@ async function setStatus(context, id, m) {
   if (!parsed.ok) throw new HttpError(400, parsed.error, parsed.message);
   const db = context.env.DB;
   const now = Date.now();
-  const { from, status: to } = parsed.value;
+  const { from, status: to, song } = parsed.value;
   // Back to the upload station from Done: only while the take's song is not uploaded yet (an undo of
   // "Done, no song"); a song already uploaded is re-pointed from Contest songs instead.
   if (from === "done" && to === "upload") {
     const take = await db.prepare(TAKE_OF_SQL).bind(id).first();
     if (!take || take.track_id) throw new HttpError(409, "already_uploaded", "This person's song is already uploaded. To put them on a different song, use Change who's on it under Songs.");
   }
+  const joining = to === "booth" && from === "waiting" ? await whichTake(db, song) : null;
   const [toStatus, toDone] = LANE_COLUMNS[parsed.value.status];
   const [fromStatus, fromDone] = LANE_COLUMNS[parsed.value.from];
   const row = await db.prepare(SET_STATUS_SQL).bind(id, toStatus, toDone ? now : null, now, fromStatus, fromDone ? 0 : 1).first();
@@ -214,26 +218,43 @@ async function setStatus(context, id, m) {
     throw new HttpError(409, "changed", "Someone else changed this group a moment ago. The line has been refreshed.", { status: laneOf(current) });
   }
   await db.prepare(STATUS_EVENT_SQL).bind(id, from, to, m.id, now).run();
-  await moveTake(db, id, from, to, now);
+  if (joining) await joinTake(db, id, joining, now);
+  else await moveTake(db, id, to, now);
   return json({ session: { id, status: laneOf(row), status_at: new Date(row.status_at).toISOString() } });
 }
-// The take follows the taps (Scooter, 18 Nov 2026: "Those taps define who's on the song ... how a
-// session closes, so people marked out of one recording don't carry over into the next upload"):
-// in → the open take (or a new one); out → the take closes once nobody of it is in the booth, and
-// waits at the upload station whole; back to waiting → off the take; back in the booth → the take
-// opens again until its song is uploaded.
-async function moveTake(db, id, from, to, now) {
-  if (to === "booth" && from === "waiting") {
-    await db.prepare("INSERT INTO party_takes (opened_at) SELECT ?1 WHERE NOT EXISTS (SELECT 1 FROM party_takes WHERE closed_at IS NULL AND track_id IS NULL)").bind(now).run();
-    const open = (await db.prepare(OPEN_TAKE_SQL).first()) ?? (await db.prepare(NEW_TAKE_SQL).bind(now).first());
-    await db.prepare(SET_TAKE_SQL).bind(id, open.id).run();
-    return;
-  }
+// Into the booth: which recording this person is on (Scooter, 19 Nov 2026: "When Carlos and Scooter
+// go into the booth and leave one after the other, the upload should belong to both"). Someone of
+// the open recording still in the booth → that one. Everyone of it out, its song not uploaded yet →
+// the server cannot know whether this is Scooter recording his verse of Carlos's song or the next
+// group, so the team says (song: "same" | "new"), and without that answer it asks (409 which_song,
+// with the first names, so the page can put the question). Nobody on it, or none open → a new one.
+// → { join: <take id> } or { fresh: true, end: <take id to end> | null }.
+async function whichTake(db, song) {
+  const open = await db.prepare(OPEN_TAKE_SQL).first();
+  if (!open) return { fresh: true, end: null };
+  if (open.in_booth > 0 || open.out_waiting === 0) return { join: open.id };
+  if (song === "same") return { join: open.id };
+  if (song === "new") return { fresh: true, end: open.id };
+  const names = (await db.prepare(TAKE_PEOPLE_SQL).bind(open.id).all()).results ?? [];
+  const label = groupLabel(names.map((p) => firstOf(p.name)));
+  throw new HttpError(409, "which_song", `${label}'s song is not uploaded yet. Is this person on the same song, or a new one?`, { names: label });
+}
+async function joinTake(db, id, joining, now) {
+  if (joining.join) { await db.prepare(SET_TAKE_SQL).bind(id, joining.join).run(); return; }
+  if (joining.end) await db.prepare(END_TAKE_SQL).bind(joining.end, now).run();
+  await db.prepare(NEW_TAKE_SQL).bind(now).run();
+  await db.prepare(SET_TAKE_SQL).bind(id, (await db.prepare(OPEN_TAKE_SQL).first()).id).run();
+}
+// The other taps: out → still on the recording (it waits at the upload station once nobody of it
+// is in the booth, and is still open to the rest of the group); back to waiting → off it; back in
+// the booth → it opens again until its song is uploaded; done with no song → if nobody of it is
+// left waiting, it takes nobody else in.
+async function moveTake(db, id, to, now) {
   const take = await db.prepare(TAKE_OF_SQL).bind(id).first();
   if (!take) return;
-  if (to === "booth") { await db.prepare(REOPEN_TAKE_SQL).bind(take.id).run(); return; }
+  if (to === "booth") await db.prepare(REOPEN_TAKE_SQL).bind(take.id).run();
   if (to === "waiting") await db.prepare(SET_TAKE_SQL).bind(id, null).run();
-  if (to === "upload" || to === "waiting") await db.prepare(CLOSE_TAKE_SQL).bind(take.id, now).run();
+  if (to === "done") await db.prepare(CLOSE_TAKE_SQL).bind(take.id, now).run();
 }
 async function texted(context, id) {
   const row = await context.env.DB.prepare(TEXTED_SQL).bind(id, Date.now()).first();
@@ -290,7 +311,7 @@ async function pull(context, code, m) {
 // "Change who's on it": the song landed on the wrong people (a stale sign-up tapped in, a mistaken
 // upload), so the team re-points it to exactly the people picked, by their records, with a note.
 // Every re-point is a row in booth_repoints (who, when, before, after, the note), shown on the song.
-// A manager no longer on the song stops managing it. The song is judged again on its new people.
+// The new people hold the song's controls (everyone on a song does). The song is judged again on its new people.
 const NOTE_MAX = 200;
 async function repoint(context, code, m) {
   const { env } = context;
@@ -310,7 +331,6 @@ async function repoint(context, code, m) {
   await db.batch([
     db.prepare(DETACH_ALL_SQL).bind(track.id),
     ...people.map((p, i) => db.prepare(ATTACH_PERSON_SQL).bind(track.id, p.email, now + i, p.id)),
-    db.prepare(DROP_GONE_MANAGER_SQL).bind(track.id),
     db.prepare(REPOINT_LOG_SQL).bind(track.id, m.id, now, JSON.stringify(before.map((p) => ({ guest_id: p.guest_id ?? null, name: p.name ?? "someone not signed up" }))), JSON.stringify(people.map((p) => ({ guest_id: p.id, name: p.name }))), note),
   ]);
   await syncEntry(env, await readSong(db, code), now);

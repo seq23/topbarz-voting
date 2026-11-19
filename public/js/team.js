@@ -13,7 +13,7 @@ import { $, closeModal, h, showModal } from "./dom.js";
 import { festive } from "./festive.js";
 import { detectPlatform } from "./logic.js";
 import { HOLIDAY } from "./party-copy.js";
-import { LINE_POLL_MS, STATUS, TEAM_KEY, UNDO_MS, clockWords, flagWords, groupLabel, groupSmsHref, isTeamToken, moves, nextTwo } from "./party-rules.js";
+import { LINE_POLL_MS, STATUS, TEAM_KEY, UNDO_MS, clockWords, flagWords, groupLabel, groupSmsHref, isTeamToken, moves, nextTwo, recordings, songQuestion } from "./party-rules.js";
 import { COPY } from "./team-copy.js";
 
 const els = Object.fromEntries([
@@ -22,7 +22,7 @@ const els = Object.fromEntries([
   "songs-title", "songs-intro", "songs-none", "songs",
   "gifs-title", "gifs-intro", "gifs-chosen-title", "gifs-chosen", "gifs-none", "gif-search", "gif-search-label", "gif-status", "gif-results", "gif-by",
   "members-title", "members-intro", "members", "add-form", "add", "add-label", "add-go", "add-msg",
-  "person", "person-title", "person-list", "person-close", "confirm", "confirm-title", "confirm-note", "confirm-yes", "confirm-no", "toast", "toast-text", "undo",
+  "person", "person-title", "person-list", "person-close", "confirm", "confirm-title", "confirm-note", "confirm-yes", "confirm-alt", "confirm-no", "toast", "toast-text", "undo",
   "repoint", "repoint-title", "repoint-intro", "repoint-find", "repoint-find-label", "repoint-list", "repoint-note", "repoint-note-label", "repoint-msg", "repoint-save", "repoint-cancel",
 ].map((id) => [id.replace(/-([a-z])/g, (_, c) => c.toUpperCase()), $(`tbz-team-${id}`)]));
 
@@ -168,43 +168,45 @@ function card(s, { contact = false } = {}) {
   const meta = [COPY.joined.replace("{time}", clockWords(s.created_at)), s.texted_at ? COPY.texted.replace("{time}", clockWords(s.texted_at)) : null].filter(Boolean).join(" · ");
   return h("li", { class: `line-item is-${tone}`, "data-status": s.status },
     h("div", { class: "line-head" },
-      h("span", { class: `pill pill-${tone}`, text: s.status === "upload" && !takeOf(s)?.closed ? COPY.outWaiting : STATUS[s.status].word }),
+      h("span", { class: `pill pill-${tone}`, text: s.status === "upload" && app.sessions.some((o) => o.status === "booth" && o.take_id && o.take_id === s.take_id) ? COPY.outWaiting : STATUS[s.status].word }),
       s.place ? h("span", { class: "line-size", text: `#${s.place}` }) : null),
     h("ul", { class: "line-people" }, ...s.guests.map((g) => h("li", {}, h("button", { type: "button", class: "person-btn", text: g.name, onclick: () => personDetails(g, s) })))),
     ...s.guests.filter((g) => contact || g.flags?.length).map((g) => (g.flags?.length ? flagLine(g) : h("p", { class: "line-meta", text: `${g.email} · ${g.phone}` }))),
     h("p", { class: "line-meta", text: meta }),
     actions, note);
 }
-const takeOf = (s) => app.takes.find((t) => t.id === s.take_id) ?? null;
 // One recording: its people, each with their own buttons.
-function takeCard(take, people, { title, contact }) {
+function takeCard(take, people, { title, contact, open = false }) {
   return h("li", { class: "take" },
     h("p", { class: "next-label", text: title }),
     h("p", { class: "next-names", text: groupLabel(people.flatMap((s) => s.guests.map((g) => g.first_name))) }),
+    open ? h("p", { class: "line-meta", text: COPY.stillOpen }) : null,
     h("ol", { class: "line" }, ...people.map((s) => card(s, { contact }))));
 }
 function draw() {
   const waiting = app.sessions.filter((s) => s.status === "waiting");
   const done = app.sessions.filter((s) => s.status === "done");
-  // The booth: the recording still open (someone of it in the booth), with anyone of it already out.
-  const open = app.takes.filter((t) => !t.closed && !t.uploaded);
-  const boothPeople = app.sessions.filter((s) => s.status === "booth" || (s.status === "upload" && open.some((t) => t.id === s.take_id)));
-  const station = app.takes.filter((t) => t.closed && !t.uploaded).sort((a, b) => Date.parse(a.closed_at) - Date.parse(b.closed_at))
-    .map((t) => ({ t, people: app.sessions.filter((s) => s.status === "upload" && s.take_id === t.id) })).filter((x) => x.people.length);
-  // Out with no recording (from before 18 Nov 2026): shown at the station on their own.
-  const loose = app.sessions.filter((s) => s.status === "upload" && !s.take_id);
+  // The booth: the recording someone is in the booth for, with anyone of it already out. The upload
+  // station: every recording nobody is in the booth for, the oldest first.
+  const recs = recordings(app.takes, app.sessions);
+  const now = recs.filter((r) => r.inBooth);
+  const station = recs.filter((r) => !r.inBooth);
+  const onRec = new Set(recs.flatMap((r) => r.people.map((s) => s.id)));
+  // In the booth or out with no recording (from before 18 Nov 2026): shown on their own.
+  const loneBooth = app.sessions.filter((s) => s.status === "booth" && !onRec.has(s.id));
+  const loose = app.sessions.filter((s) => s.status === "upload" && !onRec.has(s.id));
   const { next, after, inBooth } = nextTwo(app.sessions);
   els.nextLabel.textContent = inBooth.length ? COPY.inBooth : COPY.nextUp;
   const nameOf = (s) => (s ? namesOf(s) : COPY.nobodyNext);
   els.next.textContent = inBooth.length ? groupLabel(inBooth.map((s) => namesOf(s))) : nameOf(next);
   els.afterLabel.textContent = inBooth.length ? COPY.nextUp : COPY.afterThat;
   els.after.textContent = inBooth.length ? nameOf(next) : nameOf(after);
-  els.booth.replaceChildren(...(boothPeople.length ? [takeCard(open[0] ?? {}, boothPeople, { title: COPY.boothTitle, contact: false })] : []));
-  els.boothNone.hidden = boothPeople.length > 0;
+  els.booth.replaceChildren(...now.map((r) => takeCard(r.t, r.people, { title: COPY.boothTitle, contact: false })), ...loneBooth.map((s) => card(s)));
+  els.boothNone.hidden = now.length + loneBooth.length > 0;
   els.line.replaceChildren(...waiting.map((s) => card(s)));
   els.waitingTitle.hidden = waiting.length === 0;
   els.upload.replaceChildren(
-    ...station.map((x, i) => takeCard(x.t, x.people, { title: i === 0 ? COPY.nextUpload : COPY.laterUpload, contact: true })),
+    ...station.map((x, i) => takeCard(x.t, x.people, { title: i === 0 ? COPY.nextUpload : COPY.laterUpload, contact: true, open: !x.t.closed })),
     ...loose.map((s) => card(s, { contact: true })));
   els.uploadNone.hidden = station.length + loose.length > 0;
   els.done.replaceChildren(...done.map((s) => card(s)));
@@ -235,14 +237,23 @@ async function poll() {
 }
 document.addEventListener("visibilitychange", () => { if (!document.hidden && app.token) poll(); });
 
-// ── A status change: always asked first (with any flag and its contact details), then Undo for 10 s
-function ask(s, to) {
-  app.pending = { s, to };
-  els.confirmTitle.textContent = COPY.confirm.replace("{names}", namesOf(s)).replace("{status}", STATUS[to].word);
+// ── A status change: always asked first (with any flag and its contact details), then Undo for 10 s.
+// Into the booth while the last recording waits on its upload with nobody in the booth, the question
+// is which song: the same one (a group recording one verse at a time) or a new one. `names` is that
+// recording's first names (from the line, or from the server's 409 which_song).
+function ask(s, to, names = to === "booth" && s.status === "waiting" ? songQuestion(app.takes, app.sessions) : "") {
+  app.pending = { s, to, song: null };
   const flagged = to === "booth" ? s.guests.filter((g) => g.flags?.length) : [];
-  els.confirmNote.textContent = flagged.map((g) => COPY.confirmFlagged.replace("{name}", g.name).replace("{email}", g.email).replace("{phone}", g.phone).replace("{why}", flagWords(COPY, g.flags))).join(" ");
-  els.confirmNote.hidden = flagged.length === 0;
+  const flagText = flagged.map((g) => COPY.confirmFlagged.replace("{name}", g.name).replace("{email}", g.email).replace("{phone}", g.phone).replace("{why}", flagWords(COPY, g.flags))).join(" ");
+  const fill = (t) => t.replace(/\{name\}/g, namesOf(s)).replace(/\{names\}/g, names);
+  els.confirmTitle.textContent = names ? fill(COPY.whichSong) : COPY.confirm.replace("{names}", namesOf(s)).replace("{status}", STATUS[to].word);
+  els.confirmNote.textContent = [names ? fill(COPY.whichSongNote) : "", flagText].filter(Boolean).join(" ");
+  els.confirmNote.hidden = !els.confirmNote.textContent;
+  els.confirmYes.textContent = names ? COPY.sameSong : COPY.yes;
   els.confirmYes.className = `btn btn-status btn-${STATUS[to].tone}`;
+  els.confirmAlt.textContent = COPY.newSong;
+  els.confirmAlt.hidden = !names;
+  app.pending.asked = Boolean(names);
   showModal(els.confirm, cancel);
   els.confirmNo.focus();
 }
@@ -258,9 +269,10 @@ function toast(text, undo = null) {
 
 // ── The songs: "Take out of the vote" / "Put back", and "Change who's on it"
 function songLine(s) {
-  const entry = s.ticked ? COPY.songEntered.replace("{ticked}", s.ticked_by || COPY.someone) : COPY.songNotEntered;
-  const manager = s.manager ? COPY.songManager.replace("{name}", s.manager) : COPY.songNoManager;
-  return [s.pulled ? COPY.songPulledNote : null, entry, manager].filter(Boolean).join(" ");
+  const ch = s.changed;
+  const entry = ch ? (ch.action === "entered" ? COPY.songChangedIn : COPY.songChangedOut).replace("{name}", ch.by || COPY.someone).replace("{time}", clockWords(ch.at))
+    : s.ticked ? COPY.songEntered.replace("{ticked}", s.ticked_by || COPY.someone) : COPY.songNotEntered;
+  return [s.pulled ? COPY.songPulledNote : null, entry].filter(Boolean).join(" ");
 }
 const clock = (iso) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 const firstNames = (names) => groupLabel(names.map((n) => String(n).split(" ")[0])) || COPY.nobodyOn;
@@ -334,6 +346,8 @@ function askSong(song, pulled) {
   app.pending = { song, pulled };
   els.confirmTitle.textContent = (pulled ? COPY.confirmPull : COPY.confirmPutBack).replace("{label}", song.label);
   els.confirmNote.hidden = true;
+  els.confirmYes.textContent = COPY.yes;
+  els.confirmAlt.hidden = true;
   els.confirmYes.className = `btn btn-status btn-${pulled ? "stop" : "go"}`;
   showModal(els.confirm, cancel);
   els.confirmNo.focus();
@@ -349,14 +363,16 @@ async function pullSong(song, pulled, { undoable }) {
   app.pending = null;
   poll();
 }
-async function change(s, from, to, { undoable }) {
+async function change(s, from, to, { undoable, song = null }) {
   try {
-    await call(`/api/party/team/sessions/${s.id}/status`, { method: "POST", body: { status: to, from } });
+    await call(`/api/party/team/sessions/${s.id}/status`, { method: "POST", body: { status: to, from, ...(song ? { song } : {}) } });
     s.status = to;
     if (undoable) toast(COPY.moved.replace("{names}", namesOf(s)).replace("{status}", STATUS[to].word), { s, from: to, to: from });
     else { els.toast.hidden = true; app.undo = null; }
   } catch (err) {
     if (signedOut(err)) { signOut(); return; }
+    // The line moved on since this phone looked (another phone tapped someone out): ask which song now.
+    if (err?.code === "which_song" && typeof err.extra?.names === "string") { app.pending = null; ask(s, to, err.extra.names); return; }
     toast(err?.code === "changed" ? COPY.changed : err?.message || COPY.failed);
   }
   app.pending = null;
@@ -366,7 +382,12 @@ els.confirmYes.addEventListener("click", () => {
   const p = app.pending;
   closeModal(els.confirm);
   if (p?.song) pullSong(p.song, p.pulled, { undoable: true });
-  else if (p) change(p.s, p.s.status, p.to, { undoable: true });
+  else if (p) change(p.s, p.s.status, p.to, { undoable: true, song: p.asked ? "same" : null });
+});
+els.confirmAlt.addEventListener("click", () => {
+  const p = app.pending;
+  closeModal(els.confirm);
+  if (p?.s) change(p.s, p.s.status, p.to, { undoable: true, song: "new" });
 });
 els.confirmNo.addEventListener("click", cancel);
 els.undo.addEventListener("click", () => {

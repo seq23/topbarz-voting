@@ -9,12 +9,16 @@
 // song that landed on the wrong people, and every re-point is kept (booth_repoints). Typing a song's
 // code with an email lets anyone hear and download it, and see who has access; it never puts them on.
 //
-// Managing a song is first come (Scooter: "Whoever manages the song first - artwork, contest entry -
-// keeps those controls. No group-wide confirmation needed."): the first person on the song to add
-// artwork, set the title, tick Enter or Share it is its manager; the others hear, download and share
-// a song already shared. The manager ticks "Enter the contest" (agreeing to the linked rules) and the
-// song is in the vote by itself, solo or group; unticking takes it out (active = 0; likes kept). The
-// team can pull any song from /team. After the end nothing moves.
+// Everyone on a song holds its controls (Scooter, 19 Nov 2026: "Every group member should get the
+// song controls using their email and the song code, including title, artwork and contest entry. An
+// unrelated email shouldn't unlock those controls."; this replaces the first-come manager of 18 Nov).
+// The entry is the whole song's ("Make contest entry a shared song-level setting. Any group member
+// can enter or withdraw it for everyone. Show who last changed it, and preserve its votes if it's
+// withdrawn and entered again."): anyone on it ticks "Enter the contest" (agreeing to the linked
+// rules) and the song is in the vote by itself, solo or group; anyone on it unticks it and it is out
+// (active = 0; likes kept; entered again, it is the same track with the same votes). Every change is a
+// row in booth_contest_changes, and the newest is shown as who last changed it. The team can pull any
+// song from /team. After the end nothing moves.
 import { END_SETTING_SQL, START_SETTING_SQL, votingPhase } from "./config.js";
 import { isScooterTaylor, isTestName } from "./exclusions.js";
 import { RULES_PATH, firstOf, groupLabel, holidayOn } from "./party.js";
@@ -31,7 +35,7 @@ export function cleanTitle(raw) {
 // The verdict, pure. track: the booth row (with its contest_* columns); people: [{ name (from the
 // sign-up, or null) }]. In this order: the track exists; nothing about it is Scooter Taylor's (the
 // file, the title or anyone on it); production takes no "Test …" file; the team has not pulled it;
-// somebody is on it; its manager ticked Enter.
+// somebody is on it; someone on it ticked Enter.
 // → { ok, reason, message, step: "not_entered" | "in" | null }.
 export function contestVerdict({ track, people, production } = {}) {
   const rows = Array.isArray(people) ? people : [];
@@ -60,23 +64,25 @@ export function freshSlug(label, taken) {
 
 // ── I/O ──────────────────────────────────────────────────────────────────────────────────────
 export const CONTEST_TRACK_SQL = "SELECT id, code, file_name, media_key, title, vote_track_id, party_session_id, party_take_id, pulled_at, manager_email, manager_at, host_email, contest_entered_by, contest_entered_at FROM booth_tracks WHERE code = ?1";
-// The entry: ticked (who, when, which rules) by the manager. Unticking clears it.
+// The entry: ticked (who, when, which rules) by anyone on the song. Unticking clears it.
 export const ENTER_SQL = "UPDATE booth_tracks SET contest_entered_by = COALESCE(contest_entered_by, ?2), contest_entered_at = COALESCE(contest_entered_at, ?3), contest_rules_version = ?4 WHERE id = ?1";
 export const WITHDRAW_SQL = "UPDATE booth_tracks SET contest_entered_by = NULL, contest_entered_at = NULL, contest_rules_version = NULL, contest_confirmed_by = NULL, contest_confirmed_at = NULL WHERE id = ?1";
 export const MARK_PERSON_SQL = "UPDATE booth_people SET contest_opt_in = 1, contest_at = ?3, rules_version = ?4 WHERE track_id = ?1 AND email = ?2";
 export const UNMARK_ALL_SQL = "UPDATE booth_people SET contest_opt_in = 0, contest_at = NULL, rules_version = NULL WHERE track_id = ?1";
-// First come: the first person on the song to manage it becomes its manager; nobody else after.
-export const CLAIM_MANAGER_SQL = "UPDATE booth_tracks SET manager_email = ?2, manager_at = ?3 WHERE id = ?1 AND manager_email IS NULL";
-export const MANAGER_OF_SQL = "SELECT manager_email FROM booth_tracks WHERE id = ?1";
+// Every Enter and withdraw, kept (migrations/0015_contest_changes.sql): who, which way, when, which rules.
+export const CHANGE_SQL = "INSERT INTO booth_contest_changes (track_id, email, guest_id, entered, at, rules_version) VALUES (?1, ?2, ?3, ?4, ?5, ?6)";
+export const LAST_CHANGE_SQL = "SELECT email, entered, at FROM booth_contest_changes WHERE track_id = ?1 ORDER BY at DESC, id DESC LIMIT 1";
 // A person's name: from their one record when the upload or the team put them on by it
 // (guest_id), else (rows from before 18 Nov 2026) the sign-up of that same address.
 const NAME_OF = "COALESCE((SELECT g.name FROM party_guests g WHERE g.id = p.guest_id), CASE WHEN p.guest_id IS NULL THEN (SELECT g.name FROM party_guests g WHERE g.email = p.email) END)";
 // The team's songs: every song that is or could be in the contest (in the vote now or pulled, from a
 // take or a group, or with anyone on it who signed up), entered or not, and every song uploaded in
 // the last two days with nobody on it, so a song needing its people is in front of the team.
-export const TEAM_SONGS_SQL = `SELECT b.id, b.code, b.title, b.file_name, b.uploaded_at, b.party_session_id, b.party_take_id, b.pulled_at, b.contest_entered_at, b.manager_email, t.label, t.active,
+export const TEAM_SONGS_SQL = `SELECT b.id, b.code, b.title, b.file_name, b.uploaded_at, b.party_session_id, b.party_take_id, b.pulled_at, b.contest_entered_at, t.label, t.active,
   (SELECT g.name FROM party_guests g WHERE g.email = b.contest_entered_by) AS entered_by_name,
-  (SELECT g.name FROM party_guests g WHERE g.email = b.manager_email) AS manager_name,
+  (SELECT c.entered FROM booth_contest_changes c WHERE c.track_id = b.id ORDER BY c.at DESC, c.id DESC LIMIT 1) AS changed_entered,
+  (SELECT c.at FROM booth_contest_changes c WHERE c.track_id = b.id ORDER BY c.at DESC, c.id DESC LIMIT 1) AS changed_at,
+  (SELECT g.name FROM booth_contest_changes c JOIN party_guests g ON g.email = c.email WHERE c.track_id = b.id ORDER BY c.at DESC, c.id DESC LIMIT 1) AS changed_by_name,
   (SELECT COUNT(*) FROM booth_people p WHERE p.track_id = b.id) AS people
   FROM booth_tracks b LEFT JOIN tracks t ON t.id = b.vote_track_id
   WHERE b.vote_track_id IS NOT NULL OR b.party_session_id IS NOT NULL OR b.party_take_id IS NOT NULL
@@ -103,21 +109,22 @@ export const UPLOAD_EVENT_SQL = "INSERT INTO party_status_events (session_id, fr
 export const DETACH_ALL_SQL = "DELETE FROM booth_people WHERE track_id = ?1";
 export const GUESTS_BY_ID_SQL = "SELECT id, name, email FROM party_guests WHERE id = ?1";
 export const REPOINT_LOG_SQL = "INSERT INTO booth_repoints (track_id, member_id, at, before_json, after_json, note) VALUES (?1, ?2, ?3, ?4, ?5, ?6)";
-// A manager no longer on the song stops managing it (the next person on it to manage takes over).
-export const DROP_GONE_MANAGER_SQL = "UPDATE booth_tracks SET manager_email = NULL, manager_at = NULL WHERE id = ?1 AND manager_email IS NOT NULL AND NOT EXISTS (SELECT 1 FROM booth_people p WHERE p.track_id = ?1 AND p.email = booth_tracks.manager_email)";
 // Everyone who has signed up, for the team's re-point picker (team only).
 export const ALL_GUESTS_SQL = "SELECT id, name, email, phone, joined_at FROM party_guests ORDER BY joined_at DESC, id DESC LIMIT 300";
 
-// Whether the song is in the vote right now (its vote track is active).
-export async function isEntered(db, track) {
-  return track.vote_track_id ? (await db.prepare("SELECT active FROM tracks WHERE id = ?1").bind(track.vote_track_id).first())?.active === 1 : false;
+// Whether the song is in the vote right now (its vote track is active), and its link there.
+export async function entryOf(db, track) {
+  const t = track.vote_track_id ? await db.prepare("SELECT active, slug FROM tracks WHERE id = ?1").bind(track.vote_track_id).first() : null;
+  return { entered: t?.active === 1, slug: t?.active === 1 ? t.slug : null };
 }
+export const isEntered = async (db, track) => (await entryOf(db, track)).entered;
 
+// The song: its row, its people, and the newest change to its entry.
 export async function readSong(db, code) {
   const track = await db.prepare(CONTEST_TRACK_SQL).bind(code).first();
   if (!track) return null;
-  const people = (await db.prepare(CONTEST_PEOPLE_SQL).bind(track.id).all()).results ?? [];
-  return { track, people };
+  const [people, change] = await db.batch([db.prepare(CONTEST_PEOPLE_SQL).bind(track.id), db.prepare(LAST_CHANGE_SQL).bind(track.id)]);
+  return { track, people: people.results ?? [], change: change.results?.[0] ?? null };
 }
 
 async function isClosed(env, now) {
@@ -157,31 +164,30 @@ export async function syncEntry(env, song, now = Date.now()) {
   return { entered: true, verdict };
 }
 
-// Who manages the song (first come), as the asker may see it: their first name, and whether it is
-// the asker. → { manager: first name | null, you_manage: bool }.
-const managerOf = (track, people, email) => {
-  if (!track.manager_email) return { manager: null, you_manage: false };
-  const p = people.find((x) => x.email === track.manager_email);
-  return { manager: p?.name ? firstOf(p.name) : track.manager_email === track.host_email ? COPY_HOST : COPY_SOMEONE, you_manage: Boolean(email) && track.manager_email === email };
-};
 const COPY_SOMEONE = "someone on the song";
 const COPY_HOST = "the demo's host";
 // The demo song's host: the one email scripts/demo-song.mjs named with --host, on the preview only.
-// They manage the song without being one of its people, so the verdict never sees their name.
+// They hold the song's controls without being one of its people, so the verdict never sees their name.
 export const isHost = (track, email, production) => !production && Boolean(email) && Boolean(track?.host_email) && track.host_email === email;
+// A first name for an email that changed the song: one of its people, the demo's host, or (re-pointed
+// off since) "someone on the song". Never the email.
+const nameFor = (track, people, email) => {
+  const p = people.find((x) => x.email === email);
+  return p?.name ? firstOf(p.name) : track.host_email && email === track.host_email ? COPY_HOST : COPY_SOMEONE;
+};
 
-// What /track sees, the same for everyone with the code: who has access (first names), who manages
-// it, whether it is entered and by whom. `you.performer` says whether the asker is one of the song's
-// people (they may manage it if nobody does yet); `you.manager` whether they are its manager. First
-// names only; the one email is the asker's own, and it is not in here.
-export function contestView(song, email, { entered, closed, production }) {
-  const { track, people } = song;
+// What /track sees, the same for everyone with the code: who has access (first names), whether it
+// is entered, and who last entered or withdrew it, and when. `you.performer` says whether the asker
+// is one of the song's people, which is what holds the controls (`you.can_manage`). First names only;
+// the one email is the asker's own, and it is not in here. `vote_url` is the voting page, at this
+// song when it is in.
+export function contestView(song, email, { entered, closed, production, slug = null }) {
+  const { track, people, change = null } = song;
   const verdict = contestVerdict({ track, people, production });
   const me = people.find((p) => p.email === email);
   // The preview demo's host (migrations/0014_demo_host.sql) holds the controls without being on it.
   const host = isHost(track, email, production);
-  const { manager, you_manage } = managerOf(track, people, email);
-  const entrant = people.find((p) => p.email === track.contest_entered_by);
+  const onIt = Boolean(me) || host;
   return {
     on: true,
     rules_url: RULES_PATH,
@@ -189,10 +195,11 @@ export function contestView(song, email, { entered, closed, production }) {
     entered: Boolean(entered),
     closed: Boolean(closed),
     ticked: Boolean(track.contest_entered_at),
-    ticked_by: track.contest_entered_at ? (entrant?.name ? firstOf(entrant.name) : track.host_email && track.contest_entered_by === track.host_email ? COPY_HOST : COPY_SOMEONE) : null,
+    ticked_by: track.contest_entered_at ? nameFor(track, people, track.contest_entered_by) : null,
+    // Who last entered or withdrew it, and when (Scooter, 19 Nov 2026: "Show who last changed it").
+    changed: change ? { action: change.entered === 1 ? "entered" : "withdrawn", by: nameFor(track, people, change.email), at: new Date(change.at).toISOString() } : null,
     step: verdict.step,
-    manager,
-    you: { performer: Boolean(me) || host, manager: you_manage, can_manage: (Boolean(me) || host) && (you_manage || !track.manager_email), signed_up: Boolean(me?.name) || host, host },
+    you: { performer: onIt, can_manage: onIt, signed_up: Boolean(me?.name) || host, host },
     nobody: people.length === 0, // nobody on it yet: the team puts its people on it from /team
     // "Jeff, John and Scooter have access to this song" (Scooter, 18 Nov 2026).
     access: people.map((p) => (p.name ? firstOf(p.name) : null)).filter(Boolean),
@@ -201,12 +208,14 @@ export function contestView(song, email, { entered, closed, production }) {
     // Where the page says it: a preview's test entry, or the live site (Scooter, 18 Nov 2026: neutral
     // words, "No policy framing, and nothing about who can or cannot enter").
     production: Boolean(production),
+    // "View Contest should open the contest page with all the entered tracks" (Scooter, 19 Nov 2026).
+    vote_url: entered && slug ? `/#${slug}` : "/",
   };
 }
 export { holidayOn };
 
 // The team's view of one song on /team: its name in the vote (or, never entered, its title, its
-// people's first names, or its file), in or out, who is on it, who manages it, and its re-points.
+// people's first names, or its file), in or out, who is on it, who last entered or withdrew it, and its re-points.
 export const teamSong = (row, people = [], repoints = []) => ({
   code: row.code,
   label: row.label || cleanTitle(row.title ?? "") || groupLabel(people.filter((p) => p.name).map((p) => firstOf(p.name))) || String(row.file_name ?? "").replace(/\.[^.]+$/, "") || row.code,
@@ -219,7 +228,7 @@ export const teamSong = (row, people = [], repoints = []) => ({
   needs_people: row.people === 0,
   ticked: Boolean(row.contest_entered_at),
   ticked_by: row.contest_entered_at && row.entered_by_name ? firstOf(row.entered_by_name) : null,
-  manager: row.manager_email ? (row.manager_name ? firstOf(row.manager_name) : COPY_SOMEONE) : null,
+  changed: row.changed_at ? { action: row.changed_entered === 1 ? "entered" : "withdrawn", by: row.changed_by_name ? firstOf(row.changed_by_name) : COPY_SOMEONE, at: new Date(row.changed_at).toISOString() } : null,
   members: people.map((p) => ({ id: p.id, guest_id: p.guest_id ?? null, name: p.name ?? null, first_name: p.name ? firstOf(p.name) : null, signed_up: Boolean(p.name), attached_at: new Date(p.attached_at).toISOString() })),
   repoints: repoints.map((r) => ({ at: new Date(r.at).toISOString(), by: r.by_email ?? null, before: namesIn(r.before_json), after: namesIn(r.after_json), note: r.note || "" })),
 });
@@ -234,11 +243,4 @@ export async function teamSongs(db) {
     db.batch(rows.map((r) => db.prepare(REPOINTS_SQL).bind(r.id))),
   ]);
   return rows.map((r, i) => teamSong(r, people[i].results ?? [], repoints[i].results ?? []));
-}
-
-// First come: the first person on the song to manage it becomes its manager. → true when the asker
-// manages it now (just claimed, or already theirs); false when someone else does.
-export async function claimManager(db, trackId, email, now = Date.now()) {
-  await db.prepare(CLAIM_MANAGER_SQL).bind(trackId, email, now).run();
-  return (await db.prepare(MANAGER_OF_SQL).bind(trackId).first())?.manager_email === email;
 }

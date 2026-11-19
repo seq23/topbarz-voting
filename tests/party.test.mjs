@@ -1,6 +1,6 @@
 // The holiday party (Scooter, 17 Nov 2026, and his consolidated revision list of 18 Nov 2026): the
 // QR sign-up (one person each), the team's line with its four lanes and sign-in, the ambassador's
-// taps making the recording (take) a song lands on, the song managed first come on /track and going
+// taps making the recording (take) a song lands on, the song's controls held by everyone on it on /track and going
 // into the vote by itself, the team's re-point, the gallery GIFs, verified-only counts, the end (27 Nov 2026, 11:59 PM ET)
 // and the switch. Against a real local D1 and R2.
 import assert from "node:assert/strict";
@@ -38,11 +38,11 @@ const guest = (name, email, extra = {}) => post("join", { ...slot(name, email), 
 // Everyone signs up on their own: [[name, email], …] → each one's sign-up.
 const signUps = async (people) => { for (const [n, e] of people) assert.equal((await guest(n, e)).status, 201, `${n} signs up`); };
 const B = (code, what, body, ip = freshIp(), e = env) => call(booth.onRequest, e, { method: "POST", path: `/api/booth/tracks/${code}/${what}`, ip, body, params: { path: ["tracks", code, what] } });
-// The booth page's upload: it says which take the upload station showed (read here, as the page
-// reads it), unless the test gives its own.
+// The booth page's upload: it says which take the upload station showed and the engineer confirmed
+// (its key, read here as the page reads it), unless the test gives its own.
 async function upload(name = "Holiday Jingle.mp3", headers = {}, e = env) {
   const bytes = new Uint8Array(1024).fill(7);
-  const shown = e.HOLIDAY_EVENT === "on" && !("x-party-take" in headers) ? { "x-party-take": String((await station()).next?.id ?? "none") } : {};
+  const shown = e.HOLIDAY_EVENT === "on" && !("x-party-take" in headers) ? { "x-party-take": String((await station()).next?.key ?? "none") } : {};
   const h = new Headers({ "cf-connecting-ip": freshIp(), "x-file-name": name, "content-type": "audio/mpeg", "content-length": String(bytes.byteLength), ...shown, ...headers });
   const res = await booth.onRequest({ request: new Request("https://voting.test/api/booth/tracks", { method: "POST", headers: h, body: bytes }), env: e, params: { path: ["tracks"] }, waitUntil: () => {} });
   return { status: res.status, body: await res.json() };
@@ -310,33 +310,40 @@ test("the team's line: details only behind the team token; four lanes with a che
   assert.equal((await get("team/line", { token })).body.sessions.find((s) => s.id === id).texted_at, t.body.texted_at, "still there on the next read (any device)");
 });
 
-test("the takes: the people tapped in together are one recording; it reaches the upload station whole when the last is out; the upload lands on exactly them, never on the next recording", async () => {
+test("the takes: everyone tapped in for one song is one recording, together or one after another; the upload lands on exactly them, never on the next recording", async () => {
   const token = await teamToken();
   await clearStation();
   await signUps([["Ola First", "ola@gmail.com"], ["Bo Second", "bo@gmail.com"], ["Cy Next", "cy@gmail.com"], ["Di Later", "di@gmail.com"]]);
-  await move("ola@gmail.com", "waiting", "booth", token);
-  await move("bo@gmail.com", "waiting", "booth", token);
+  assert.equal((await move("ola@gmail.com", "waiting", "booth", token)).status, 200);
+  assert.equal((await move("bo@gmail.com", "waiting", "booth", token)).status, 200, "tapped in while Ola is in: no question, the same recording");
   const takeOf = async (e) => (await env.DB.prepare("SELECT take_id FROM party_sessions WHERE id = ?1").bind(await sessionOf(e)).first()).take_id;
   assert.ok(await takeOf("ola@gmail.com"));
-  assert.equal(await takeOf("bo@gmail.com"), await takeOf("ola@gmail.com"), "tapped in while Ola is in: the same recording");
+  assert.equal(await takeOf("bo@gmail.com"), await takeOf("ola@gmail.com"));
   let st = await station();
-  assert.deepEqual([st.next, st.in_booth], [null, ["Ola", "Bo"]], "nobody at the upload station while they record");
-  assert.equal((await upload("Too Soon.mp3", { "x-party-take": "999" })).body.error, "take_changed", "an upload for a take the station does not show is refused");
-  // Ola is out, Bo still in: the recording is not at the station yet.
+  assert.deepEqual([st.next, st.in_booth, st.recording], [null, ["Ola", "Bo"], [{ first_name: "Ola", in_booth: true }, { first_name: "Bo", in_booth: true }]], "nobody at the upload station while they record; the booth page sees the whole group");
+  assert.equal((await upload("Too Soon.mp3", { "x-party-take": "999.1" })).body.error, "take_changed", "an upload for a take the station does not show is refused");
+  // Ola is out, Bo still in: the recording is not at the station yet, and the booth page shows both.
   await move("ola@gmail.com", "booth", "upload", token);
-  assert.equal((await station()).next, null, "half out is not out");
+  st = await station();
+  assert.deepEqual([st.next, st.recording], [null, [{ first_name: "Bo", in_booth: true }, { first_name: "Ola", in_booth: false }]], "half out is not out");
   await move("bo@gmail.com", "booth", "upload", token);
   st = await station();
-  assert.deepEqual([st.next?.names, st.next?.size, st.queued], ["Ola & Bo", 2, 0]);
+  assert.deepEqual([st.next?.names, st.next?.size, st.queued, st.recording], ["Ola & Bo", 2, 0, []]);
+  assert.equal(st.next.key, `${st.next.id}.2`, "the key the engineer confirms: the recording and how many are on it");
   assert.ok(!/@|First|Second|555/.test(JSON.stringify(st)), "first names only on the open booth page");
   const first = st.next.id;
-  // The next person goes in and out before the engineer has saved Ola & Bo's file: a new recording.
-  await move("cy@gmail.com", "waiting", "booth", token);
-  assert.notEqual(await takeOf("cy@gmail.com"), first, "a new recording, never Ola & Bo's");
+  // Cy is next in while Ola & Bo's file is not saved yet: the server does not guess which song.
+  const asked = await move("cy@gmail.com", "waiting", "booth", token);
+  assert.deepEqual([asked.status, asked.body.error, asked.body.names], [409, "which_song", "Ola & Bo"], "the team is asked: same song or a new one");
+  assert.equal(laneOf(await env.DB.prepare("SELECT status, done_at FROM party_sessions WHERE id = ?1").bind(await sessionOf("cy@gmail.com")).first()), "waiting", "and nothing moved");
+  assert.equal((await post(`team/sessions/${await sessionOf("cy@gmail.com")}/status`, { status: "booth", from: "waiting", song: "maybe" }, { token })).body.error, "bad_song");
+  assert.equal((await post(`team/sessions/${await sessionOf("cy@gmail.com")}/status`, { status: "booth", from: "waiting", song: "new" }, { token })).status, 200);
+  assert.notEqual(await takeOf("cy@gmail.com"), first, "a new song: never Ola & Bo's");
   await move("cy@gmail.com", "booth", "upload", token);
   st = await station();
   assert.deepEqual([st.next.id, st.next.names, st.queued], [first, "Ola & Bo", 1], "the oldest first, Cy's waits behind it");
   assert.equal((await upload("Stale.mp3", { "x-party-take": "none" })).body.error, "take_changed", "a page that showed nobody is refused once someone is there");
+  assert.equal((await upload("Short.mp3", { "x-party-take": `${first}.1` })).body.error, "take_changed", "a page that showed fewer people is refused");
   const up = await upload("Ola And Bo.mp3");
   assert.equal(up.status, 200, JSON.stringify(up.body));
   assert.equal(up.body.tagged, true);
@@ -358,7 +365,7 @@ test("the takes: the people tapped in together are one recording; it reaches the
   await move("di@gmail.com", "booth", "waiting", token);
   assert.equal(await takeOf("di@gmail.com"), null, "back to waiting: off the recording");
   assert.equal((await station()).next, null, "an empty recording never reaches the station");
-  await move("di@gmail.com", "waiting", "booth", token);
+  assert.equal((await move("di@gmail.com", "waiting", "booth", token)).status, 200, "nobody on the open recording: no question");
   await move("di@gmail.com", "booth", "upload", token);
   assert.equal((await station()).next?.names, "Di");
   await move("di@gmail.com", "upload", "booth", token);
@@ -372,6 +379,38 @@ test("the takes: the people tapped in together are one recording; it reaches the
   const ola = await sessionOf("ola@gmail.com");
   const refused = await post(`team/sessions/${ola}/status`, { status: "upload", from: "done" }, { token });
   assert.deepEqual([refused.status, refused.body.error], [409, "already_uploaded"], "a song already uploaded is re-pointed, never re-uploaded over");
+  await move("di@gmail.com", "upload", "done", token);
+});
+
+test("a group recording one after another (Scooter, 19 Nov 2026: \"When Carlos and Scooter go into the booth and leave one after the other, the upload should belong to both\"): one song, every one of them on it with the controls", async () => {
+  const token = await teamToken();
+  await clearStation();
+  await signUps([["Carl Os", "carl.os@gmail.com"], ["Ken Verse", "ken.verse@gmail.com"], ["Next Group", "next.group@gmail.com"]]);
+  // Carl records his verse and comes out; the booth is empty; Ken goes in for his verse of the same song.
+  await move("carl.os@gmail.com", "waiting", "booth", token);
+  await move("carl.os@gmail.com", "booth", "upload", token);
+  assert.equal((await station()).next?.names, "Carl", "Carl alone is at the station for now");
+  const same = await post(`team/sessions/${await sessionOf("ken.verse@gmail.com")}/status`, { status: "booth", from: "waiting", song: "same" }, { token });
+  assert.equal(same.status, 200, same.text);
+  let st = await station();
+  assert.deepEqual([st.next, st.recording], [null, [{ first_name: "Carl", in_booth: false }, { first_name: "Ken", in_booth: true }]], "the song is back in the booth: off the station, the whole group on the booth page");
+  await move("ken.verse@gmail.com", "booth", "upload", token);
+  st = await station();
+  assert.deepEqual([st.next?.names, st.next?.size], ["Carl & Ken", 2], "both, not just the last one out");
+  const up = await upload("Carl And Ken.mp3");
+  assert.equal(up.status, 200, JSON.stringify(up.body));
+  assert.deepEqual((await songPeople(up.body.code)).map((p) => p.email), ["carl.os@gmail.com", "ken.verse@gmail.com"], "the upload belongs to both");
+  // Each of them opens it with their own email and the code, with the controls; an unrelated email does not.
+  for (const e of ["carl.os@gmail.com", "ken.verse@gmail.com"]) {
+    const c = (await B(up.body.code, "enter", { email: e })).body.contest;
+    assert.deepEqual([c.you.performer, c.you.can_manage, c.access], [true, true, ["Carl", "Ken"]], e);
+  }
+  const stranger = (await B(up.body.code, "enter", { email: "plusone.stranger@gmail.com" })).body.contest;
+  assert.deepEqual([stranger.you.performer, stranger.you.can_manage], [false, false], "an unrelated email hears and downloads only");
+  // The upload ended that song: the next person in starts a new one, with no question.
+  assert.equal((await move("next.group@gmail.com", "waiting", "booth", token)).status, 200);
+  assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM party_takes t JOIN party_sessions s ON s.take_id = t.id WHERE s.id = ?1 AND t.track_id IS NULL").bind(await sessionOf("next.group@gmail.com")).first()).n, 1, "a new recording");
+  await move("next.group@gmail.com", "booth", "waiting", token);
 });
 
 test("stale and test sign-ups are flagged where the team picks who goes in: names, emails and phones on /team, a word on the booth page", async () => {
@@ -390,7 +429,7 @@ test("stale and test sign-ups are flagged where the team picks who goes in: name
   await move("ava.real@gmail.com", "upload", "done", token);
 });
 
-test("contest verdict: entered by its manager, solo or group, in at once; Scooter Taylor and test files in production are refused", () => {
+test("contest verdict: entered by anyone on it, solo or group, in at once; Scooter Taylor and test files in production are refused", () => {
   const track = { file_name: "Jingle.mp3" };
   const ticked = { ...track, contest_entered_at: 1 };
   const p = (name) => ({ name });
@@ -419,64 +458,75 @@ async function takeSong(people, file, token, e = env) {
   return up.body.code;
 }
 
-test("managing is first come: the first on the song to tick Enter keeps the controls, and it is in the vote at once; everyone with the code sees who has access", async () => {
+test("the song is everyone's on it (Scooter, 19 Nov 2026): each of them has the artwork, the title and the entry; anyone enters or withdraws it for everyone; who last changed it shows; its votes are kept", async () => {
   const token = await teamToken();
   const songCode = await takeSong([["Jay Holly", "jay.h@gmail.com"], ["Mo Ivy", "mo.i@gmail.com"], ["Kim Fir", "kim.f@gmail.com"]], "Jingle Bars.mp3", token);
   const view = await B(songCode, "contest-status", { email: "mo.i@gmail.com" });
   assert.equal(view.status, 200, view.text);
   assert.deepEqual(view.body.contest.access, ["Jay", "Mo", "Kim"], "all three have access before anyone opens /track");
-  assert.deepEqual([view.body.contest.ticked, view.body.contest.step, view.body.contest.manager, view.body.contest.you], [false, "not_entered", null, { performer: true, manager: false, can_manage: true, signed_up: true, host: false }]);
+  assert.deepEqual([view.body.contest.ticked, view.body.contest.step, view.body.contest.changed, view.body.contest.you, view.body.contest.vote_url], [false, "not_entered", null, { performer: true, can_manage: true, signed_up: true, host: false }, "/"]);
+  assert.ok(!("manager" in view.body.contest), "no manager: nobody's controls depend on who came first");
   assert.equal(view.body.contest.rules_url, "/holiday-rules");
   assert.ok(!/@/.test(JSON.stringify(view.body.contest)), "no email for anyone");
   const heard = await B(songCode, "enter", { email: "friend@gmail.com" });
-  assert.deepEqual([heard.status, heard.body.contest.access, heard.body.contest.you.performer, heard.body.contest.you.can_manage], [200, ["Jay", "Mo", "Kim"], false, false], "a listener sees who has access, and manages nothing");
+  assert.deepEqual([heard.status, heard.body.contest.access, heard.body.contest.you.performer, heard.body.contest.you.can_manage], [200, ["Jay", "Mo", "Kim"], false, false], "a listener sees who has access, and changes nothing");
   assert.ok(heard.body.audio_url && heard.body.download_url, "and hears and downloads it");
   assert.equal((await B(songCode, "contest", { email: "jay.h@gmail.com", enter: true })).body.error, "agree_required", "ticking needs the rules agreement");
-  // Jay ticks Enter: Jay manages it now, and the group song is in the vote by itself.
+  // Mo sets the title and the artwork, Jay ticks Enter: each of them may; the group song is in the vote by itself.
+  assert.equal((await B(songCode, "title", { email: "mo.i@gmail.com", title: "Sleigh Bars" })).body.title, "Sleigh Bars");
+  const art = await booth.onRequest({ request: new Request(`https://voting.test/api/booth/tracks/${songCode}/art`, { method: "POST", headers: { "cf-connecting-ip": freshIp(), "content-type": "image/png", "content-length": "8", "x-email": "kim.f@gmail.com" }, body: new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]) }), env, params: { path: ["tracks", songCode, "art"] }, waitUntil: () => {} });
+  assert.equal(art.status, 200, "Kim adds the artwork");
   const ticked = await B(songCode, "contest", { email: "jay.h@gmail.com", enter: true, agree: true });
   assert.equal(ticked.status, 200, ticked.text);
-  assert.deepEqual([ticked.body.contest.ticked, ticked.body.contest.ticked_by, ticked.body.contest.entered, ticked.body.contest.step, ticked.body.contest.manager, ticked.body.contest.you.manager], [true, "Jay", true, "in", "Jay", true]);
-  const label = () => env.DB.prepare("SELECT t.label, t.active FROM tracks t JOIN booth_tracks b ON b.vote_track_id = t.id WHERE b.code = ?1").bind(songCode).first();
-  assert.deepEqual(await label(), { label: "Jay, Mo & Kim", active: 1 });
-  assert.ok(await inVote("Jay, Mo & Kim"), "it shows in the vote, with no script run");
-  const rec = await env.DB.prepare("SELECT contest_entered_by, contest_entered_at, contest_rules_version, manager_email FROM booth_tracks WHERE code = ?1").bind(songCode).first();
-  assert.deepEqual([rec.contest_entered_by, rec.contest_rules_version, rec.manager_email], ["jay.h@gmail.com", "holiday-2026-draft-3", "jay.h@gmail.com"], "who entered, which rules and who manages are kept");
-  // Mo is on the song but does not manage it: every control answers who does, and nothing changes.
+  const c1 = ticked.body.contest;
+  assert.deepEqual([c1.ticked, c1.ticked_by, c1.entered, c1.step, c1.changed.action, c1.changed.by], [true, "Jay", true, "in", "entered", "Jay"]);
+  assert.ok(Date.parse(c1.changed.at) > Date.now() - 60e3, "and when");
+  const slugRow = () => env.DB.prepare("SELECT t.slug, t.label, t.active, t.id FROM tracks t JOIN booth_tracks b ON b.vote_track_id = t.id WHERE b.code = ?1").bind(songCode).first();
+  const voteTrack = await slugRow();
+  assert.deepEqual([voteTrack.label, voteTrack.active], ["Sleigh Bars", 1]);
+  assert.equal(c1.vote_url, `/#${voteTrack.slug}`, "View Contest opens the voting page at this song");
+  assert.ok(await inVote("Sleigh Bars"), "it shows in the vote, with no script run");
+  const rec = await env.DB.prepare("SELECT contest_entered_by, contest_rules_version FROM booth_tracks WHERE code = ?1").bind(songCode).first();
+  assert.deepEqual([rec.contest_entered_by, rec.contest_rules_version], ["jay.h@gmail.com", "holiday-2026-draft-4"], "who entered and which rules are kept");
+  // Mo sees the same line on their phone, and can withdraw it for everyone.
   const moSees = (await B(songCode, "contest-status", { email: "mo.i@gmail.com" })).body.contest;
-  assert.deepEqual([moSees.manager, moSees.you.manager, moSees.you.can_manage, moSees.ticked_by], ["Jay", false, false, "Jay"]);
-  for (const [what, body] of [["contest", { enter: false }], ["title", { title: "Mo's Title" }], ["public", { public: true }]]) {
-    const r = await B(songCode, what, { email: "mo.i@gmail.com", ...body });
-    assert.deepEqual([r.status, r.body.error], [403, "not_manager"], what);
-    assert.match(r.body.message, /^Jay manages this song/);
-  }
-  const art = await booth.onRequest({ request: new Request(`https://voting.test/api/booth/tracks/${songCode}/art`, { method: "POST", headers: { "cf-connecting-ip": freshIp(), "content-type": "image/png", "content-length": "8", "x-email": "mo.i@gmail.com" }, body: new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]) }), env, params: { path: ["tracks", songCode, "art"] }, waitUntil: () => {} });
-  assert.deepEqual([art.status, (await art.json()).error], [403, "not_manager"], "artwork is the manager's too");
-  assert.ok(await inVote("Jay, Mo & Kim"), "Mo's untick did nothing");
-  // Jay's title is its name in the vote; Jay's untick takes it out; the same track comes back.
-  assert.equal((await B(songCode, "title", { email: "jay.h@gmail.com", title: "Sleigh Bars" })).body.title, "Sleigh Bars");
-  assert.equal((await label()).label, "Sleigh Bars");
-  const slug = (await env.DB.prepare("SELECT t.slug FROM tracks t JOIN booth_tracks b ON b.vote_track_id = t.id WHERE b.code = ?1").bind(songCode).first()).slug;
-  const out = await B(songCode, "contest", { email: "jay.h@gmail.com", enter: false });
-  assert.deepEqual([out.body.contest.entered, out.body.contest.ticked], [false, false]);
+  assert.deepEqual([moSees.entered, moSees.changed.by, moSees.you.can_manage], [true, "Jay", true]);
+  const iso = new Date().toISOString();
+  const voter = await env.DB.prepare("INSERT INTO voters (name, email, email_key, city, created_at, verified) VALUES ('Fan', 'fan.sleigh@example.com', 'fan.sleigh@example.com', 'Bronx', ?1, 1) RETURNING id").bind(iso).first();
+  await env.DB.prepare("INSERT INTO like_events (track_id, voter_id, action, created_at) VALUES (?1, ?2, 'like', ?3)").bind(voteTrack.id, voter.id, iso).run();
+  const out = await B(songCode, "contest", { email: "mo.i@gmail.com", enter: false });
+  assert.equal(out.status, 200, out.text);
+  assert.deepEqual([out.body.contest.entered, out.body.contest.ticked, out.body.contest.changed.action, out.body.contest.changed.by, out.body.contest.vote_url], [false, false, "withdrawn", "Mo", "/"], "withdrawn by Mo, for everyone");
   assert.ok(!(await inVote("Sleigh Bars")));
+  assert.deepEqual((await B(songCode, "contest-status", { email: "jay.h@gmail.com" })).body.contest.changed, out.body.contest.changed, "Jay's phone says the same");
+  // Kim enters it again: the same track, the same link, and the like it had is still counted.
+  const back = await B(songCode, "contest", { email: "kim.f@gmail.com", enter: true, agree: true });
+  assert.deepEqual([back.body.contest.entered, back.body.contest.changed.by], [true, "Kim"]);
+  assert.deepEqual([(await slugRow()).id, (await slugRow()).slug], [voteTrack.id, voteTrack.slug], "the same track, the same link");
+  assert.equal((await stateNow()).tracks.find((t) => t.slug === voteTrack.slug)?.likes, 1, "its votes are kept");
+  // A tick that changes nothing is not a change; every change is kept, in order.
   await B(songCode, "contest", { email: "jay.h@gmail.com", enter: true, agree: true });
-  assert.equal((await label()).active, 1);
-  assert.equal((await env.DB.prepare("SELECT t.slug FROM tracks t JOIN booth_tracks b ON b.vote_track_id = t.id WHERE b.code = ?1").bind(songCode).first()).slug, slug, "the same track, the same link");
-  // Someone not on the song cannot enter it or change it.
-  assert.equal((await B(songCode, "contest", { email: "stranger@gmail.com", enter: true, agree: true })).body.error, "not_attached");
-  assert.equal((await B(songCode, "contest-status", { email: "stranger@gmail.com" })).body.error, "not_attached");
+  const log = (await env.DB.prepare("SELECT c.email, c.entered, c.rules_version FROM booth_contest_changes c JOIN booth_tracks b ON b.id = c.track_id WHERE b.code = ?1 ORDER BY c.id").bind(songCode).all()).results;
+  assert.deepEqual(log.map((r) => [r.email, r.entered]), [["jay.h@gmail.com", 1], ["mo.i@gmail.com", 0], ["kim.f@gmail.com", 1]]);
+  assert.deepEqual(log.map((r) => r.rules_version), ["holiday-2026-draft-4", null, "holiday-2026-draft-4"], "an entry keeps the rules it agreed to");
+  const listed = (await get("team/songs", { token })).body.songs.find((x) => x.code === songCode);
+  assert.deepEqual([listed.changed.action, listed.changed.by], ["entered", "Kim"], "the team sees who last changed it");
+  // Someone not on the song cannot enter it, withdraw it or change it.
+  for (const [what, body] of [["contest", { enter: false }], ["title", { title: "Theirs" }], ["public", { public: true }], ["contest-status", {}]]) {
+    assert.equal((await B(songCode, what, { email: "stranger@gmail.com", ...body })).body.error, "not_attached", what);
+  }
+  assert.ok(await inVote("Sleigh Bars"), "the stranger changed nothing");
+  await B(songCode, "contest", { email: "jay.h@gmail.com", enter: false });
 });
 
-test("first come is any of the controls: the first to add a title (or Share) manages it; two at once, one wins", async () => {
+test("everyone on the song may Share it: the first Share publishes the listen page; two at once both work", async () => {
   const token = await teamToken();
-  const code = await takeSong([["Ann First", "ann.f@gmail.com"], ["Ben Second", "ben.s@gmail.com"]], "First Come.mp3", token);
+  const code = await takeSong([["Ann First", "ann.f@gmail.com"], ["Ben Second", "ben.s@gmail.com"]], "Both Share.mp3", token);
   const both = await Promise.all([B(code, "title", { email: "ben.s@gmail.com", title: "Ben's" }), B(code, "title", { email: "ann.f@gmail.com", title: "Ann's" })]);
-  const won = both.filter((r) => r.status === 200);
-  assert.equal(won.length, 1, "exactly one manager");
-  const manager = (await env.DB.prepare("SELECT manager_email FROM booth_tracks WHERE code = ?1").bind(code).first()).manager_email;
-  const loser = manager === "ann.f@gmail.com" ? "ben.s@gmail.com" : "ann.f@gmail.com";
-  assert.equal((await B(code, "public", { email: loser, public: true })).body.error, "not_manager");
-  assert.equal((await B(code, "public", { email: manager, public: true })).body.public, true, "the manager's Share publishes it");
+  assert.deepEqual(both.map((r) => r.status), [200, 200], "neither is refused");
+  const shared = await B(code, "public", { email: "ben.s@gmail.com", public: true });
+  assert.equal(shared.body.public, true, "Ben's Share publishes it");
+  assert.equal((await B(code, "public", { email: "ann.f@gmail.com", public: true })).body.share_id, shared.body.share_id, "Ann shares the same link");
 });
 
 test("typing a song's code hears and downloads it, and never puts anyone on it; Scooter's file and test files in production never go in, said neutrally", async () => {
@@ -509,12 +559,12 @@ test("typing a song's code hears and downloads it, and never puts anyone on it; 
   assert.deepEqual([t.body.contest.entered, t.body.contest.blocked, t.body.contest.production], [false, "test_file_in_production", true]);
 });
 
-test("the team re-points a song to exactly the people picked, with a note of who changed what and when; team only; the old manager stops managing it", async () => {
+test("the team re-points a song to exactly the people picked, with a note of who changed what and when; team only; the old people lose the controls", async () => {
   const token = await teamToken("fixer@example.com");
   // The 7444 case: a song lands on a stale test sign-up instead of the person who recorded it.
   await signUps([["Real Rae", "rae.real@gmail.com"]]);
   const wrong = await takeSong([["Test Old", "old.test@gmail.com"]], "Twice.mp3", token);
-  assert.equal((await B(wrong, "title", { email: "old.test@gmail.com", title: "Old Title" })).status, 200, "the wrong person even manages it");
+  assert.equal((await B(wrong, "title", { email: "old.test@gmail.com", title: "Old Title" })).status, 200, "the wrong person even has the controls");
   assert.equal((await B(wrong, "enter", { email: "rae.real@gmail.com" })).body.contest.you.performer, false, "Rae reads as a listener: identity is membership, never a matching email");
   const rae = await guestId("rae.real@gmail.com");
   assert.equal((await post(`team/songs/${wrong}/people`, { guest_ids: [rae] })).body.error, "team_sign_in", "only the team re-points");
@@ -525,14 +575,15 @@ test("the team re-points a song to exactly the people picked, with a note of who
   const fixed = await post(`team/songs/${wrong}/people`, { guest_ids: [rae], note: "  uploaded on the wrong   sign-up  " }, { token });
   assert.equal(fixed.status, 200, fixed.text);
   assert.deepEqual(await songPeople(wrong), [{ email: "rae.real@gmail.com", guest_id: rae }], "exactly the person picked, by their record");
-  assert.deepEqual([fixed.body.song.members.map((m) => m.first_name), fixed.body.song.manager], [["Real"], null], "the old manager is off the song, so nobody manages it until Rae does");
+  assert.deepEqual(fixed.body.song.members.map((m) => m.first_name), ["Real"], "the old person is off the song");
+  assert.equal((await B(wrong, "title", { email: "old.test@gmail.com", title: "Still Mine" })).body.error, "not_attached", "and has no controls any more");
   const [log] = fixed.body.song.repoints;
   assert.deepEqual([log.by, log.before, log.after, log.note], ["fixer@example.com", ["Test Old"], ["Real Rae"], "uploaded on the wrong sign-up"], "who, what and the note");
   assert.ok(Date.parse(log.at) > Date.now() - 60e3, "and when");
   const row = await env.DB.prepare("SELECT before_json, after_json, member_id FROM booth_repoints r JOIN booth_tracks b ON b.id = r.track_id WHERE b.code = ?1").bind(wrong).first();
   assert.deepEqual(JSON.parse(row.after_json), [{ guest_id: rae, name: "Real Rae" }], "kept in the table, never deleted");
   const raeNow = (await B(wrong, "enter", { email: "rae.real@gmail.com" })).body.contest;
-  assert.deepEqual([raeNow.you.performer, raeNow.you.can_manage, raeNow.access], [true, true, ["Real"]], "Rae is on it and can manage it");
+  assert.deepEqual([raeNow.you.performer, raeNow.you.can_manage, raeNow.access], [true, true, ["Real"]], "Rae is on it, with the controls");
   assert.equal((await B(wrong, "enter", { email: "old.test@gmail.com" })).body.contest.you.performer, false, "the stale sign-up is off it");
   // A song uploaded with nobody on it is put on its people the same way; and re-pointing to nobody is allowed (the song waits).
   const walk = (await upload("Nobody Yet.mp3")).body.code;
@@ -613,7 +664,8 @@ test("the team's safety valve: Take out of the vote from /team holds even if it 
   const listed = (await get("team/songs", { token })).body.songs.find((s) => s.code === code);
   const { members, uploaded_at, ...rest } = listed;
   assert.ok(Date.parse(uploaded_at) > 0);
-  assert.deepEqual(rest, { code, label: "Val", file_name: "Valve Jingle.mp3", entered: true, pulled: false, pulled_at: null, people: 1, needs_people: false, ticked: true, ticked_by: "Val", manager: "Val", repoints: [] }, "the team sees the song, in, with who entered and manages it");
+  assert.deepEqual(rest, { code, label: "Val", file_name: "Valve Jingle.mp3", entered: true, pulled: false, pulled_at: null, people: 1, needs_people: false, ticked: true, ticked_by: "Val", changed: rest.changed, repoints: [] }, "the team sees the song, in, with who entered it");
+  assert.deepEqual([rest.changed.action, rest.changed.by], ["entered", "Val"], "and who last changed it");
   assert.equal(members.length, 1);
   assert.deepEqual(Object.keys(members[0]).sort(), ["attached_at", "first_name", "guest_id", "id", "name", "signed_up"], "names and records, never an email");
   assert.equal(members[0].first_name, "Val");
@@ -727,7 +779,7 @@ test("the demo song (Scooter, 19 Nov 2026: \"make sure I can ... take a song thr
   const found = await env.DB.prepare(demo.FIND_SQL).first();
   assert.deepEqual(found, { code: "8642", email: "jingle.demo@example.com" }, "the script finds its own song again (a second run resets, never a second song)");
   const view = (await B("8642", "enter", { email: "jingle.demo@example.com" })).body.contest;
-  assert.deepEqual([view.access, view.you.performer, view.you.can_manage, view.step], [["Demo"], true, true, "not_entered"], "the singer's email manages it; it is not entered yet");
+  assert.deepEqual([view.access, view.you.performer, view.you.can_manage, view.step], [["Demo"], true, true, "not_entered"], "the singer's email has the controls; it is not entered yet");
   assert.deepEqual((await B("8642", "enter", { email: "listener@gmail.com" })).body.contest.you.can_manage, false, "anyone else hears it only");
   const demoRow = (await get("team/line", { token: await teamToken() })).body.sessions.find((x) => x.guests.some((g) => g.email === "jingle.demo@example.com"));
   assert.ok(!demoRow || laneOf(demoRow) === "done", "the demo singer holds no place in the line or at the upload station");
@@ -739,13 +791,13 @@ test("the demo song (Scooter, 19 Nov 2026: \"make sure I can ... take a song thr
   await run(demo.resetStatements({ code: "8642", now: Date.now() }));
   assert.ok(!(await inVote("Jingle Demo")), "the reset takes it out of the vote");
   const after = (await B("8642", "enter", { email: "jingle.demo@example.com" })).body.contest;
-  assert.deepEqual([after.ticked, after.manager, after.title, after.you.can_manage], [false, null, "", true], "not entered, nobody manages it, no title: ready to show again");
+  assert.deepEqual([after.ticked, after.changed, after.title, after.you.can_manage], [false, null, "", true], "not entered, no history line, no title: ready to show again");
   assert.equal((await B("8642", "contest", { email: "jingle.demo@example.com", enter: true, agree: true })).body.contest.entered, true, "and it goes in again");
   assert.ok(await inVote("Demo") || await inVote("Jingle Demo"), "the same song, back on the voting page");
   await B("8642", "contest", { email: "jingle.demo@example.com", enter: false });
 });
 
-test("the demo's host (Scooter, 19 Nov 2026: \"use my own access to take a song through contest entry and see it appear on the voting page\"): their own email manages the demo song and enters it, without being on it; nobody else can; production ignores it", async () => {
+test("the demo's host (Scooter, 19 Nov 2026: \"use my own access to take a song through contest entry and see it appear on the voting page\"): their own email has the demo song's controls and enters it, without being on it; nobody else can; production ignores it", async () => {
   const demo = await import("../scripts/demo-song.mjs");
   const host = "host.demo@example.org";
   assert.equal(demo.checkArgs({ env: "preview", host }).host, host);
@@ -767,8 +819,7 @@ test("the demo's host (Scooter, 19 Nov 2026: \"use my own access to take a song 
     const ticked = await B("8643", "contest", { email: host, enter: true, agree: true });
     assert.deepEqual([ticked.status, ticked.body.contest.entered, ticked.body.contest.step, ticked.body.contest.ticked_by], [200, true, "in", "the demo's host"], "Enter, by the host's own email, puts it in");
     assert.ok(await inVote("Host Jingle"), "and it is on the voting page");
-    const singer = await B("8643", "contest", { email: "jingle.demo@example.com", enter: false });
-    assert.deepEqual([singer.status, singer.body.error], [403, "not_manager"], "first come: the host manages it now, the singer's email cannot take it out");
+    assert.deepEqual([ticked.body.contest.changed.action, ticked.body.contest.changed.by], ["entered", "the demo's host"], "the line says the host entered it, never their name or email");
     const prodEnv = { ...env, APP_ENV: "production" };
     const prod = await B("8643", "contest", { email: host, enter: false }, freshIp(), prodEnv);
     assert.deepEqual([prod.status, prod.body.error], [403, "not_attached"], "production never honours a host");
@@ -776,7 +827,7 @@ test("the demo's host (Scooter, 19 Nov 2026: \"use my own access to take a song 
     assert.ok(!(await inVote("Host Jingle")));
     await run(demo.resetStatements({ code: "8643", now: Date.now() }));
     const after = (await B("8643", "enter", { email: host })).body.contest;
-    assert.deepEqual([after.ticked, after.manager, after.title, after.you.can_manage], [false, null, "", true], "a reset without --host keeps the host: ready to show again");
+    assert.deepEqual([after.ticked, after.changed, after.title, after.you.can_manage], [false, null, "", true], "a reset without --host keeps the host: ready to show again");
   } finally {
     await env.DB.prepare("DELETE FROM party_guests WHERE email = ?1").bind(host).run();
   }

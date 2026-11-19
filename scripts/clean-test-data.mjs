@@ -83,6 +83,7 @@ export async function cleanTestData(target, opts = {}) {
   if (tIds.length) {
     sql.push(`DELETE FROM booth_people WHERE track_id IN (${list(tIds)});`);
     sql.push(`DELETE FROM booth_repoints WHERE track_id IN (${list(tIds)});`);
+    sql.push(`DELETE FROM booth_contest_changes WHERE track_id IN (${list(tIds)});`);
     sql.push(`UPDATE tracks SET active = 0 WHERE source_name IN (${list(tIds.map((id) => `booth:${id}`))});`);
     sql.push(`DELETE FROM booth_tracks WHERE id IN (${list(tIds)});`);
   }

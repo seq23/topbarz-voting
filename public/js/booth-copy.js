@@ -30,7 +30,18 @@ export const COPY = {
   groupsTitle: "This song goes to",
   queued: "{n} more recording{s} waiting after this one.",
   inBoothNow: "Still in the booth: {names}. They show here once the ambassador taps them out.",
+  // The song being recorded now, the whole group (Scooter, 19 Nov 2026: "show the completed
+  // recording's group names from the booth queue so the engineer can confirm the right group").
+  recordingNow: "Recording now: {names}. The song goes to all of them once nobody of it is in the booth.",
+  inBooth: "in the booth",
+  outOfBooth: "out",
   groupsNone: "Nobody is at the upload station yet. When the ambassador taps the last person of a recording out of the booth, their names show here within a few seconds.",
+  // Before the file goes up: the engineer confirms the names, on the page.
+  confirmGroup: "Upload {file} for {names}?",
+  confirmGroupNote: "Check these are the people who recorded it. The song goes to every one of them, and each of them can open it with the code.",
+  confirmGroupGo: "Yes, it's them",
+  confirmGroupNo: "Not them",
+  confirmGroupHeld: "Not uploaded. Ask the ambassador to fix who is on this recording on the team page; the names above change within a few seconds. Then drop the file again.",
   // A name the team should look at twice (a test sign-up, or one made long ago). First names only here:
   // the team sees the contact details on the team page.
   flagTest: "looks like a test sign-up",

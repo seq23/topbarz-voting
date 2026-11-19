@@ -20,7 +20,7 @@ export const partyTrackClause = (env, alias = "t") => (holidayOn(env) ? ` AND ${
 
 // Which rules a guest agreed to when they ticked "Enter the contest". A new text of the rules is a
 // new version, so each tick records the words that were on the page.
-export const RULES_VERSION = "holiday-2026-draft-3";
+export const RULES_VERSION = "holiday-2026-draft-4";
 export const RULES_PATH = "/holiday-rules";
 
 export const PARTY_NAME_MAX = 80;
@@ -141,7 +141,9 @@ export function parseStatusChange(body) {
   if (!LANES.includes(b.status)) return refuse("status", "bad_status", "Status is waiting, booth, upload or done.");
   if (!LANES.includes(b.from)) return refuse("from", "bad_status", "Say which status you saw.");
   if (b.status === b.from) return refuse("status", "same_status", "That is already the status.");
-  return { ok: true, value: { status: b.status, from: b.from } };
+  // Into the booth while the last recording waits on its upload: on that same song, or a new one.
+  if (b.song !== undefined && b.song !== "same" && b.song !== "new") return refuse("song", "bad_song", "Say whether it is the same song or a new one.");
+  return { ok: true, value: { status: b.status, from: b.from, song: b.song ?? null } };
 }
 
 // A GIF the team adds to the gallery: Giphy's id and an https URL on giphy.com, with its size.
@@ -179,33 +181,55 @@ export const SET_STATUS_SQL = "UPDATE party_sessions SET status = ?2, done_at = 
 export const STATUS_EVENT_SQL = "INSERT INTO party_status_events (session_id, from_status, to_status, member_id, at) VALUES (?1, ?2, ?3, ?4, ?5)";
 export const TEXTED_SQL = "UPDATE party_sessions SET texted_at = ?2 WHERE id = ?1 RETURNING texted_at";
 // ── Takes: who is on the song (Scooter, 18 Nov 2026: "The brand ambassador taps each person into
-// the booth and out when the song is done. Those taps define who's on the song.") ────────────────
-// The open take: someone of it still in the booth and no song yet. A person tapped in joins it, or
-// starts a new one. The newest, if (after an undo) there were ever two.
-export const OPEN_TAKE_SQL = "SELECT id FROM party_takes WHERE closed_at IS NULL AND track_id IS NULL ORDER BY opened_at DESC, id DESC LIMIT 1";
-export const NEW_TAKE_SQL = "INSERT INTO party_takes (opened_at) VALUES (?1) RETURNING id";
+// the booth and out when the song is done. Those taps define who's on the song."; 19 Nov 2026: "When
+// Carlos and Scooter go into the booth and leave one after the other, the upload should belong to
+// both, not just the last person out.") ──────────────────────────────────────────────────────────
+// A take is one song's recording. It stays OPEN while its song is not uploaded: people tapped in join
+// it, and an empty booth does not end it, because a group often records one verse at a time. It ends
+// (closed_at) when the engineer uploads its song, or when the ambassador taps the next person in as a
+// NEW song; then nobody else joins it. So a song is everyone who was in the booth for it, and nobody
+// from the song before or after.
+// The open take, with how many of it are in the booth now and how many are out waiting on the
+// upload: in_booth > 0 → the next person tapped in joins it; everyone out → the team says whether
+// the next person is on the same song or a new one (409 which_song until they do).
+export const OPEN_TAKE_SQL = `SELECT t.id,
+  (SELECT COUNT(*) FROM party_sessions s WHERE s.take_id = t.id AND s.status = 'booth') AS in_booth,
+  (SELECT COUNT(*) FROM party_sessions s WHERE s.take_id = t.id AND s.status = 'out' AND s.done_at IS NULL) AS out_waiting
+  FROM party_takes t WHERE t.closed_at IS NULL AND t.track_id IS NULL ORDER BY t.opened_at DESC, t.id DESC LIMIT 1`;
+// A new take, unless one is already open (two phones tapping at once start one recording, not two).
+export const NEW_TAKE_SQL = "INSERT INTO party_takes (opened_at) SELECT ?1 WHERE NOT EXISTS (SELECT 1 FROM party_takes WHERE closed_at IS NULL AND track_id IS NULL)";
 export const SET_TAKE_SQL = "UPDATE party_sessions SET take_id = ?2 WHERE id = ?1";
-// After a tap out (or back to waiting): the take closes once none of its people is in the booth.
-export const CLOSE_TAKE_SQL = "UPDATE party_takes SET closed_at = ?2 WHERE id = ?1 AND closed_at IS NULL AND track_id IS NULL AND NOT EXISTS (SELECT 1 FROM party_sessions s WHERE s.take_id = ?1 AND s.status = 'booth')";
-// Back in the booth from the upload station (an undo): the take opens again, until its song is up.
-export const REOPEN_TAKE_SQL = "UPDATE party_takes SET closed_at = NULL WHERE id = ?1 AND track_id IS NULL";
+// The team's "New song": the open take takes nobody else in.
+export const END_TAKE_SQL = "UPDATE party_takes SET closed_at = ?2 WHERE id = ?1 AND closed_at IS NULL";
+// "Done, no song" for its last person: a take nobody is waiting on any more takes nobody else in.
+export const CLOSE_TAKE_SQL = "UPDATE party_takes SET closed_at = ?2 WHERE id = ?1 AND closed_at IS NULL AND track_id IS NULL AND NOT EXISTS (SELECT 1 FROM party_sessions s WHERE s.take_id = ?1 AND s.done_at IS NULL AND s.status IN ('booth', 'out'))";
+// Back in the booth from the upload station (an undo): the take is open again until its song is up,
+// unless another recording has started since (then it simply waits until this person is out again).
+export const REOPEN_TAKE_SQL = "UPDATE party_takes SET closed_at = NULL WHERE id = ?1 AND track_id IS NULL AND NOT EXISTS (SELECT 1 FROM party_takes o WHERE o.closed_at IS NULL AND o.track_id IS NULL AND o.id != ?1)";
 export const TAKE_OF_SQL = "SELECT t.id, t.closed_at, t.track_id FROM party_takes t JOIN party_sessions s ON s.take_id = t.id WHERE s.id = ?1";
-// The next take at the upload station: closed, no song yet, with someone still waiting on it; the
-// oldest closed first (the engineer's next file is theirs).
-export const NEXT_TAKE_SQL = `SELECT t.id, t.closed_at FROM party_takes t
-  WHERE t.closed_at IS NOT NULL AND t.track_id IS NULL
+// The next take at the upload station: no song yet, nobody of it in the booth, someone of it out and
+// waiting on the upload; the oldest recording first (the engineer's next file is theirs).
+const AT_STATION = `t.track_id IS NULL
     AND EXISTS (SELECT 1 FROM party_sessions s WHERE s.take_id = t.id AND s.status = 'out' AND s.done_at IS NULL)
-  ORDER BY t.closed_at, t.id LIMIT 1`;
-export const STATION_TAKES_SQL = `SELECT COUNT(*) AS n FROM party_takes t WHERE t.closed_at IS NOT NULL AND t.track_id IS NULL
-  AND EXISTS (SELECT 1 FROM party_sessions s WHERE s.take_id = t.id AND s.status = 'out' AND s.done_at IS NULL)`;
+    AND NOT EXISTS (SELECT 1 FROM party_sessions s WHERE s.take_id = t.id AND s.status = 'booth')`;
+export const NEXT_TAKE_SQL = `SELECT t.id, t.closed_at FROM party_takes t WHERE ${AT_STATION} ORDER BY t.opened_at, t.id LIMIT 1`;
+export const STATION_TAKES_SQL = `SELECT COUNT(*) AS n FROM party_takes t WHERE ${AT_STATION}`;
 // A take's people as the upload puts them on the song: everyone of it at the upload station, in the
-// order they were tapped in. Their one record (guest id), their email (the contact the code is read
+// order they came out. Their one record (guest id), their email (the contact the code is read
 // against) and their name.
 export const TAKE_PEOPLE_SQL = `SELECT s.id AS session_id, g.id AS guest_id, g.email, g.name, g.joined_at FROM party_sessions s JOIN party_guests g ON g.session_id = s.id
   WHERE s.take_id = ?1 AND s.status = 'out' AND s.done_at IS NULL ORDER BY s.status_at, s.id`;
+// What the upload checks it is still the take the engineer confirmed: its id and how many are on it.
+export const takeKey = (id, size) => `${id}.${size}`;
 // Who is still in the booth now (first names for the booth page, while no take is at the station).
 export const IN_BOOTH_NOW_SQL = "SELECT g.name FROM party_sessions s JOIN party_guests g ON g.session_id = s.id WHERE s.status = 'booth' ORDER BY s.status_at, s.id";
-export const CLAIM_TAKE_SQL = "UPDATE party_takes SET track_id = ?2 WHERE id = ?1 AND track_id IS NULL";
+// The song being recorded now, for the booth page: everyone on a take someone is still in the booth
+// for, with whether they are in or already out.
+export const RECORDING_NOW_SQL = `SELECT g.name, s.status FROM party_sessions s JOIN party_guests g ON g.session_id = s.id
+  WHERE s.done_at IS NULL AND s.status IN ('booth', 'out') AND s.take_id IN (SELECT b.take_id FROM party_sessions b WHERE b.status = 'booth' AND b.take_id IS NOT NULL)
+  ORDER BY s.status_at, s.id`;
+// The upload claims the take: its song, and nobody else joins it.
+export const CLAIM_TAKE_SQL = "UPDATE party_takes SET track_id = ?2, closed_at = COALESCE(closed_at, ?3) WHERE id = ?1 AND track_id IS NULL";
 
 export const GIFS_SQL = "SELECT giphy_id, url, width, height, title FROM party_gifs WHERE removed_at IS NULL ORDER BY added_at, id";
 export const ADD_GIF_SQL = "INSERT INTO party_gifs (giphy_id, url, width, height, title, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT (giphy_id) DO UPDATE SET removed_at = NULL, url = excluded.url";

@@ -26,7 +26,7 @@ Everything here runs from `~/GitHub/topbarz-voting` on Sequoia's Mac, which is l
 - **Order on the page:** the `sort` column, lowest first.
 
 ## Load photos
-- **Preview:** `npm run load-photos -- --env preview` (reads `Test photos`). **Production:** `npm run load-photos -- --env production` (reads `Gallery photos`).
+- **Preview:** `npm run load-photos -- --env preview` (reads `Test photos`). **Production:** `npm run load-photos -- --env production` (reads `Gallery photos`). While the holiday party is on, a photo whose alt text names CultureCon is not served (the team's GIFs show instead); load party photos with `--event "the Christmas party"`.
 - **What it does:** each photo is turned upright, stripped of camera data and saved at two sizes (long edge 1600 px and 640 px), uploaded, and listed in the manifest `/api/state` returns, in file-name order. The manifest always matches the folder: remove a photo from the folder, run it again, and it is gone from the page.
 - **No photos yet:** it writes an empty manifest and the page hides the slider.
 

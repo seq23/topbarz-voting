@@ -626,6 +626,24 @@ test("gallery GIFs: the team adds and removes; /api/state carries them while the
   assert.equal((await post("team/gifs", { id: "gifx", url: "https://media.giphy.com/x.gif" })).body.error, "team_sign_in", "only the team adds GIFs");
 });
 
+test("gallery photos: while the party is on, the old CultureCon photos are never served; party photos are", async () => {
+  const photo = (sha, alt) => ({ url: `/media/photos/${sha}-1600.jpg`, width: 1067, height: 1600, thumb_url: `/media/photos/${sha}-640.jpg`, thumb_width: 427, thumb_height: 640, alt });
+  const old = photo("aaa", "Top Barz at CultureCon, photo 1");
+  const party = photo("bbb", "Top Barz at the Christmas party, photo 2");
+  await env.MEDIA.put("manifest/photos.json", JSON.stringify({ photos: [old, party] }));
+  try {
+    assert.deepEqual((await stateNow()).photos, [party], "party on: CultureCon photos dropped, the party photo kept");
+    await env.MEDIA.put("manifest/photos.json", JSON.stringify({ photos: [old] }));
+    assert.deepEqual((await stateNow()).photos, [], "party on with only CultureCon photos: none");
+    _resetStateMemo();
+    const offState = (await call(state.onRequest, { ...env, HOLIDAY_EVENT: "off" }, { path: "/api/state" })).body;
+    assert.deepEqual(offState.photos, [old], "party off (production until go-live): the photos are as before");
+  } finally {
+    await env.MEDIA.delete("manifest/photos.json");
+    _resetStateMemo();
+  }
+});
+
 test("privacy: no route but the team's answers a phone or an email of a guest; the tables are read only where they should be", () => {
   const src = (rel) => fs.readFileSync(path.join(ROOT, rel), "utf8");
   const partyRoute = src("functions/api/party/[[path]].js");

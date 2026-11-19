@@ -33,10 +33,13 @@ export async function readPhotoManifest(env) {
 export async function buildState(env, now = Date.now()) {
   const [tracksRes, settingRes, startRes] = await env.DB.batch([env.DB.prepare(tracksWithCountsSql(env)), env.DB.prepare(END_SETTING_SQL), env.DB.prepare(START_SETTING_SQL)]);
   const { startsAt, endsAt, closed, notOpen } = votingPhase(env, now, startRes.results?.[0]?.value ?? null, settingRes.results?.[0]?.value ?? null);
-  const photos = await readPhotoManifest(env);
+  const holiday = holidayOn(env);
+  // While the party is on, the old CultureCon photos are never served (Scooter, 17 Nov 2026:
+  // "Remove everything CultureCon"; the GIFs replace the old photos). Party photos loaded with
+  // `load-photos --event "the Christmas party"` show as before. Off, the answer is unchanged.
+  const photos = (await readPhotoManifest(env)).filter((p) => !holiday || !/culturecon/i.test(String(p?.alt ?? "")));
   // The holiday party (17 Nov 2026): the GIFs the team picked show in the gallery until there are
   // event photos. Off (production until go-live), none are read and the answer is as before.
-  const holiday = holidayOn(env);
   const gifs = holiday ? ((await env.DB.prepare(GIFS_SQL).all()).results ?? []).map(toGif) : [];
   return {
     now: new Date(now).toISOString(),

@@ -1,6 +1,7 @@
 // Everything /api/state returns, built from D1 and the R2 photo manifest.
 import { END_SETTING_SQL, START_SETTING_SQL, giphyStatus, gateStatus, verificationStatus, votingPhase } from "./config.js";
-import { GIFS_SQL, holidayOn, partyTrackClause, toGif } from "./party.js";
+import { VOTE_PEOPLE_SQL } from "./contest.js";
+import { GIFS_SQL, firstOf, holidayOn, partyTrackClause, toGif } from "./party.js";
 
 export const PHOTO_MANIFEST_KEY = "manifest/photos.json";
 
@@ -15,7 +16,7 @@ export const countedLikesClause = (env, alias = "e", endsAtMs = Infinity) => (ho
   ? `${alias}.voter_id IN (SELECT id FROM voters WHERE flagged = 0 AND verified = 1${verifiedBefore(endsAtMs)})`
   : `${alias}.voter_id NOT IN (SELECT id FROM voters WHERE flagged = 1)`);
 export const tracksWithCountsSql = (env, endsAtMs = Infinity) => `
-SELECT t.slug, t.label, t.audio_key, t.duration_ms, t.sort,
+SELECT t.id, t.slug, t.label, t.audio_key, t.duration_ms, t.sort,
   (SELECT COALESCE(SUM(CASE e.action WHEN 'like' THEN 1 ELSE -1 END), 0) FROM like_events e
     WHERE e.track_id = t.id AND ${countedLikesClause(env, "e", endsAtMs)}) AS likes,
   (SELECT COUNT(*) FROM comments c WHERE c.track_id = t.id AND c.hidden = 0) AS comments
@@ -46,6 +47,14 @@ export async function buildState(env, now = Date.now()) {
   // The holiday party (17 Nov 2026): the GIFs the team picked show in the gallery until there are
   // event photos. Off (production until go-live), none are read and the answer is as before.
   const gifs = holiday ? ((await env.DB.prepare(GIFS_SQL).all()).results ?? []).map(toGif) : [];
+  // Who made each song (Scooter, 20 Nov 2026: "show the people on it, so voters can see who made
+  // each jingle"): first names only, in the order they were put on it. Off, not read.
+  const people = new Map();
+  if (holiday) {
+    for (const r of (await env.DB.prepare(VOTE_PEOPLE_SQL).all()).results ?? []) {
+      if (r.name) people.set(r.track_id, [...(people.get(r.track_id) ?? []), firstOf(r.name)]);
+    }
+  }
   return {
     now: new Date(now).toISOString(),
     // null only while no end is set.
@@ -60,6 +69,7 @@ export async function buildState(env, now = Date.now()) {
       duration_ms: t.duration_ms ?? null,
       likes: Math.max(0, t.likes),
       comments: t.comments,
+      ...(holiday ? { people: people.get(t.id) ?? [] } : {}),
     })),
     photos,
     ...(holiday ? { holiday: { on: true }, gifs } : {}),

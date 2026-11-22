@@ -238,6 +238,8 @@ button:disabled { cursor: not-allowed; }
 .track-main { flex: 1; min-width: 0; }
 .track-title { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); }
 .track-label { font: 400 var(--text-label)/1.2 var(--font-display); letter-spacing: var(--tracking-display); }
+.track-by { margin: var(--space-1) 0 0; color: var(--color-ink-2); font-size: 0.95rem; line-height: 1.35; overflow-wrap: anywhere; }
+.track-by:empty { display: none; }
 .linked-tag { padding: 2px var(--space-2); border-radius: 99px; background: var(--color-warm); color: var(--color-warm-ink); font-size: 0.75rem; text-transform: uppercase; }
 .scrub-row { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-2); }
 .scrub { --p: 0%; position: relative; flex: 1; min-width: 0; height: 34px; cursor: pointer; touch-action: pan-y; }

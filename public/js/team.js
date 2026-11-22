@@ -20,6 +20,7 @@ const els = Object.fromEntries([
   "headline", "intro", "loading", "off", "off-title", "off-note", "signin", "signin-title", "signin-intro", "email-form", "email", "email-label", "send", "code-form", "code-sent", "code", "code-label", "check", "resend", "change", "signin-error",
   "board", "who", "signout", "next-label", "next", "after-label", "after", "line-note", "line", "waiting-title", "booth-title", "booth-intro", "booth-none", "booth", "upload-title", "upload-intro", "upload-none", "upload", "done-title", "done",
   "songs-title", "songs-intro", "songs-none", "songs",
+  "export-title", "export-intro", "export-line", "export-songs", "export-msg",
   "gifs-title", "gifs-intro", "gifs-chosen-title", "gifs-chosen", "gifs-none", "gif-search", "gif-search-label", "gif-status", "gif-results", "gif-by",
   "members-title", "members-intro", "members", "add-form", "add", "add-label", "add-go", "add-msg",
   "person", "person-title", "person-list", "person-close", "confirm", "confirm-title", "confirm-note", "confirm-yes", "confirm-alt", "confirm-no", "toast", "toast-text", "undo",
@@ -30,7 +31,7 @@ const app = { token: null, me: "", sessions: [], takes: [], timer: null, pending
 
 // ── The words
 document.title = `${COPY.headline} | Top Barz`;
-const words = { headline: "headline", intro: "intro", offNote: null, signinTitle: "signInTitle", signinIntro: "signInIntro", emailLabel: "emailLabel", send: "sendCode", codeLabel: "codeLabel", check: "check", change: "changeEmail", signout: "signOut", nextLabel: "nextUp", afterLabel: "afterThat", doneTitle: "doneTitle", waitingTitle: "waitingTitle", boothTitle: "boothTitle", boothIntro: "boothIntro", boothNone: "boothNone", uploadTitle: "uploadTitle", uploadIntro: "uploadIntro", uploadNone: "uploadNone", repointIntro: "repointIntro", repointFindLabel: "repointFind", repointNoteLabel: "repointNote", repointSave: "repointSave", repointCancel: "cancel", songsTitle: "songsTitle", songsIntro: "songsIntro", songsNone: "songsNone", gifsTitle: "gifsTitle", gifsIntro: "gifsIntro", gifsChosenTitle: "gifsChosen", gifsNone: "gifsNone", gifSearchLabel: "gifsSearch", gifBy: "poweredBy", membersTitle: "teamTitle", membersIntro: "teamIntro", addLabel: "addLabel", addGo: "add", personClose: "close", confirmYes: "yes", confirmNo: "cancel", undo: "undo" };
+const words = { headline: "headline", intro: "intro", offNote: null, signinTitle: "signInTitle", signinIntro: "signInIntro", emailLabel: "emailLabel", send: "sendCode", codeLabel: "codeLabel", check: "check", change: "changeEmail", signout: "signOut", nextLabel: "nextUp", afterLabel: "afterThat", doneTitle: "doneTitle", waitingTitle: "waitingTitle", boothTitle: "boothTitle", boothIntro: "boothIntro", boothNone: "boothNone", uploadTitle: "uploadTitle", uploadIntro: "uploadIntro", uploadNone: "uploadNone", repointIntro: "repointIntro", repointFindLabel: "repointFind", repointNoteLabel: "repointNote", repointSave: "repointSave", repointCancel: "cancel", songsTitle: "songsTitle", songsIntro: "songsIntro", songsNone: "songsNone", exportTitle: "exportTitle", exportIntro: "exportIntro", exportLine: "exportLine", exportSongs: "exportSongs", gifsTitle: "gifsTitle", gifsIntro: "gifsIntro", gifsChosenTitle: "gifsChosen", gifsNone: "gifsNone", gifSearchLabel: "gifsSearch", gifBy: "poweredBy", membersTitle: "teamTitle", membersIntro: "teamIntro", addLabel: "addLabel", addGo: "add", personClose: "close", confirmYes: "yes", confirmNo: "cancel", undo: "undo" };
 for (const [el, key] of Object.entries(words)) if (key) els[el].textContent = COPY[key];
 els.offTitle.textContent = HOLIDAY.off;
 els.offNote.textContent = HOLIDAY.offNote;
@@ -266,6 +267,35 @@ function toast(text, undo = null) {
   els.toast.hidden = false;
   app.undoTimer = setTimeout(() => { els.toast.hidden = true; app.undo = null; }, UNDO_MS);
 }
+
+// ── The downloads (Scooter, 20 Nov 2026: "one for the line … and one for the songs"): a CSV made
+// by the server at the tap, for the signed-in team only, saved by the browser. Nothing is kept on
+// this phone but the file the person chose to save.
+async function download(which, btn) {
+  const say = (text) => { els.exportMsg.textContent = text; els.exportMsg.hidden = !text; };
+  btn.disabled = true;
+  say(COPY.exportMaking);
+  try {
+    const res = await fetch(`/api/party/team/export/${which}.csv`, { headers: { authorization: `Bearer ${app.token}` }, credentials: "same-origin", cache: "no-store" });
+    if (res.status === 401) { signOut(); return; }
+    if (!res.ok) throw new Error("export");
+    const blob = await res.blob();
+    const name = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? `Top Barz ${which}.csv`;
+    const url = URL.createObjectURL(blob);
+    const a = h("a", { href: url, download: name, hidden: true });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    say(COPY.exportSaved.replace("{file}", name));
+  } catch {
+    say(COPY.exportFailed);
+  } finally {
+    btn.disabled = false;
+  }
+}
+els.exportLine.addEventListener("click", () => download("line", els.exportLine));
+els.exportSongs.addEventListener("click", () => download("songs", els.exportSongs));
 
 // ── The songs: "Take out of the vote" / "Put back", and "Change who's on it"
 function songLine(s) {

@@ -26,6 +26,8 @@
 //   GET  /api/party/team/members     → { members: [{ id, email, you }] };  POST { email } adds;  POST …/members/<id>/remove
 //   GET  /api/party/team/gifs        → { gifs };  POST { id, url, width, height, title } adds;  POST …/gifs/<giphy id>/remove
 //   GET  /api/party/team/songs       → { songs: [{ code, label, entered, pulled, changed, members, repoints, … }], guests: [{ id, name, email, phone, flags }] }
+//   GET  /api/party/team/export/line.csv    everyone who signed up (name, phone, email, city, Instagram, when, times in line, now)
+//   GET  /api/party/team/export/songs.csv   every song (code, title, who is on it, in the vote, likes, comments, last change)
 //   POST /api/party/team/songs/<booth code>/pull  { pulled: true|false } → { song }   "Take out of the vote" / "Put back"
 //   POST /api/party/team/songs/<booth code>/people  { guest_ids: [id, …], note } → { song }   re-points the song to exactly
 //                                    those people (Scooter, 18 Nov 2026: "staff can re-point it with a note of who changed what
@@ -38,6 +40,7 @@ import {
   ADD_GIF_SQL, CLOSE_TAKE_SQL, END_TAKE_SQL, GIFS_SQL, GUEST_BY_EMAIL_SQL, GUEST_BY_KEY_SQL, INSERT_GUEST_SQL, LANE_COLUMNS, LINE_GUESTS_SQL, LINE_SESSIONS_SQL, NEW_SESSION_SQL, NEW_TAKE_SQL, OPEN_TAKE_SQL, REJOIN_GUEST_SQL, REMOVE_GIF_SQL, REOPEN_TAKE_SQL, SESSION_CODE_TRIES, SESSION_NAMES_SQL, SET_STATUS_SQL, SET_TAKE_SQL, STATUS_EVENT_SQL, TAKE_OF_SQL, TAKE_PEOPLE_SQL, TEXTED_SQL, VISIT_SQL,
   firstOf, groupLabel, guestFlags, guestKey, holidayOn, isGuestKey, laneOf, lineOrder, parsePartyGif, parseSignUp, parseStatusChange, randomSessionCode, toGif,
 } from "../../_lib/party.js";
+import { lineCsv, songsCsv } from "../../_lib/party-export.js";
 import { assertUnderLimit, limitStatement, maybePrune } from "../../_lib/ratelimit.js";
 import { MEMBER_BY_EMAIL_SQL, STORE_TEAM_CODE_SQL, newCode, releaseTeamSlot, requireMember, signTeamToken, takeTeamSlot, teamCodeEmail, teamCodeHmac, teamCodeLive, teamCodeMatchesAny } from "../../_lib/team.js";
 import { sendMail } from "../../_lib/verify.js";
@@ -350,6 +353,9 @@ export const onRequest = route({
     if (parts.length === 2 && parts[1] === "members") return members(context, m);
     if (parts.length === 2 && parts[1] === "gifs") return gifs(context);
     if (parts.length === 2 && parts[1] === "songs") return songs(context);
+    // The two downloads (Scooter, 20 Nov 2026): the line and the songs, as CSV, made at the tap.
+    if (parts.length === 3 && parts[1] === "export" && parts[2] === "line.csv") return lineCsv(context.env);
+    if (parts.length === 3 && parts[1] === "export" && parts[2] === "songs.csv") return songsCsv(context.env);
     return fail(404, "not_found", "No such API route.");
   },
   async POST(context) {

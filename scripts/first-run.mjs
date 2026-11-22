@@ -156,6 +156,11 @@ ok(`a stale upload page is refused (take_changed); the walk-up code ${walk.json.
 const line = await req("/api/party/team/line");
 if (line.status !== 401 || line.json?.error !== "team_sign_in") fail(`the team's line without signing in answered ${line.status}`);
 ok("the team's line refuses anyone not signed in (401 team_sign_in)");
+for (const file of ["line.csv", "songs.csv"]) {
+  const r = await req(`/api/party/team/export/${file}`);
+  if (r.status !== 401 || /@/.test(r.text)) fail(`the ${file} download without signing in answered ${r.status}`);
+}
+ok("the team's two downloads (line.csv, songs.csv) refuse anyone not signed in, with no detail");
 const token = process.env.FIRST_RUN_TEAM_TOKEN;
 if (token) {
   const auth = { authorization: `Bearer ${token}` };
@@ -204,6 +209,9 @@ if (token) {
   };
   if (!(await inVote(true))) fail("entered, but the song did not show in /api/state within 12 s");
   ok("Ava ticks Enter and the song is in the vote (/api/state) with no script run and no group confirmation");
+  const onPage = (await req(`/api/state?first-run=${Date.now()}`)).json?.tracks?.find((t) => t.label === label);
+  if (JSON.stringify(onPage?.people) !== JSON.stringify(["Test", "Test"])) fail(`the song on the voting page does not name its two people by first name: ${JSON.stringify(onPage?.people)}`);
+  ok("the voting page names the people on the song, first names only");
   const out = await req(`/api/booth/tracks/${code}/contest`, { method: "POST", body: { email: guestB.email, enter: false } });
   if (out.status !== 200 || out.json?.contest?.entered !== false || out.json.contest.changed?.action !== "withdrawn" || !(await inVote(false))) fail(`Bo's withdraw: ${out.status} ${out.text.slice(0, 160)}`);
   const seenByA = await req(`/api/booth/tracks/${code}/contest-status`, { method: "POST", body: { email: guestA.email } });
@@ -217,6 +225,11 @@ if (token) {
   const untick = await req(`/api/booth/tracks/${code}/contest`, { method: "POST", body: { email: guestA.email, enter: false } });
   if (untick.json?.contest?.entered !== false || !(await inVote(false))) fail("unticking did not take the song out of the vote");
   ok("unticked: the song left the vote for everyone (this run leaves nothing in the preview's vote)");
+  for (const [file, want] of [["line.csv", guestA.email], ["songs.csv", `"${code}",`]]) {
+    const r = await req(`/api/party/team/export/${file}`, { headers: auth });
+    if (r.status !== 200 || !r.text.startsWith("\uFEFF\"") || !r.text.includes(want)) fail(`the team's ${file} download: ${r.status}`);
+  }
+  ok("signed in, the team downloads the line (this run's sign-ups in it) and the songs (this run's song in it)");
   const back = await req("/api/party/rejoin", { method: "POST", body: { guest_key: a.json.guest_key } });
   if (back.status !== 201 || back.json?.session?.status !== "waiting") fail(`Get back in line answered ${back.status} ${back.text.slice(0, 120)}`);
   ok("once their song is uploaded, one tap puts the same person back in line");

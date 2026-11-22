@@ -74,7 +74,7 @@ export const CHANGE_SQL = "INSERT INTO booth_contest_changes (track_id, email, g
 export const LAST_CHANGE_SQL = "SELECT email, entered, at FROM booth_contest_changes WHERE track_id = ?1 ORDER BY at DESC, id DESC LIMIT 1";
 // A person's name: from their one record when the upload or the team put them on by it
 // (guest_id), else (rows from before 18 Nov 2026) the sign-up of that same address.
-const NAME_OF = "COALESCE((SELECT g.name FROM party_guests g WHERE g.id = p.guest_id), CASE WHEN p.guest_id IS NULL THEN (SELECT g.name FROM party_guests g WHERE g.email = p.email) END)";
+export const NAME_OF = "COALESCE((SELECT g.name FROM party_guests g WHERE g.id = p.guest_id), CASE WHEN p.guest_id IS NULL THEN (SELECT g.name FROM party_guests g WHERE g.email = p.email) END)";
 // The team's songs: every song that is or could be in the contest (in the vote now or pulled, from a
 // take or a group, or with anyone on it who signed up), entered or not, and every song uploaded in
 // the last two days with nobody on it, so a song needing its people is in front of the team.
@@ -91,6 +91,10 @@ export const TEAM_SONGS_SQL = `SELECT b.id, b.code, b.title, b.file_name, b.uplo
   ORDER BY b.uploaded_at DESC, b.id DESC LIMIT 200`;
 // One song's people for the team: their record and name. Never the email here (the team reads
 // contact details from the line, where they are already answered to the team only).
+// The people of every song in the vote, by its vote track: the voting page shows their first names
+// beside the song (Scooter, 20 Nov 2026: "Each song on the public voting page should show the people
+// on it, so voters can see who made each jingle"). Only the name is read; never an email.
+export const VOTE_PEOPLE_SQL = `SELECT b.vote_track_id AS track_id, ${NAME_OF} AS name FROM booth_people p JOIN booth_tracks b ON b.id = p.track_id WHERE b.vote_track_id IS NOT NULL ORDER BY p.attached_at, p.id`;
 export const TEAM_SONG_PEOPLE_SQL = `SELECT p.id, p.guest_id, p.email, p.attached_at, ${NAME_OF} AS name FROM booth_people p WHERE p.track_id = ?1 ORDER BY p.attached_at, p.id`;
 export const REPOINTS_SQL = "SELECT r.at, r.before_json, r.after_json, r.note, m.email AS by_email FROM booth_repoints r LEFT JOIN team_members m ON m.id = r.member_id WHERE r.track_id = ?1 ORDER BY r.at DESC, r.id DESC LIMIT 10";
 // Take out (pulled_at set, with who) or put back (NULL). Likes are kept either way.

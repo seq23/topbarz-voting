@@ -421,3 +421,10 @@ export function displayOrder(tracks) {
 // card never moves under a thumb. Monotonic ms; null = never touched.
 export const REORDER_STILL_MS = 2500;
 export const canReorder = (lastInput, now) => lastInput == null || now - lastInput >= REORDER_STILL_MS;
+
+// "by Carla & Ken" under a party song on the vote ("" with no names, or when its name is them).
+export function byLine(template, track) {
+  const n = Array.isArray(track?.people) ? track.people.filter((x) => typeof x === "string" && x.trim()) : [];
+  const list = n.length <= 1 ? n[0] ?? "" : `${n.slice(0, -1).join(", ")} & ${n[n.length - 1]}`;
+  return !list || list === String(track?.label ?? "") ? "" : String(template).replace("{names}", list);
+}

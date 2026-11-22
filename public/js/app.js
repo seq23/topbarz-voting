@@ -8,7 +8,7 @@ import { HOLIDAY } from "./party-copy.js";
 import { createGallery } from "./gallery.js";
 import { createGate } from "./gate.js";
 import {
-  canReorder, countdownSpoken, detectPlatform, displayOrder, formatCountdown, formatCount, formatEndsLine, holdFrom,
+  byLine as byWords, canReorder, countdownSpoken, detectPlatform, displayOrder, formatCountdown, formatCount, formatEndsLine, holdFrom,
   LIKE_WAIT_MS, likeInitial, likeReduce, likeRequest, likeView, nextPollDelay, plural,
   rulesEndLine, safeMediaUrl, serverNow, serverTimeOf, shareMessage, slugFromHash, smsHref, syncClock, trackLink, voterRecord,
 } from "./logic.js";
@@ -346,8 +346,14 @@ function createCard(track) {
     copyTimer: null,
   };
   const by = () => `the track by ${card.track.label}`;
+  const byLine = (t) => byWords(HOLIDAY.home.byLine, t);
 
   const title = h("h3", { class: "track-label", text: track.label });
+  // Who made it (the party: Scooter, 20 Nov 2026, "Add their names next to the song"). Hidden when
+  // the song has no names, or when its name already is their names (no title was set).
+  const madeBy = h("p", { class: "track-by" });
+  const renderBy = (t) => { const text = byLine(t); madeBy.textContent = text; madeBy.hidden = !text; };
+  renderBy(track);
   const tag = h("span", { class: "linked-tag", hidden: true, text: "Shared with you" });
   // Play, the bar, the clock and the line under them (player.js, shared with the select page).
   const audioTrack = () => ({ slug, url: safeMediaUrl(card.track.audio_url), hint: card.audio.duration, title: card.track.label });
@@ -375,6 +381,7 @@ function createCard(track) {
     h("div", { class: "track-top" }, controls.playBtn,
       h("div", { class: "track-main" },
         h("div", { class: "track-title" }, title, tag),
+        madeBy,
         controls.scrubRow,
         controls.note)),
     h("div", { class: "actions" }, likeBtn, talkBtn, shareBtn),
@@ -437,6 +444,7 @@ function createCard(track) {
   card.update = (next, generatedAt, stored) => {
     card.track = next;
     if (title.textContent !== next.label) title.textContent = next.label;
+    renderBy(next);
     if (!player.isCurrent(slug)) card.audio.duration = (Number(next.duration_ms) || 0) / 1000;
     applyOwn(card, generatedAt, stored);
     card.like = likeReduce(card.like, { type: "poll", likes: next.likes, generatedAt });

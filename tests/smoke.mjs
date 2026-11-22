@@ -459,6 +459,7 @@ try {
   const twice = await post("/api/party/join", { name: "Smoke Bo", phone: "555 010 4050", email: "bo@example.com", city: "Queens", website: "" });
   ok(twice.status === 409 && twice.body.error === "already_in_line" && /One place at a time/.test(twice.body.message), "the same email while in line is refused, in words");
   ok((await j("/api/party/team/line")).status === 401, "the team's line refuses anyone not signed in");
+  for (const file of ["line.csv", "songs.csv"]) { const r = await j(`/api/party/team/export/${file}`); ok(r.status === 401 && !/555|@example/.test(JSON.stringify(r.body)), `GET /api/party/team/export/${file} refuses anyone not signed in, with no detail`); }
   ok((await post("/api/party/team/code", { email: "stranger@example.com" })).body?.error === "not_team", "a team code goes only to an email on the list");
   const atStation = await j("/api/booth/sessions");
   ok(atStation.body?.on === true && "next" in atStation.body && Array.isArray(atStation.body.in_booth), "GET /api/booth/sessions answers the upload station's next recording while the party is on");

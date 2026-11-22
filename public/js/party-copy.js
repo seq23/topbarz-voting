@@ -26,6 +26,8 @@ export const HOLIDAY = {
   home: {
     lede: "Our first-ever Christmas party, Sunday, December 13, hosted at Dick & Jane's in partnership with Flow Music and Blitz & Bubbles. JUMP IN THE BOOTH and make a Christmas jingle. Below are the songs recorded: vote and comment on your favorites.",
     tracksTitle: "THE CHRISTMAS JINGLES:",
+    // Under each song's name: who made it (Scooter, 20 Nov 2026). {names} is "Carla & Ken".
+    byLine: "by {names}",
     emptyNote: "The jingles are on their way out of the booth. Come back to listen, vote, and send your favorite to your people.",
     // Before voting opens: the party night, no time of day (Scooter, 18 Nov 2026).
     notOpenRefusal: "Voting opens on the party night, Sunday, December 13 (exact time to be confirmed).",

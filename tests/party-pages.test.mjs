@@ -174,9 +174,15 @@ test("the team's page: every change asks first and can be undone; no swipe can c
   // The engineer confirms the names first (Scooter, 19 Nov 2026), and the upload carries what was confirmed.
   assert.match(boothJs, /if \(party\) xhr\.setRequestHeader\("x-party-take", confirmed\);/);
   assert.match(boothJs, /if \(party && !confirmed\) \{ askFirst\(file\); return; \}/, "nothing goes up before the engineer answers on the page");
-  assert.match(boothJs, /app\.asking = next \? \{ key: next\.key \} : \{ key: "none" \};/, "the key as it was when asked");
-  assert.match(boothJs, /else if \(body\.error === "take_changed"\) \{ failed\(COPY\.sessionGone\); loadGroups\(\); \}/);
-  assert.match(boothJs, /els\.walkupText\.textContent = next \? `\$\{COPY\.confirmGroup\.replace\("\{file\}", file\.name\)\.replace\("\{names\}", next\.names\)\} \$\{COPY\.confirmGroupNote\}` : COPY\.walkUpConfirm;/, "the names to confirm, or with nobody at the station the walk-up question, on the page");
+  assert.match(boothJs, /app\.asking = next \? \{ key: next\.key, sig: stationSig\(next\) \} : \{ key: "none", sig: "" \};/, "the key as it was when asked");
+  // A stale page is refused by the server and the file is HELD, never sent again by itself.
+  assert.match(boothJs, /else if \(body\.error === "take_changed"\) \{ app\.busy = false; hold\(file, null, COPY\.sessionGone\); loadGroups\(\); \}/);
+  // "Wait for the names" / "Not them" hold the file (Scooter, 20 Nov 2026), and a held file is only ever ASKED about again.
+  assert.match(boothJs, /if \(file\) hold\(file, refused, notThem \? COPY\.confirmGroupHeld : COPY\.walkUpHeld\);/);
+  assert.match(boothJs, /if \(askAboutHeld\(app\.held, next, \{ busy: app\.busy, asking: app\.state === "walkup" \}\)\) askFirst\(app\.held\.file, \{ again: true \}\);/);
+  assert.equal((boothJs.match(/upload\(file, \{ confirmed: key \}\)/g) ?? []).length, 1, "one place sends a confirmed upload: the Yes button");
+  assert.ok(!/upload\(app\.held/.test(boothJs), "a held file is never uploaded without the engineer's Yes");
+  assert.match(boothJs, /els\.walkupText\.textContent = next \? `\$\{lead\}\$\{COPY\.confirmGroup\.replace\("\{file\}", file\.name\)\.replace\("\{names\}", next\.names\)\} \$\{COPY\.confirmGroupNote\}` : COPY\.walkUpConfirm;/, "the names to confirm, or with nobody at the station the walk-up question, on the page");
   assert.match(boothJs, /els\.walkupGo\.addEventListener\("click", \(\) => \{ const file = app\.lastFile; const key = app\.asking\?\.key \?\? "none"; app\.asking = null; app\.lastFile = null; upload\(file, \{ confirmed: key \}\); \}\);/);
   assert.match(read("public/booth.html"), /<div id="tbz-walkup" class="walkup" role="alert" hidden>[\s\S]*id="tbz-walkup-pick"[\s\S]*id="tbz-walkup-go"/);
   for (const f of ["booth.js", "track.js", "team.js", "join.js", "app.js"]) assert.ok(!/window\.(confirm|alert|prompt)\(/.test(read(`public/js/${f}`)), `${f}: no browser pop-up`);

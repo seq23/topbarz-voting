@@ -832,3 +832,116 @@ test("the demo's host (Scooter, 19 Nov 2026: \"use my own access to take a song 
     await env.DB.prepare("DELETE FROM party_guests WHERE email = ?1").bind(host).run();
   }
 });
+
+test("names on the voting page (Scooter, 20 Nov 2026: \"Each song on the public voting page should show the people on it\"): first names only, in the order they joined it; never a last name, email or phone; off with the party", async () => {
+  const token = await teamToken();
+  await clearStation();
+  await signUps([["Nia Lyric", "nia.lyric@gmail.com"], ["Omar Flow", "omar.flow@gmail.com"]]);
+  await recording(["nia.lyric@gmail.com", "omar.flow@gmail.com"], token);
+  const up = await upload("Nia And Omar.mp3");
+  assert.equal(up.status, 200, JSON.stringify(up.body));
+  assert.equal((await B(up.body.code, "title", { email: "nia.lyric@gmail.com", title: "Snow Day Anthem" })).status, 200);
+  assert.equal((await B(up.body.code, "contest", { email: "omar.flow@gmail.com", enter: true, agree: true })).body.contest.entered, true);
+  const s = await stateNow();
+  const t = s.tracks.find((x) => x.label === "Snow Day Anthem");
+  assert.deepEqual(t.people, ["Nia", "Omar"], "the first names of everyone on it");
+  const raw = JSON.stringify(s);
+  for (const never of ["Lyric", "Flow", "nia.lyric@gmail.com", "omar.flow@gmail.com", "555"]) assert.ok(!raw.includes(never), `/api/state never carries ${never}`);
+  for (const x of s.tracks) assert.ok(Array.isArray(x.people) && x.people.every((n) => typeof n === "string" && !/\s|@/.test(n)), `${x.label}: a list of single first names`);
+  // The line on the card: "by Nia & Omar"; nothing when the song's own label already is its names.
+  const { byLine } = await import("../public/js/logic.js");
+  const { groupLabel: teamJoin } = await import("../public/js/party-rules.js");
+  assert.equal(byLine("{names}", { label: "x", people: ["A", "B", "C"] }), teamJoin(["A", "B", "C"]), "the same join as the team's");
+  assert.equal(byLine("by {names}", t), "by Nia & Omar");
+  assert.equal(byLine("by {names}", { label: "Nia & Omar", people: ["Nia", "Omar"] }), "", "never says the names twice");
+  assert.equal(byLine("by {names}", { label: "Old Track", people: [] }), "");
+  assert.equal(byLine("by {names}", { label: "Old Track" }), "", "party off: no people key, no line");
+  // Party off: the shape of a track is as before (no people key).
+  _resetStateMemo();
+  const off = (await call(state.onRequest, { ...env, HOLIDAY_EVENT: "off" }, { path: "/api/state" })).body;
+  assert.ok(off.tracks.length > 0 && off.tracks.every((x) => !("people" in x)), "party off: no names on the vote");
+  await B(up.body.code, "contest", { email: "nia.lyric@gmail.com", enter: false });
+});
+
+test("the team's downloads (Scooter, 20 Nov 2026: \"a CSV export on the team page\"): the line and the songs, team token only, never cached; a formula typed into a sign-up is text, a phone number is kept", async () => {
+  const token = await teamToken();
+  await clearStation();
+  for (const route of ["export/line.csv", "export/songs.csv"]) {
+    const anon = await get(`team/${route}`);
+    assert.equal(anon.status, 401, `${route} refuses without the team token`);
+    assert.ok(!/@|555/.test(anon.text), "and answers no detail");
+    const bad = await get(`team/${route}`, { token: "not-a-token" });
+    assert.equal(bad.status, 401, `${route} refuses a forged token`);
+  }
+  assert.equal((await guest("=HYPERLINK(\"http://x.test\") Evil", "csv.evil@gmail.com", { phone: "+1 901 555 0100", city: "-cmd", instagram: "csv_ig" })).status, 201);
+  await signUps([["Pia Quotes", "pia.quotes@gmail.com"]]);
+  const line = await get("team/export/line.csv", { token });
+  assert.equal(line.status, 200, line.text);
+  assert.match(line.headers.get("content-type"), /^text\/csv/);
+  assert.match(line.headers.get("content-disposition"), /^attachment; filename="topbarz-line-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}\.csv"$/);
+  assert.equal(line.headers.get("cache-control"), "no-store");
+  const rows = line.text.replace(/^﻿/, "").trim().split("\r\n");
+  assert.equal(rows[0], '"Name","Phone","Email","City","Instagram","First signed up (UTC)","Last signed up (UTC)","Times in line","Now","Flags"');
+  const total = (await env.DB.prepare("SELECT COUNT(*) AS n FROM party_guests").first()).n;
+  assert.equal(rows.length - 1, total, "one row for everyone who signed up");
+  const evil = rows.find((r) => r.includes("csv.evil@gmail.com"));
+  assert.ok(evil.startsWith(`"'=HYPERLINK(""http://x.test"") Evil","+19015550100","csv.evil@gmail.com","'-cmd","csv_ig",`), `a formula is text, the phone stays a phone: ${evil}`);
+  const pia0 = await env.DB.prepare("SELECT phone FROM party_guests WHERE email = 'pia.quotes@gmail.com'").first();
+  assert.ok(rows.some((r) => r.startsWith(`"Pia Quotes","${pia0.phone}","pia.quotes@gmail.com","Brooklyn","",`)), "name, phone (as kept), email, city, Instagram");
+  // The songs: code, title, who is on it, in the vote, likes and comments as the page counts them.
+  await recording(["pia.quotes@gmail.com"], token);
+  const up = await upload("Pia Solo.mp3");
+  assert.equal(up.status, 200, JSON.stringify(up.body));
+  await B(up.body.code, "title", { email: "pia.quotes@gmail.com", title: "Pia's Carol" });
+  await B(up.body.code, "contest", { email: "pia.quotes@gmail.com", enter: true, agree: true });
+  const slug = (await env.DB.prepare("SELECT t.slug FROM tracks t JOIN booth_tracks b ON b.vote_track_id = t.id WHERE b.code = ?1").bind(up.body.code).first()).slug;
+  const likes = await import("../functions/api/likes.js");
+  const iso = new Date().toISOString();
+  const mk = (email, verified) => env.DB.prepare("INSERT INTO voters (name, email, email_key, city, created_at, verified, unverified_reason) VALUES ('V', ?1, ?1, 'Bronx', ?2, ?3, ?4) RETURNING id").bind(email, iso, verified, verified ? null : "mail_budget").first();
+  const like = async (id) => call(likes.onRequest, env, { method: "POST", path: "/api/likes", body: { track: slug, liked: true }, token: await signVoterToken(env, id), ip: freshIp() });
+  for (const v of [await mk("csv.fan1@gmail.com", 1), await mk("csv.fan2@gmail.com", 1), await mk("csv.nocode@gmail.com", 0)]) assert.equal((await like(v.id)).status, 200);
+  const tid = (await env.DB.prepare("SELECT id FROM tracks WHERE slug = ?1").bind(slug).first()).id;
+  const fan = (await env.DB.prepare("SELECT id FROM voters WHERE email = 'csv.fan1@gmail.com'").first()).id;
+  await env.DB.prepare("INSERT INTO comments (voter_id, track_id, body, created_at, hidden) VALUES (?1, ?2, 'fire', ?3, 0), (?1, ?2, 'hidden one', ?3, 1)").bind(fan, tid, iso).run();
+  const page = (await stateNow()).tracks.find((t) => t.slug === slug);
+  assert.deepEqual([page.likes, page.comments], [2, 1], "the page: two counted likes (the one with no code is not), one visible comment");
+  const songs = await get("team/export/songs.csv", { token });
+  assert.equal(songs.status, 200, songs.text);
+  assert.match(songs.headers.get("content-disposition"), /filename="topbarz-songs-/);
+  const srows = songs.text.replace(/^﻿/, "").trim().split("\r\n");
+  assert.equal(srows[0], '"Code","Title","Who is on it","People","In the vote","Likes","Comments","Last entered or withdrawn","Uploaded (UTC)","File"');
+  const pia = srows.find((r) => r.startsWith(`"${up.body.code}",`));
+  assert.ok(pia.startsWith(`"${up.body.code}","Pia's Carol","Pia Quotes","1","yes","2","1",`), `the same counts as the page: ${pia}`);
+  assert.ok(pia.includes('"Pia Solo.mp3"'));
+  await B(up.body.code, "contest", { email: "pia.quotes@gmail.com", enter: false });
+  const out = (await get("team/export/songs.csv", { token })).text.split("\r\n").find((r) => r.startsWith(`"${up.body.code}",`));
+  assert.match(out, /^"\d{4}","Pia's Carol","Pia Quotes","1","no \(withdrawn\)","2","1","withdrawn by Pia at /, "withdrawn: no longer in the vote, its votes kept");
+});
+
+test("the held file (Scooter, 20 Nov 2026: \"the file waits until the right recording pops up, the engineer confirms the names, and only then it attaches\"): the page asks again only for a recording the engineer has not refused; only Yes uploads", async () => {
+  const { askAboutHeld, stationSig } = await import("../public/js/booth-rules.js");
+  const ava = { key: "41.2", names: "Ava & Ben" };
+  const file = { name: "Take.mp3" };
+  assert.equal(askAboutHeld(null, ava), false, "no file held: nothing to ask");
+  assert.equal(askAboutHeld({ file, refused: null }, null), false, "held, nobody at the station yet: it keeps waiting");
+  assert.equal(askAboutHeld({ file, refused: null }, ava), true, "a recording pops up: ask the engineer");
+  assert.equal(askAboutHeld({ file, refused: stationSig(ava) }, ava), false, "the same names the engineer said Not them to: never asked again");
+  assert.equal(askAboutHeld({ file, refused: stationSig(ava) }, { key: "41.3", names: "Ava, Ben & Cy" }), true, "someone joined: a different recording, ask again");
+  assert.equal(askAboutHeld({ file, refused: stationSig(ava) }, { key: "42.1", names: "Dee" }), true, "the next recording: ask");
+  assert.equal(askAboutHeld({ file, refused: null }, ava, { busy: true }), false, "never while an upload is going");
+  assert.equal(askAboutHeld({ file, refused: null }, ava, { asking: true }), false, "never twice at once");
+  assert.equal(stationSig(null), "");
+  // The server half: a file sent for a recording that is no longer the station's next is refused, never attached.
+  const token = await teamToken();
+  await clearStation();
+  await signUps([["Held One", "held.one@gmail.com"], ["Held Two", "held.two@gmail.com"]]);
+  await recording(["held.one@gmail.com"], token);
+  const shown = (await station()).next;
+  assert.equal((await post(`team/sessions/${await sessionOf("held.two@gmail.com")}/status`, { status: "booth", from: "waiting", song: "new" }, { token })).status, 200);
+  assert.equal((await move("held.two@gmail.com", "booth", "upload", token)).status, 200);
+  const res = await upload("Held.mp3", { "x-party-take": "999999.1" });
+  assert.equal(res.status, 409, "a take the station is not showing is refused");
+  assert.equal(res.body.error, "take_changed");
+  assert.equal((await station()).next.key, shown.key, "nothing was attached: the first recording is still waiting");
+  await clearStation();
+});

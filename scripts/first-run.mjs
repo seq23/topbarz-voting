@@ -135,22 +135,31 @@ const twice = await req("/api/party/join", { method: "POST", body: { ...guestB, 
 if (twice.status !== 409 || twice.json?.error !== "already_in_line") fail(`signing up again while in line answered ${twice.status} ${twice.text.slice(0, 120)}`);
 ok(`one place at a time, said out loud: "${twice.json.message}"`);
 
-// 3. A walk-up upload (only with nobody at the upload station: it would take their recording).
+// 3. A walk-up upload. The upload station belongs to the night: when a real recording is waiting
+// there or under way (a person's song, e.g. "miles" on 22 Nov 2026), this run never uploads on top
+// of it and never moves it. It proves the station refuses a stale page (which takes no file), and
+// leaves the walk-up and the team's recording steps for a free booth; the OK line says so.
 const bytes = new Uint8Array(2048).map((_, i) => (i < 3 ? [0x49, 0x44, 0x33][i] : i % 251));
 const uploadSong = (name, headers = {}) => req("/api/booth/tracks", { method: "POST", headers: { "x-file-name": encodeURIComponent(name), "content-type": "audio/mpeg", "content-length": String(bytes.byteLength), ...headers }, raw: bytes });
 const station0 = await req("/api/booth/sessions");
 if (station0.json?.on !== true) fail(`the upload station does not answer: ${station0.status} ${station0.text.slice(0, 120)}`);
-if (station0.json.next) fail(`a recording (${station0.json.next.names}) is already waiting at the upload station; upload it or move it on /team first`);
-if (station0.json.recording?.length) fail(`a recording is under way (${station0.json.recording.map((p) => p.first_name).join(", ")}): play this once the booth is free`);
+const busy = station0.json.next ? `a recording (${station0.json.next.names}) is waiting at the upload station`
+  : station0.json.recording?.length ? `a recording is under way (${station0.json.recording.map((p) => p.first_name).join(", ")})` : "";
 const stale = await uploadSong(`Test - Stale ${tag}.mp3`, { "x-party-take": "999999999" });
 if (stale.status !== 409 || stale.json?.error !== "take_changed") fail(`an upload for a recording the station no longer shows answered ${stale.status}`);
-const walk = await uploadSong(`Test - Walk up ${tag}.mp3`, { "x-party-take": "none" });
-if (walk.status !== 200 || !/^\d{4}$/.test(walk.json?.code ?? "")) fail(`the booth upload: ${walk.status} ${walk.text.slice(0, 120)}`);
-const heard = await req(`/api/booth/tracks/${walk.json.code}/enter`, { method: "POST", body: { email: guestA.email } });
-if (heard.status !== 200 || !heard.json?.download_url || heard.json?.contest?.you?.performer !== false) fail(`entering a song's code: ${heard.status} ${heard.text.slice(0, 160)}`);
-const sneak = await req(`/api/booth/tracks/${walk.json.code}/contest`, { method: "POST", body: { email: guestA.email, enter: true, agree: true } });
-if (sneak.status < 400) fail(`someone who only typed the code could enter the song: ${sneak.status} ${sneak.text.slice(0, 120)}`);
-ok(`a stale upload page is refused (take_changed); the walk-up code ${walk.json.code} hears and downloads, and never makes anyone a performer`);
+if (busy) {
+  const after = (await req("/api/booth/sessions")).json;
+  if (JSON.stringify(after?.next ?? null) !== JSON.stringify(station0.json.next ?? null)) fail("the refused upload changed what the upload station shows");
+  ok(`a stale upload page is refused (take_changed) and the station is untouched; ${busy}, so the walk-up upload waits for a free booth`);
+} else {
+  const walk = await uploadSong(`Test - Walk up ${tag}.mp3`, { "x-party-take": "none" });
+  if (walk.status !== 200 || !/^\d{4}$/.test(walk.json?.code ?? "")) fail(`the booth upload: ${walk.status} ${walk.text.slice(0, 120)}`);
+  const heard = await req(`/api/booth/tracks/${walk.json.code}/enter`, { method: "POST", body: { email: guestA.email } });
+  if (heard.status !== 200 || !heard.json?.download_url || heard.json?.contest?.you?.performer !== false) fail(`entering a song's code: ${heard.status} ${heard.text.slice(0, 160)}`);
+  const sneak = await req(`/api/booth/tracks/${walk.json.code}/contest`, { method: "POST", body: { email: guestA.email, enter: true, agree: true } });
+  if (sneak.status < 400) fail(`someone who only typed the code could enter the song: ${sneak.status} ${sneak.text.slice(0, 120)}`);
+  ok(`a stale upload page is refused (take_changed); the walk-up code ${walk.json.code} hears and downloads, and never makes anyone a performer`);
+}
 
 // 4. The team's line: closed to anyone not signed in; with a team token, the whole song flow.
 const line = await req("/api/party/team/line");
@@ -162,7 +171,7 @@ for (const file of ["line.csv", "songs.csv"]) {
 }
 ok("the team's two downloads (line.csv, songs.csv) refuse anyone not signed in, with no detail");
 const token = process.env.FIRST_RUN_TEAM_TOKEN;
-if (token) {
+if (token && !busy) {
   const auth = { authorization: `Bearer ${token}` };
   const l = await req("/api/party/team/line", { headers: auth });
   const find = (sessions, g) => (sessions ?? []).find((x) => x.guests?.some((y) => y.email === g.email));
@@ -247,4 +256,5 @@ try {
 } catch (err) {
   cleaned = `; its test rows are still there (${String(err.message).split("\n")[0].slice(0, 120)}): npm run clean-test-data -- --env preview --keep <demo code>`;
 }
-console.log(`FIRST_RUN OK ${base}: ${step} steps${cleaned}${token ? "" : " (the team's emailed-code sign-in is a person's step: set FIRST_RUN_TEAM_TOKEN to cover the team's line, the recording, the upload station and the shared entry too)"}`);
+const held = busy ? ` (${busy} on this preview, so the walk-up upload${token ? " and the team's recording" : ""} waited for a free booth; nothing of it was touched)` : "";
+console.log(`FIRST_RUN OK ${base}: ${step} steps${cleaned}${held}${token ? "" : " (the team's emailed-code sign-in is a person's step: set FIRST_RUN_TEAM_TOKEN to cover the team's line, the recording, the upload station and the shared entry too)"}`);

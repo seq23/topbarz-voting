@@ -11,7 +11,7 @@ import * as me from "../functions/api/me.js";
 import * as state from "../functions/api/state.js";
 import * as voters from "../functions/api/voters.js";
 import * as verify from "../functions/api/voters/verify.js";
-import { LIMITS, VERIFICATION, sendBudget } from "../functions/_lib/config.js";
+import { LIMITS, VERIFICATION, sendBudget, voterSendBudget } from "../functions/_lib/config.js";
 import { signVoterToken, verifyVoterToken } from "../functions/_lib/token.js";
 import { codeEmail, codeHmac, newCode } from "../functions/_lib/verify.js";
 import { ROOT, SECRET, addTrack, call, freshIp, makeEnv } from "./helpers.mjs";
@@ -39,7 +39,7 @@ const sendsCounted = async () => (await env.DB.prepare("SELECT COUNT(*) AS n FRO
 async function spendBudget(leave = 0) {
   await env.DB.prepare("INSERT OR IGNORE INTO voters (name, email, email_key, city, created_at) VALUES ('Filler', 'filler@example.com', 'filler@example.com', 'X', '2026-10-01T00:00:00.000Z')").run();
   const id = (await row("filler@example.com")).id;
-  for (let i = await sendsCounted(); i < sendBudget(env) - leave; i++) await env.DB.prepare("INSERT INTO email_sends (voter_id, sent_at) VALUES (?1, ?2)").bind(id, nowS() - 3 * 3600).run();
+  for (let i = await sendsCounted(); i < voterSendBudget(env) - leave; i++) await env.DB.prepare("INSERT INTO email_sends (voter_id, sent_at) VALUES (?1, ?2)").bind(id, nowS() - 3 * 3600).run();
 }
 // A voter who has entered a code: { token, code }.
 async function verified(mail, email, extra = {}) {
@@ -57,7 +57,7 @@ test("the numbers are the owner's: 50 emails a day, 10 minutes, 5 tries, 60 s, 3
   assert.equal(VERIFICATION.dailySendBudget, 50);
   // Production and staging count in separate databases: their shares add up to the 50, never more.
   const production = sendBudget({ APP_ENV: "production" }), preview = sendBudget({ APP_ENV: "preview" });
-  assert.deepEqual([production, preview], [45, 5]);
+  assert.deepEqual([production, preview], [35, 15]);
   assert.equal(production + preview, VERIFICATION.dailySendBudget);
   assert.equal(sendBudget({}), production, "anything that is not preview gets production's share, never more");
   assert.equal(sendBudget(env), production);
@@ -118,7 +118,8 @@ test("happy path: the gate emails a code and gives no token; the code gives the 
 
   // Only an HMAC of the code is stored.
   const stored = await env.DB.prepare("SELECT * FROM email_codes WHERE voter_id = ?1").bind(before.id).first();
-  assert.deepEqual(Object.keys(stored).sort(), ["attempts", "code_hmac", "expires_at", "voter_id"]);
+  assert.deepEqual(Object.keys(stored).sort(), ["attempts", "code_hmac", "expires_at", "prev_code_hmac", "prev_expires_at", "voter_id"]);
+  assert.deepEqual([stored.prev_code_hmac, stored.prev_expires_at], [null, null], "a first code has no earlier one");
   assert.equal(stored.code_hmac, await codeHmac(env, before.id, sent.code));
   assert.match(stored.code_hmac, /^[0-9a-f]{64}$/);
   assert.notEqual(stored.code_hmac, await codeHmac({ VOTER_TOKEN_SECRET: "another-secret" }, before.id, sent.code), "keyed with VOTER_TOKEN_SECRET");
@@ -222,6 +223,32 @@ test("an expired code is refused, and an email that was never sent a code gets t
   assert.equal((await check("expired@example.com", mail.sent[1].code)).status, 200);
 });
 
+test("a resend never kills the first email's code: either live code signs in once, and both are gone after", async (t) => {
+  const mail = stubMail(t);
+  await gate("slowmail@example.com");
+  await ageSends("slowmail@example.com", 61);
+  assert.equal((await gate("slowmail@example.com")).body.verification, "code_sent");
+  assert.equal(mail.sent.length, 2);
+  const [first, second] = [mail.sent[0].code, mail.sent[1].code];
+  if (first === second) return; // one in a million: the two codes are the same number
+  const wrong = await check("slowmail@example.com", wrongCode(first) === second ? wrongCode(second) : wrongCode(first));
+  assert.equal(wrong.body.error, "wrong_code", "a code that is neither is still wrong");
+  const ok = await check("slowmail@example.com", first);
+  assert.equal(ok.status, 200, "the FIRST email's code still signs in after a resend");
+  assert.ok(TOKEN_RE.test(ok.text));
+  const again = await check("slowmail@example.com", second);
+  assert.equal(again.body.error, "code_expired", "signing in uses both codes up");
+  // The earlier code dies at its own end time.
+  await ageSends("slowmail@example.com", 3600);
+  await gate("slowmail@example.com");
+  await ageSends("slowmail@example.com", 61);
+  await gate("slowmail@example.com");
+  const id = (await row("slowmail@example.com")).id;
+  await env.DB.prepare("UPDATE email_codes SET prev_expires_at = ?2 WHERE voter_id = ?1").bind(id, nowS() - 1).run();
+  const stale = await check("slowmail@example.com", mail.sent[2].code);
+  assert.equal(stale.status, mail.sent[2].code === mail.sent[3].code ? 200 : 400, "an earlier code past its 10 minutes is refused");
+});
+
 test("resend cooldown: asking again inside 60 s sends nothing and shows the code step again", async (t) => {
   const mail = stubMail(t);
   await gate("cooldown@example.com");
@@ -240,10 +267,12 @@ test("resend cooldown: asking again inside 60 s sends nothing and shows the code
   const resend = await gate("cooldown@example.com");
   assert.deepEqual([resend.body.verification, resend.body.sent, resend.body.resend_in_seconds], ["code_sent", true, 60]);
   assert.equal(mail.sent.length, 2);
+  const kept = await env.DB.prepare("SELECT prev_code_hmac FROM email_codes WHERE voter_id = (SELECT id FROM voters WHERE email_key = 'cooldown@example.com')").first();
+  assert.match(kept.prev_code_hmac, /^[0-9a-f]{64}$/, "the earlier code is kept as an HMAC only");
+  assert.equal((await check("cooldown@example.com", mail.sent[0].code)).status, 200, "a resend keeps the earlier code live (the slow first email still works)");
   if (mail.sent[0].code !== mail.sent[1].code) {
-    assert.equal((await check("cooldown@example.com", mail.sent[0].code)).body.error, "wrong_code", "a resend replaces the earlier code");
+    assert.equal((await check("cooldown@example.com", mail.sent[1].code)).body.error, "code_expired", "one sign-in uses both codes up");
   }
-  assert.equal((await check("cooldown@example.com", mail.sent[1].code)).status, 200);
 });
 
 test("two requests racing for the same email send one code", async (t) => {
@@ -274,7 +303,9 @@ test("at most 3 codes per email per hour, however the address is written", async
 
 test("the 50-a-day budget: the last email of the share goes out, then a NEW email is let in at once as skipped", async (t) => {
   const mail = stubMail(t);
-  const share = sendBudget(env);
+  const share = voterSendBudget(env);
+  assert.equal(share, sendBudget(env) - VERIFICATION.teamReserve, "the voters stop short of the share by the team's reserve");
+  assert.ok(VERIFICATION.teamReserve >= 3, "the team keeps enough for a partner signing in on a few devices");
   await spendBudget(1);
   assert.equal(await sendsCounted(), share - 1);
   assert.equal((await gate("budget.last@example.com")).body.verification, "code_sent");
@@ -305,13 +336,13 @@ test("the 50-a-day budget: the last email of the share goes out, then a NEW emai
   assert.equal((await gate("budget.nextday@example.com")).body.verification, "code_sent");
   assert.equal(mail.attempts.length, 2);
 
-  // Staging has its own, small share: 5 emails, then skipped.
+  // Staging has its own, smaller share: 15 emails, of which the voters may send 10, then skipped.
   await env.DB.prepare("DELETE FROM email_sends").run();
   const staging = { ...env, APP_ENV: "preview" };
   const answers = [];
-  for (let i = 0; i < 7; i++) answers.push((await gate(`staging.share${i}@example.com`, {}, staging)).body.verification);
-  assert.deepEqual(answers, ["code_sent", "code_sent", "code_sent", "code_sent", "code_sent", "skipped", "skipped"]);
-  assert.equal(mail.attempts.length, 2 + VERIFICATION.previewSendShare);
+  for (let i = 0; i < 17; i++) answers.push((await gate(`staging.share${i}@example.com`, {}, staging)).body.verification);
+  assert.deepEqual(answers, [...Array(10).fill("code_sent"), ...Array(7).fill("skipped")]);
+  assert.equal(mail.attempts.length, 2 + VERIFICATION.previewSendShare - VERIFICATION.teamReserve);
 });
 
 test("mail service down (429, 5xx, network error): a NEW email is let in at once as skipped", async (t) => {

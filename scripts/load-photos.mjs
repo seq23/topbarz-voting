@@ -4,7 +4,8 @@
 // folder exactly. No photos = an empty manifest (the page hides the slider).
 //   node scripts/load-photos.mjs --env preview        (default folder: Drive "Test photos")
 //   node scripts/load-photos.mjs --env production     (default folder: Drive "Gallery photos")
-//   flags: --folder <dir>  --dry-run
+//   flags: --folder <dir>  --dry-run  --event <name> (alt text "Top Barz at <name>"; default CultureCon.
+//   While the holiday party is on, a photo whose alt names CultureCon is not served.)
 // Refuses any "Test …" folder or file into production.
 import fs from "node:fs";
 import path from "node:path";
@@ -18,7 +19,7 @@ const IMAGES = new Set([".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff"]);
 const SIZES = { full: { edge: 1600, quality: 78 }, thumb: { edge: 640, quality: 72 } };
 
 stopOnError();
-const args = parseArgs(process.argv.slice(2), { env: "value", folder: "value", "dry-run": "flag" });
+const args = parseArgs(process.argv.slice(2), { env: "value", folder: "value", event: "value", "dry-run": "flag" });
 if (!args.env) { console.error("STOPPED: say where to load: --env local | preview | production"); process.exit(2); }
 const target = targets(args.env);
 const folder = fs.realpathSync(path.resolve(args.folder ?? path.join(DRIVE_DIR, args.env === "production" ? "Gallery photos" : "Test photos")));
@@ -34,7 +35,7 @@ fs.mkdirSync(work, { recursive: true });
 const photos = await pool(files, args.env === "local" ? 1 : 4, async (file, i) => {
   const src = path.join(folder, file);
   const sha = (await sha256File(src)).slice(0, 12);
-  const entry = { alt: `Top Barz at CultureCon, photo ${i + 1}` };
+  const entry = { alt: `Top Barz at ${String(args.event ?? "CultureCon").trim() || "CultureCon"}, photo ${i + 1}` };
   for (const [kind, { edge, quality }] of Object.entries(SIZES)) {
     const key = `photos/${sha}-${edge}.jpg`;
     const out = path.join(work, path.basename(key));

@@ -6,6 +6,9 @@ import { formatClock } from "./logic.js";
 
 const SLOW_AFTER_MS = 6000;
 
+// While the holiday party is on (festive.js marks the page), no CultureCon words on the lock screen.
+const holiday = () => typeof document !== "undefined" && document.documentElement.classList.contains("is-holiday");
+
 export function createPlayer(onChange) {
   const audio = new Audio();
   audio.preload = "none";
@@ -77,7 +80,7 @@ export function createPlayer(onChange) {
     try {
       if (typeof MediaMetadata === "function" && navigator.mediaSession) {
         const artwork = Array.isArray(track.artwork) && track.artwork.length ? { artwork: track.artwork } : {};
-        navigator.mediaSession.metadata = new MediaMetadata({ title: track.title || "CultureCon track", artist: track.artist || "Top Barz at CultureCon", ...artwork });
+        navigator.mediaSession.metadata = new MediaMetadata({ title: track.title || (holiday() ? "Christmas jingle" : "CultureCon track"), artist: track.artist || (holiday() ? "Top Barz" : "Top Barz at CultureCon"), ...artwork });
       }
     } catch {}
     set("loading");

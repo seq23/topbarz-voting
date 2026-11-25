@@ -15,6 +15,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { computeTally } from "../functions/_lib/tally.js";
+import { PARTY_TRACK_PREFIX } from "../functions/_lib/party.js";
+import { PARTY_VOTING_ENDS_AT } from "../functions/_lib/config.js";
 import { ROOT, d1, parseArgs, stopOnError, targets } from "./lib/cf.mjs";
 import { toCsv } from "./lib/csv.mjs";
 
@@ -46,15 +48,26 @@ export function entryMembersCsv(rows) {
   return toCsv(["entry", "first_name", "last_name", "email"], rows.map((r) => [r.entry_id, r.first_name, r.last_name, r.email]));
 }
 export const ENTRIES_SQL = "SELECT e.id, e.first_name, e.last_name, e.city, e.email, e.phone, e.instagram, e.track_title, e.in_group, e.rules_agreed_at, e.created_at, u.file_name FROM entries e JOIN entry_uploads u ON u.id = e.upload_id ORDER BY e.id";
+// A party like counts: its voter entered a code, before the end, and the like itself is before it.
+export function partyCounts(e, endsAt = PARTY_VOTING_ENDS_AT) {
+  const end = Date.parse(endsAt ?? "");
+  if (!e.verified) return false;
+  if (!Number.isFinite(end)) return true;
+  return Date.parse(e.created_at) < end && (!e.verified_at || Date.parse(e.verified_at) < end);
+}
+
 export const ENTRY_MEMBERS_SQL = "SELECT entry_id, first_name, last_name, email FROM entry_members ORDER BY entry_id, id";
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   stopOnError();
-  const args = parseArgs(process.argv.slice(2), { env: "value" });
+  const args = parseArgs(process.argv.slice(2), { env: "value", party: "flag" });
   if (!args.env) { console.error("STOPPED: say which data: --env local | preview | production"); process.exit(2); }
   const target = targets(args.env);
-  const tracks = await d1(target, "SELECT id, slug, label FROM tracks WHERE active = 1");
-  const events = await d1(target, "SELECT e.id, e.track_id, e.action, e.created_at, v.verified FROM like_events e JOIN voters v ON v.id = e.voter_id WHERE v.flagged = 0 ORDER BY e.id");
+  // --party: the holiday party's tally, its own songs only (the vote the page shows while the party is on).
+  const tracks = (await d1(target, "SELECT id, slug, label, source_name FROM tracks WHERE active = 1")).filter((t) => !args.party || t.source_name.startsWith(PARTY_TRACK_PREFIX));
+  // The party's votes count only after the 6-digit email code (Scooter, 18 Nov 2026), entered before
+  // voting closed (19 Nov 2026: "make sure votes after the cutoff don't count"), as on the page.
+  const events = (await d1(target, "SELECT e.id, e.track_id, e.action, e.created_at, v.verified, v.verified_at FROM like_events e JOIN voters v ON v.id = e.voter_id WHERE v.flagged = 0 ORDER BY e.id")).filter((e) => !args.party || partyCounts(e));
   const commentRows = await d1(target, "SELECT track_id, COUNT(*) AS n FROM comments WHERE hidden = 0 GROUP BY track_id");
   const voters = await d1(target, "SELECT name, email, city, marketing_opt_in, created_at, flagged, flag_reason, verified, unverified_reason FROM voters ORDER BY created_at, id");
   const entries = await d1(target, ENTRIES_SQL);

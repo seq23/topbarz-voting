@@ -41,4 +41,38 @@ export const COPY = {
   voteAll: "Everyone's in for the vote",
   voteOnlyYou: "Only you so far: the others enter the code with their own email",
   voteFailed: "That did not save. Try again.",
+  // The holiday contest (17 Nov 2026, and Scooter's notes of 18 and 19 Nov), shown only while the
+  // party is on. Anyone with the code and their email hears, downloads and sees who has access;
+  // everyone on the song has the artwork, the title, the entry and Share.
+  // The three buttons (Scooter, 19 Nov 2026: "small and square, not ovals. Labels: Download Song,
+  // Share Song, and View Contest"). View Contest opens the voting page: every song entered that night.
+  downloadSong: "Download Song",
+  shareSong: "Share Song",
+  viewContest: "View Contest",
+  listenOnly: "You can hear and download this song.",
+  accessOne: "{names} has access to this song.",
+  accessMany: "{names} have access to this song.",
+  // Uploaded with nobody on it yet (the team puts its people on it from the team page).
+  accessNobody: "Nobody is on this song yet. If you recorded it, ask the Top Barz team to put you on it, then enter this code again.",
+  youreOn: "You're on this song. Everyone on it can change the artwork, the title and the contest entry.",
+  contestTitle: "Enter the contest",
+  contestHelp: "This is for the whole song: anyone on it can enter it or withdraw it, for everyone on it.",
+  contestBox: "Enter the contest. I agree to the",
+  contestRules: "official rules",
+  titleLabel: "Song title (its name in the vote)",
+  titleSave: "Save title",
+  titleSaved: "Title saved",
+  contestEntered: "Entered by {who}: it's in the vote.",
+  contestEnteredAt: "Entered by {who} at {time}: it's in the vote.",
+  contestWithdrawn: "Withdrawn by {who} at {time}. Anyone on the song can enter it again, and its votes are kept.",
+  contestNotYet: "Not entered yet.",
+  contestSomeone: "someone on the song",
+  // A song that cannot go in, said neutrally (Scooter, 18 Nov 2026: "No policy framing, and nothing
+  // about who can or cannot enter once the real rules are set").
+  testEntry: "This song was recorded as a test entry for this preview, so it is not eligible for the vote.",
+  notEligible: "This song is not eligible for the vote.",
+  contestClosed: "Voting has closed, so nothing changes now.",
+  contestSignUp: "Sign up at the QR code first, with the same email you used here, then tick the box.",
+  contestFailed: "That did not save. Try again.",
+  contestPulled: "The team took this song out of the vote.",
 };

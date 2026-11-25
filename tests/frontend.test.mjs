@@ -244,7 +244,7 @@ test("order: the most-liked track is shown first, ties keep the server's order, 
   // The source of truth for the count is unchanged: the server still orders by sort, label, id and
   // counts likes from like_events as before; the page sorts a copy of what it is sent.
   const stateSql = fs.readFileSync(path.join(ROOT, "functions/_lib/state.js"), "utf8");
-  assert.match(stateSql, /FROM tracks t WHERE t\.active = 1 ORDER BY t\.sort, t\.label, t\.id`/, "the API's own order is untouched");
+  assert.match(stateSql, /FROM tracks t WHERE t\.active = 1\$\{partyTrackClause\(env\)\} ORDER BY t\.sort, t\.label, t\.id`/, "the API's own order is untouched (the party filter only narrows which tracks)");
   assert.ok(!/likes/i.test(stateSql.split("ORDER BY")[1].split("`")[0]), "the API never orders by likes: the client does, as display only");
   const app = fs.readFileSync(path.join(PUBLIC, "js/app.js"), "utf8");
   assert.match(app, /const wanted = displayOrder\(tracks\);/, "renderTracks draws the cards in display order");
@@ -325,7 +325,9 @@ test("gate: the browser remembers a token and a first name, never the email", as
   // The contest entry page (9 Oct 2026) takes an email too: its three files are the other ones, and
   // tests/entry.test.mjs pins that it keeps nothing on the device. The engineer's page, the listen
   // page and their copy stay without one.
-  for (const file of JS.filter((f) => !/^js\/(gate|logic|api|track|track-copy|booth-rules|entry|entry-copy|entry-rules)\.js$/.test(f))) assert.ok(!/email/i.test(read(file)), `${file} has no business with emails`);
+  // The holiday party (17 Nov 2026): the sign-up form (/join) and the team's page (/team: its sign-in,
+  // and the details a guest filled in) take an email too; tests/party-pages.test.mjs pins what each keeps.
+  for (const file of JS.filter((f) => !/^js\/(gate|logic|api|track|track-copy|booth-rules|entry|entry-copy|entry-rules|join|join-copy|party-rules|team|team-copy)\.js$/.test(f))) assert.ok(!/email/i.test(read(file)), `${file} has no business with emails`);
   assert.ok(/EMAIL_MENTIONS = \{\n    "track\.js":/.test(fs.readFileSync(path.join(ROOT, "tests/booth.test.mjs"), "utf8")), "the booth's test enumerates the mentions");
   assert.ok(!/localStorage|document\.cookie|sessionStorage/.test(read("js/gate.js")), "the gate stores nothing itself");
 });
@@ -935,7 +937,15 @@ test("closed: nothing on the page still promises a future end, and a like that a
   assert.equal(rulesEndLine(true, ends), `Voting ended ${ends}.`);
   assert.ok(read("index.html").includes(`<li id="tbz-rule-ends">${rulesEndLine(false, ends)}</li>`), "the rules line as shipped is the open one, from the same function");
   const app = read("js/app.js");
-  assert.match(app, /els\.ruleEnds\.textContent = rulesEndLine\(app\.closed, formatEndsLine\(app\.endMs\)\)/);
+  assert.match(app, /els\.ruleEnds\.textContent = rulesEndLine\(app\.closed, endsWords\(\)\)/);
+  // The line is the server's end time (in Eastern while the holiday party is on). With no end set
+  // (/api/state answers voting_ends_at null) there is no end line, no countdown and no end in the rules.
+  assert.match(app, /const endsWords = \(\) => formatEndsLine\(app\.endMs, app\.holiday \? HOLIDAY\.dates\.zone : undefined\);/);
+  assert.equal(formatEndsLine(Date.parse("2026-11-28T04:59:00Z"), "America/New_York"), "Friday, November 27 at 11:59 PM EST");
+  assert.equal(formatEndsLine(Date.parse("2026-10-12T06:59:00Z")), "Sunday, October 11 at 11:59 PM PDT", "CultureCon's line is unchanged");
+  assert.match(app, /app\.noEnd = state\.voting_ends_at === null;/);
+  assert.match(/function renderNoEnd\(\) \{[\s\S]*?\n\}/.exec(app)[0], /els\.ends\.closest\("\.window"\)\.hidden = app\.noEnd;\s*els\.ruleEnds\.hidden = app\.noEnd;\s*els\.countdownRow\.hidden = app\.noEnd \|\| app\.closed;/);
+  assert.match(/function setClosed\(closed\) \{[\s\S]*?\n\}/.exec(app)[0], /els\.countdownRow\.hidden = closed \|\| app\.noEnd;/, "closing never brings back a countdown with no end");
   assert.match(/function setClosed\(closed\) \{[\s\S]*?\n\}/.exec(app)[0], /renderRuleEnds\(\);/, "rewritten the moment the window closes or reopens");
   assert.match(app, /if \(app\.closed\) \{ setStatus\("late"\); return \{ ok: false \}; \}/, "the gate finished after the close: the page says the action was not counted");
   assert.match(app, /late: "Voting closed before that went through, so it was not counted\."/);
@@ -1007,7 +1017,7 @@ test("Back: with a popup open, the phone's Back button closes the popup instead 
 });
 
 test("phones: the lock screen names the track, and Android and iPhone each get their own text link", () => {
-  assert.match(read("js/player.js"), /const artwork = Array\.isArray\(track\.artwork\) && track\.artwork\.length \? \{ artwork: track\.artwork \} : \{\};\s*navigator\.mediaSession\.metadata = new MediaMetadata\(\{ title: track\.title \|\| "CultureCon track", artist: track\.artist \|\| "Top Barz at CultureCon", \.\.\.artwork \}\)/, "the title, the artist, and artwork only when the track carries some (a booth track with a picture; since 4 Oct 2026)");
+  assert.match(read("js/player.js"), /const artwork = Array\.isArray\(track\.artwork\) && track\.artwork\.length \? \{ artwork: track\.artwork \} : \{\};\s*navigator\.mediaSession\.metadata = new MediaMetadata\(\{ title: track\.title \|\| \(holiday\(\) \? "Christmas jingle" : "CultureCon track"\), artist: track\.artist \|\| \(holiday\(\) \? "Top Barz" : "Top Barz at CultureCon"\), \.\.\.artwork \}\)/, "the title, the artist, and artwork only when the track carries some (a booth track with a picture; since 4 Oct 2026); no CultureCon words while the holiday party is on");
   assert.ok(!/artwork/.test(read("js/app.js")) && !/artwork/.test(read("js/select.js")), "the voting page and the select page pass no artwork");
   assert.match(read("js/app.js"), /hint: card\.audio\.duration, title: card\.track\.label \}\)/);
   assert.ok(!/\bartist\b/.test(read("js/app.js")), "the voting page names no artist of its own, so its tracks still say Top Barz at CultureCon");
@@ -1070,7 +1080,7 @@ test("copy: Top Barz, JUMP IN THE BOOTH, 11:59 PM PDT, for them and their friend
   assert.ok(dated.length >= 4, "the end time is on the page, in the rules, and in the link preview");
   for (const d of dated) assert.equal(d, ends);
   assert.equal([...index.matchAll(/11:59/g)].length, dated.length, "every 11:59 on the page is the full line with PM PDT");
-  assert.match(read("js/app.js"), /els\.ends\.textContent = formatEndsLine\(app\.endMs\)/, "and the live page rewrites it from the server's end time");
+  assert.match(read("js/app.js"), /els\.ends\.textContent = endsWords\(\)/, "and the live page rewrites it from the server's end time (the party's day while it is on)");
 
   assert.match(read("js/logic.js"), /`\$\{label\} wants you to vote on their track from the Top Barz experience \$\{link\}`/);
 });
@@ -1092,27 +1102,44 @@ test("link preview: Open Graph tags and a 1200x630 image", async () => {
 // ── Wiring: nothing the page needs is missing, nothing inline, nothing heavy ─────────────────
 // Each page that runs a script, and the one script it runs. Every other script is reached from
 // one of these by import, and belongs to the page (or pages) that reach it.
-const PAGE_SCRIPTS = { "index.html": "app.js", "select.html": "select.js", "booth.html": "booth.js", "track.html": "track.js", "listen.html": "listen.js", "entry.html": "entry.js" };
+const PAGE_SCRIPTS = { "index.html": "app.js", "select.html": "select.js", "booth.html": "booth.js", "track.html": "track.js", "listen.html": "listen.js", "entry.html": "entry.js", "join.html": "join.js", "team.html": "team.js" };
 // What each pair of pages may have in common. The vote's page shares its helpers and player with
 // the select page, the rapper's page and the listen page (the same four files for each); the
 // engineer's page takes only the DOM helpers; the three booth pages share the booth's rules.
 const SHARED = {
   "app.js+select.js": ["api.js", "dom.js", "logic.js", "player.js"],
-  "app.js+track.js": ["api.js", "dom.js", "logic.js", "player.js"],
-  "app.js+listen.js": ["api.js", "dom.js", "logic.js", "player.js"],
+  // The holiday look (17 Nov 2026): the guest pages (the vote, /track, /listen, /join) and /team
+  // share festive.js and its words; the select page, the booth and the entry page stay as they were.
+  "app.js+track.js": ["api.js", "dom.js", "festive.js", "logic.js", "party-copy.js", "player.js"],
+  "app.js+listen.js": ["api.js", "dom.js", "festive.js", "logic.js", "party-copy.js", "player.js"],
   "app.js+booth.js": ["dom.js"],
   "booth.js+select.js": ["dom.js"],
   "select.js+track.js": ["api.js", "dom.js", "logic.js", "player.js"],
   "listen.js+select.js": ["api.js", "dom.js", "logic.js", "player.js"],
   "booth.js+track.js": ["booth-rules.js", "dom.js"],
   "booth.js+listen.js": ["booth-rules.js", "dom.js"],
-  "listen.js+track.js": ["api.js", "booth-rules.js", "dom.js", "logic.js", "player.js"],
+  "listen.js+track.js": ["api.js", "booth-rules.js", "dom.js", "festive.js", "logic.js", "party-copy.js", "player.js"],
   // The contest entry's page (9 Oct 2026) takes the DOM helpers and the booth's file and email rules.
   "app.js+entry.js": ["dom.js"],
   "entry.js+select.js": ["dom.js"],
   "booth.js+entry.js": ["booth-rules.js", "dom.js"],
   "entry.js+track.js": ["booth-rules.js", "dom.js"],
   "entry.js+listen.js": ["booth-rules.js", "dom.js"],
+  // The holiday party's two pages (17 Nov 2026): /join and /team take the helpers, the festive look
+  // and the party's rules; /track takes the party's rules for its contest box.
+  "app.js+join.js": ["api.js", "dom.js", "festive.js", "logic.js", "party-copy.js"],
+  "app.js+team.js": ["api.js", "dom.js", "festive.js", "logic.js", "party-copy.js"],
+  "join.js+select.js": ["api.js", "dom.js", "logic.js"],
+  "select.js+team.js": ["api.js", "dom.js", "logic.js"],
+  "booth.js+join.js": ["dom.js"],
+  "booth.js+team.js": ["dom.js"],
+  "join.js+track.js": ["api.js", "dom.js", "festive.js", "logic.js", "party-copy.js", "party-rules.js"],
+  "team.js+track.js": ["api.js", "dom.js", "festive.js", "logic.js", "party-copy.js", "party-rules.js"],
+  "join.js+listen.js": ["api.js", "dom.js", "festive.js", "logic.js", "party-copy.js"],
+  "listen.js+team.js": ["api.js", "dom.js", "festive.js", "logic.js", "party-copy.js"],
+  "entry.js+join.js": ["dom.js"],
+  "entry.js+team.js": ["dom.js"],
+  "join.js+team.js": ["api.js", "dom.js", "festive.js", "logic.js", "party-copy.js", "party-rules.js"],
 };
 // The scripts of the two vote-side pages (the same eleven files as before the booth existed),
 // and the scripts that belong only to the booth's three pages (/booth, /track, /listen).
@@ -1120,6 +1147,9 @@ const VOTE_SCRIPTS = ["api.js", "app.js", "comments.js", "dom.js", "gallery.js",
 const BOOTH_ONLY_SCRIPTS = ["booth-copy.js", "booth-rules.js", "booth.js", "listen-copy.js", "listen.js", "track-copy.js", "track.js"];
 // … and the three scripts that belong only to the contest entry page (/entry).
 const ENTRY_SCRIPTS = ["entry-copy.js", "entry-rules.js", "entry.js"];
+// … and the scripts of the holiday party (17 Nov 2026): the festive look and its words, the
+// party's rules, and the /join and /team pages.
+const PARTY_SCRIPTS = ["festive.js", "join-copy.js", "join.js", "party-copy.js", "party-rules.js", "team-copy.js", "team.js"];
 function scriptsOf(entry) {
   const seen = new Set();
   const walk = (file) => {
@@ -1168,6 +1198,11 @@ test("wiring: every file a page names exists; every element a page's scripts loo
   assert.ok(lookups["track.html"] >= 29, `checked ${lookups["track.html"]} element lookups in track.html`);
   assert.ok(lookups["listen.html"] >= 9, `checked ${lookups["listen.html"]} element lookups in listen.html`);
   assert.ok(lookups["entry.html"] >= 40, `checked ${lookups["entry.html"]} element lookups in entry.html`);
+  assert.ok(lookups["join.html"] >= 20, `checked ${lookups["join.html"]} element lookups in join.html`);
+  // team.js looks its elements up from one list (tbz-team-<name>); each one is in team.html.
+  const teamIds = /Object\.fromEntries\(\[([\s\S]*?)\]\.map/.exec(read("js/team.js"))[1].match(/"([a-z-]+)"/g).map((q) => `tbz-team-${q.slice(1, -1)}`);
+  assert.ok(teamIds.length >= 60, `team.js names ${teamIds.length} elements`);
+  for (const id of teamIds) assert.ok(read("team.html").includes(`id="${id}"`), `team.js looks up #${id}, which is not in team.html`);
   // No page loads anything of another page's own: each pair shares exactly what SHARED says.
   const entries = Object.values(PAGE_SCRIPTS);
   for (let i = 0; i < entries.length; i++) {
@@ -1179,10 +1214,12 @@ test("wiring: every file a page names exists; every element a page's scripts loo
     }
   }
   assert.equal(Object.keys(SHARED).length, (entries.length * (entries.length - 1)) / 2, "every pair is named");
-  assert.deepEqual([...new Set([...scriptsOf("app.js"), ...scriptsOf("select.js")])].sort(), VOTE_SCRIPTS, "the vote's two pages still run exactly the eleven scripts they did");
-  assert.deepEqual([...new Set([...scriptsOf("booth.js"), ...scriptsOf("track.js"), ...scriptsOf("listen.js")])].filter((f) => !VOTE_SCRIPTS.includes(f)).sort(), BOOTH_ONLY_SCRIPTS, "and these belong only to the booth's pages");
+  assert.deepEqual([...new Set([...scriptsOf("app.js"), ...scriptsOf("select.js")])].filter((f) => !PARTY_SCRIPTS.includes(f)).sort(), VOTE_SCRIPTS, "the vote's two pages run exactly the eleven scripts they did, plus the festive look");
+  assert.deepEqual(scriptsOf("app.js").filter((f) => PARTY_SCRIPTS.includes(f)), ["festive.js", "party-copy.js"], "the voting page takes only the festive look from the party");
+  assert.deepEqual([...new Set([...scriptsOf("booth.js"), ...scriptsOf("track.js"), ...scriptsOf("listen.js")])].filter((f) => !VOTE_SCRIPTS.includes(f) && !PARTY_SCRIPTS.includes(f)).sort(), BOOTH_ONLY_SCRIPTS, "and these belong only to the booth's pages");
   assert.deepEqual(scriptsOf("entry.js").filter((f) => !VOTE_SCRIPTS.includes(f) && !BOOTH_ONLY_SCRIPTS.includes(f)).sort(), ENTRY_SCRIPTS, "the entry page's own scripts are exactly these three; the rest it shares are the booth's");
-  assert.deepEqual([...VOTE_SCRIPTS, ...BOOTH_ONLY_SCRIPTS, ...ENTRY_SCRIPTS].sort(), [...JS].map((f) => f.replace(/^js\//, "")).sort(), "the three lists are every script there is");
+  assert.deepEqual([...new Set([...scriptsOf("join.js"), ...scriptsOf("team.js")])].filter((f) => !VOTE_SCRIPTS.includes(f)).sort(), PARTY_SCRIPTS, "the party's two pages run the party's scripts and the vote's helpers, nothing of the booth's");
+  assert.deepEqual([...VOTE_SCRIPTS, ...BOOTH_ONLY_SCRIPTS, ...ENTRY_SCRIPTS, ...PARTY_SCRIPTS].sort(), [...JS].map((f) => f.replace(/^js\//, "")).sort(), "the four lists are every script there is");
 });
 
 test("safety: text is never written as markup, nothing runs inline, and the page loads only its own files and Giphy's GIFs", () => {
@@ -1210,24 +1247,31 @@ test("weight: no libraries, and the whole page is small", () => {
   const pageJs = (entry) => scriptsOf(entry).reduce((n, f) => n + size(`js/${f}`), 0);
   const js = pageJs("app.js");
   const fonts = fs.readdirSync(path.join(PUBLIC, "fonts")).reduce((n, f) => n + size(`fonts/${f}`), 0);
-  assert.ok(js < 110_000, `the voting page's scripts are ${js} bytes before compression`);
+  assert.ok(js < 116_000, `the voting page's scripts are ${js} bytes before compression (115,2xx on 22 Nov 2026 with the names on each party song; 114,0xx on 18 Nov 2026 with the GIFs drifting by, no end date and the party's lighter vote box; 110,5xx earlier that day with the party's dates)`);
   assert.ok(pageJs("select.js") < 60_000, `the select page's scripts are ${pageJs("select.js")} bytes before compression`);
   const voteJs = VOTE_SCRIPTS.reduce((n, f) => n + size(`js/${f}`), 0);
   const boothJs = BOOTH_ONLY_SCRIPTS.reduce((n, f) => n + size(`js/${f}`), 0);
-  assert.ok(voteJs < 120_000, `the scripts of the voting and select pages together are ${voteJs} bytes (the same eleven files as before the booth)`);
-  assert.ok(boothJs < 37_500, `the scripts belonging only to booth/track/listen are ${boothJs} bytes together (36,6xx on 4 Oct 2026 with the people: the email box, the vote switch and its rules in track.js, booth-rules.js and the two copy files; 29,143 before that, with the share; was < 30_000 for booth/track alone)`);
+  assert.ok(voteJs < 123_000, `the scripts of the voting and select pages together are ${voteJs} bytes (the same eleven files as before the booth; 122,6xx on 22 Nov 2026 with the names on each party song; 121,3xx on 18 Nov 2026 with the GIFs drifting by and the party's lighter vote box)`);
+  assert.ok(boothJs < 59_000, `the scripts belonging only to booth/track/listen are ${boothJs} bytes together (57,5xx on 22 Nov 2026 with the held file that waits for its recording and the engineer's Yes; 54,4xx on 19 Nov 2026 with the engineer confirming the group's names before the upload, the whole recording on the booth page, the shared entry with who last changed it and the three square buttons; 51,7xx on 18 Nov 2026 with who has access, the manager first come and whose song it is on the booth page; 50,7xx earlier on 18 Nov 2026 with the reasons a song cannot enter and the walk-up question on the page; 47,9xx on 17 Nov 2026 after Scooter's preview notes: the listener line, the group confirmation and Share publishing on /track; 44,5xx earlier that day with the holiday contest box on /track and the group picker on /booth; 36,6xx on 4 Oct 2026 with the people: the email box, the vote switch and its rules in track.js, booth-rules.js and the two copy files; 29,143 before that, with the share; was < 30_000 for booth/track alone)`);
   const entryJs = ENTRY_SCRIPTS.reduce((n, f) => n + size(`js/${f}`), 0);
   assert.ok(entryJs < 24_000, `the scripts belonging only to the contest entry page are ${entryJs} bytes together`);
-  assert.equal(voteJs + boothJs + entryJs, JS.reduce((n, f) => n + size(f), 0), "and the three together are every script in public/js");
+  const partyJs = PARTY_SCRIPTS.reduce((n, f) => n + size(`js/${f}`), 0);
+  assert.ok(partyJs < 65_000, `the holiday party's own scripts are ${partyJs} bytes together (63,9xx on 22 Nov 2026 with the team's two CSV downloads; 61,5xx on 19 Nov 2026 with the same-song-or-new question on the green tap, the recordings that stay open until their upload and who last entered or withdrew a song; 57,5xx on 18 Nov 2026 with the dates and the reasons a song cannot enter; 56,2xx on 17 Nov 2026 with Put this group on it for a song uploaded with nobody on it, and the voting page's words also written by the server; 52,4xx on 17 Nov 2026 after Scooter's preview notes: the hand-around group sign-up, the four lanes, the partner logo row and the party's homepage words; 46,8xx earlier with who is on each contest song and Remove from this song; 44,0xx with the team's Contest songs and Take out of the vote; 40,1xx before: /join, /team, the festive look and the party's rules)`);
+  assert.equal(voteJs + boothJs + entryJs + partyJs, JS.reduce((n, f) => n + size(f), 0), "and the four together are every script in public/js");
+  assert.ok(pageJs("join.js") < 57_000, `the sign-up page's scripts are ${pageJs("join.js")} bytes before compression (56,6xx on 18 Nov 2026 with the party night before voting opens; 54,2xx on 17 Nov 2026 with the hand-around group sign-up and the partner logo row)`);
+  assert.ok(pageJs("team.js") < 86_000, `the team's page's scripts are ${pageJs("team.js")} bytes before compression (84,0xx on 22 Nov 2026 with the two CSV downloads; 81,2xx on 19 Nov 2026 with the same-song-or-new question and the recordings kept open until their upload; 76,7xx on 18 Nov 2026 with per-person cards, the takes, the flags and Change who's on it; 74,5xx on 18 Nov 2026 with "a code already went to you" for a resend inside the minute; 74,1xx on 18 Nov 2026 with the party dates, the reasons a song cannot enter and the party night before voting opens; 72,6xx on 17 Nov 2026 with Put this group on it; 68,8xx on 17 Nov 2026 with the four lanes and the partner logo row; 64,2xx earlier with Remove from this song)`);
   assert.ok(pageJs("entry.js") < 38_000, `the contest entry page's scripts are ${pageJs("entry.js")} bytes before compression (37,2xx on 15 Nov 2026 with the closed state)`);
-  assert.ok(pageJs("track.js") < 64_000, `the rapper's page's scripts are ${pageJs("track.js")} bytes before compression (61,7xx on 4 Oct 2026 with the people; the shared api/dom/logic/player files are most of it)`);
-  assert.ok(pageJs("booth.js") < 22_000, `the engineer's page's scripts are ${pageJs("booth.js")} bytes before compression (20,8xx on 4 Oct 2026: the people's rules sit in the shared booth-rules.js, as the share's do)`);
+  assert.ok(pageJs("track.js") < 92_000, `the rapper's page's scripts are ${pageJs("track.js")} bytes before compression (89,7xx on 19 Nov 2026 with the three square buttons, the shared entry and who last changed it; 87,1xx on 18 Nov 2026 with the reasons a song cannot enter; 83,9xx on 17 Nov 2026 after Scooter's preview notes: the group confirmation, the listener line and the partner logo row; 77,4xx earlier that day with the contest box and the festive look; 61,7xx on 4 Oct 2026 with the people; the shared api/dom/logic/player files are most of it)`);
+  assert.ok(pageJs("booth.js") < 33_000, `the engineer's page's scripts are ${pageJs("booth.js")} bytes before compression (31,7xx on 22 Nov 2026 with the held file asked about again when its recording shows; 28,5xx on 19 Nov 2026 with the names confirmed before the upload and the whole recording shown; 25,1xx on 18 Nov 2026 with the walk-up question on the page; 24,0xx on 17 Nov 2026 with the no-group upload asked first; 23,1xx on 17 Nov 2026 with the group picker; 20,8xx on 4 Oct 2026: the people's rules sit in the shared booth-rules.js, as the share's do)`);
   assert.ok(pageJs("listen.js") < 60_000, `the listen page's scripts are ${pageJs("listen.js")} bytes before compression`);
-  assert.ok(size("css/site.css") < 41_000, "the stylesheet stays small (40,7xx on 9 Oct 2026 with the prize list, FAQ and rules page)");
+  assert.ok(size("css/site.css") < 52_000, "the stylesheet stays small (50,6xx on 18 Nov 2026 with the takes, the flags, the access line and the re-point; 48,4xx on 17 Nov 2026 with the partner logo row and the upload-station lane; 47,0xx earlier that day with the holiday look, /join and /team; 40,7xx on 9 Oct 2026 with the prize list, FAQ and rules page)");
   assert.ok(size("index.html") < 20_000);
   assert.ok(size("select.html") < 8_000);
   assert.ok(size("booth.html") < 8_000);
   assert.ok(size("track.html") < 8_000);
+  for (const page of ["join.html", "join-qr.html", "holiday-rules.html"]) assert.ok(size(page) < 8_000, page);
+  assert.ok(size("team.html") < 9_500, `team.html is ${size("team.html")} bytes (8,8xx on 18 Nov 2026 with the booth lane and the Change who's on it dialog)`);
+  assert.ok(size("img/join-qr.svg") < 20_000);
   assert.ok(size("listen.html") < 8_000);
   assert.ok(size("track-qr.html") < 8_000);
   assert.ok(size("entry.html") < 8_000);

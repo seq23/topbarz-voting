@@ -66,11 +66,15 @@ try {
   // The vote window is pinned open (the real end passed on 12 Oct 2026); the constant itself is
   // pinned by tests/window.test.mjs and tests/state.test.mjs. The start is pinned in the past too.
   const bindings = [`VOTING_ENDS_AT=${SMOKE_ENDS_AT}`, "VOTER_TOKEN_SECRET=smoke-only-not-a-secret", "VOTING_STARTS_AT=2020-01-01T00:00:00Z", "RESEND_API_KEY=smoke-only-not-a-key", `RESEND_ENDPOINT=${stubBase}/emails`, `DOH_ENDPOINT=${stubBase}/dns-query`].flatMap((b) => ["--binding", b]);
+  // The holiday party: off for everything up to its own section (as production runs: the booth's
+  // CultureCon flow is unchanged), then the server is restarted with it on (Scooter's preview notes,
+  // 17 Nov 2026: while it is on, a song's code only hears and downloads it).
+  let holiday = "off";
   // The dev server, startable more than once: the promote steps below run a second wrangler
   // against the same local D1 and R2, which is not safe while this one is serving them (on
   // Linux the server dies and the next fetch fails), so the server is stopped around them.
   const startServer = async () => {
-    server = spawn(WRANGLER, ["pages", "dev", "public", "--port", String(port), "--inspector-port", String(await freePort()), "--persist-to", dir, ...bindings, "--show-interactive-dev-session=false"], { cwd: ROOT, env, stdio: ["ignore", "pipe", "pipe"] });
+    server = spawn(WRANGLER, ["pages", "dev", "public", "--port", String(port), "--inspector-port", String(await freePort()), "--persist-to", dir, ...bindings, "--binding", `HOLIDAY_EVENT=${holiday}`, "--show-interactive-dev-session=false"], { cwd: ROOT, env, stdio: ["ignore", "pipe", "pipe"] });
     server.stdout.on("data", (d) => { log += d; });
     server.stderr.on("data", (d) => { log += d; });
     const deadline = Date.now() + 90_000;
@@ -94,7 +98,10 @@ try {
   const page = await fetch(base + "/");
   const pageText = await page.text();
   ok(page.status === 200 && pageText.includes("JUMP IN THE BOOTH"), "GET / serves the page");
+  ok(pageText.includes('content="Vote for your favorite CultureCon track | Top Barz"') && !pageText.includes("data-dressed"), "with the party off (production), GET / is served untouched");
   ok((page.headers.get("content-security-policy") ?? "").includes("script-src 'self'"), "the page is served with its content security policy (public/_headers)");
+  const privOff = await (await fetch(base + "/privacy")).text();
+  ok(privOff.includes("track vote for CultureCon") && !privOff.includes("data-dressed"), "with the party off (production), /privacy is served untouched");
   const assets = [...new Set([...pageText.matchAll(/(?:src|href)="(\/(?:js|css|img|fonts)\/[^"]+)"/g)].map((m) => m[1]))];
   const served = await Promise.all(assets.map(async (a) => { const r = await fetch(base + a); await r.arrayBuffer(); return r.status === 200 ? null : `${a} → ${r.status}`; }));
   ok(assets.length >= 12 && served.every((x) => x === null), `every file the page names is served (${assets.length} files${served.filter(Boolean).length ? `; missing: ${served.filter(Boolean).join(", ")}` : ""})`);
@@ -235,7 +242,7 @@ try {
   const flip = (code, pub, ip = `203.0.113.${addr++}`, email = ME) => j(`/api/booth/tracks/${code}/public`, { method: "POST", headers: { "content-type": "application/json", "cf-connecting-ip": ip }, body: JSON.stringify({ email, public: pub }) });
   const hear = (id, ip = `203.0.113.${addr++}`) => j(`/api/booth/listen/${id}`, { headers: { "cf-connecting-ip": ip } });
   const fresh = await look(up.body.code);
-  ok(fresh.status === 200 && fresh.body.public === false && fresh.body.share_id === null && fresh.body.art_url === null && Object.keys(fresh.body).join() === "code,file_name,audio_url,download_url,size,uploaded_at,public,share_id,art_url,you,people,opted,everyone_in", "the entry carries the share state: private, no link, no artwork, until someone attached says otherwise");
+  ok(fresh.status === 200 && fresh.body.public === false && fresh.body.share_id === null && fresh.body.art_url === null && Object.keys(fresh.body).join() === "code,file_name,audio_url,download_url,size,uploaded_at,public,share_id,art_url,you,people,opted,everyone_in", "the entry carries the share state: private, no link, no artwork, until someone attached says otherwise (and, with the party off as in production, no contest box)");
   const stranger = await flip(up.body.code, true, undefined, "stranger@example.com");
   ok(stranger.status === 403 && stranger.body.error === "not_attached" && (await look(up.body.code)).body.public === false, "the switch answers 403 not_attached to an email that never entered the code, and nothing flips");
   const on = await flip(up.body.code, true, undefined, OTHER);
@@ -280,7 +287,7 @@ try {
 
   const s1 = await j("/api/state");
   ok(s1.status === 200 && s1.body.tracks.length === 1 && s1.body.tracks[0].slug === "smoke" && s1.body.tracks[0].likes === 0, "GET /api/state lists the track with 0 likes");
-  ok(!/beat/i.test(JSON.stringify(s1.body)) && Object.keys(s1.body).sort().join() === "closed,gate,giphy,now,open,photos,tracks,verification,voting_ends_at,voting_starts_at", "the beat is not in /api/state, whose shape has not changed");
+  ok(!/beat/i.test(JSON.stringify(s1.body)) && Object.keys(s1.body).sort().join() === "closed,gate,giphy,now,open,photos,tracks,verification,voting_ends_at,voting_starts_at", "the beat is not in /api/state, whose shape has not changed (the party is off here, as in production)");
   ok(s1.body.closed === false && s1.body.voting_ends_at === new Date(SMOKE_ENDS_AT).toISOString(), "state carries the end time and closed=false");
   ok(s1.body.giphy.available === false && s1.body.giphy.reason === "no_key" && s1.body.gate.available === true, "state names the GIF picker as off (no key) and the gate as on");
   ok(Array.isArray(s1.body.photos) && s1.body.photos.length === 0, "no photos = empty manifest");
@@ -423,7 +430,49 @@ try {
   do { await new Promise((r) => setTimeout(r, 1000)); s7 = await j("/api/state"); } while (!s7.body.tracks.some((t) => t.slug === "zora") && Date.now() < entryBy);
   ok(s7.body.tracks.length === 3 && s7.body.tracks.some((t) => t.slug === "zora" && t.label === "Zora") && !JSON.stringify(s7.body).includes("@"), "the promoted entry is in /api/state with its first name, and no address");
 
-  if (passed < 131) throw new Error(`only ${passed} checks ran`);
+  // The holiday party (17 Nov 2026, with Scooter's preview notes), switched on for this last part:
+  // every new page and route is wired, and a song's code only hears and downloads it.
+  await stopServer();
+  holiday = "on";
+  await startServer();
+  for (const page of ["/join", "/team", "/join-qr", "/holiday-rules", "/img/partners/flow-music.png", "/img/partners/dick-and-janes.png", "/img/partners/blitz-and-bubbles.png"]) {
+    const r = await fetch(base + page);
+    await r.arrayBuffer();
+    ok(r.status === 200 && /text\/html|image\/png/.test(r.headers.get("content-type") ?? ""), `${page} is served (${r.status})`);
+  }
+  ok((await j("/api/party")).body?.on === true, "GET /api/party says the party is on");
+  // "Remove everything CultureCon" (Scooter, 17 Nov 2026) holds before any script runs: a link
+  // preview reads the HTML only, so the server writes the party's words into it (functions/index.js).
+  const dressed = await fetch(base + "/");
+  const dressedText = await dressed.text();
+  ok(dressed.status === 200 && !/culturecon|october 11/i.test(dressedText), `with the party on, GET / has no CultureCon and no October date anywhere, meta tags included${/culturecon/i.test(dressedText) ? ` (found: ${dressedText.match(/.{0,60}culturecon.{0,40}/i)[0]})` : ""}`);
+  ok(dressedText.includes('<meta property="og:title" content="Vote for your favorite Christmas jingle | Top Barz">') && /Dick (&amp;|&) Jane/.test(dressedText) && !/stand-in-mark|bar tab/.test(dressedText) && !/December 18/.test(dressedText) && dressedText.includes("JUMP IN THE BOOTH") && dressedText.includes("Prize details TBD") && dressedText.includes('<strong id="tbz-ends">Friday, November 27 at 11:59 PM EST</strong>') && !/id="tbz-countdown-row"[^>]*hidden/.test(dressedText), "the link preview and the page carry the party's words, \"Prize details TBD\", the end in Eastern time and the countdown (Scooter, 19 Nov 2026)");
+  ok((dressed.headers.get("content-security-policy") ?? "").includes("script-src 'self'"), "the dressed page keeps its content security policy");
+  const priv = await fetch(base + "/privacy");
+  const privText = await priv.text();
+  ok(priv.status === 200 && !/culturecon/i.test(privText) && privText.includes("DRAFT") && privText.includes("phone number") && privText.includes("signed-in Top Barz team"), "with the party on, /privacy is the party's DRAFT note (what /join collects, who sees it) with no CultureCon");
+  const g1 = await post("/api/party/join", { name: "Smoke Ava", phone: "555 010 2030", email: "ava@example.com", city: "Brooklyn", website: "" });
+  ok(g1.status === 201 && g1.body.session.size === 1 && !("code" in g1.body.session) && !JSON.stringify({ ...g1.body, guest_key: "" }).includes("555"), "POST /api/party/join signs up one person: no code, no phone in the answer");
+  ok((await post("/api/party/join", { guests: [{ name: "Smoke Cy", phone: "555 010 6070", email: "cy@example.com", city: "Bronx" }, { name: "Smoke Di", phone: "555 010 8090", email: "di@example.com", city: "Bronx" }], website: "" })).status === 400, "a group sign-up is refused: everyone signs up on their own");
+  ok((await post("/api/party/me", { guest_key: g1.body.guest_key })).body?.session?.status === "waiting", "POST /api/party/me reads it back");
+  await post("/api/party/join", { name: "Smoke Bo", phone: "555 010 4050", email: "bo@example.com", city: "Queens", website: "" });
+  const twice = await post("/api/party/join", { name: "Smoke Bo", phone: "555 010 4050", email: "bo@example.com", city: "Queens", website: "" });
+  ok(twice.status === 409 && twice.body.error === "already_in_line" && /One place at a time/.test(twice.body.message), "the same email while in line is refused, in words");
+  ok((await j("/api/party/team/line")).status === 401, "the team's line refuses anyone not signed in");
+  for (const file of ["line.csv", "songs.csv"]) { const r = await j(`/api/party/team/export/${file}`); ok(r.status === 401 && !/555|@example/.test(JSON.stringify(r.body)), `GET /api/party/team/export/${file} refuses anyone not signed in, with no detail`); }
+  ok((await post("/api/party/team/code", { email: "stranger@example.com" })).body?.error === "not_team", "a team code goes only to an email on the list");
+  const atStation = await j("/api/booth/sessions");
+  ok(atStation.body?.on === true && "next" in atStation.body && Array.isArray(atStation.body.in_booth), "GET /api/booth/sessions answers the upload station's next recording while the party is on");
+  ok((await post("/api/party/rejoin", { guest_key: g1.body.guest_key })).body?.error === "already_in_line", "Get back in line while still in line is refused, in words");
+  const listener = await enter(up.body.code, "listener@example.com");
+  ok(listener.status === 200 && listener.body.download_url && listener.body.contest?.you?.performer === false, "with the party on, a song's code hears and downloads, and a new email is not made one of its performers");
+  // /api/state is cached for 5 s under one key, and the local cache outlives the restart: read it
+  // again until that window has passed (as the page's own poll would).
+  let holidayState;
+  const stateBy = Date.now() + 8_000;
+  do { holidayState = await j(`/api/state?smoke=${Date.now()}`); if (holidayState.body?.holiday) break; await new Promise((r) => setTimeout(r, 1000)); } while (Date.now() < stateBy);
+  ok(holidayState.body?.holiday?.on === true && Array.isArray(holidayState.body.gifs), "/api/state carries the party and its GIFs");
+  if (passed < 148) throw new Error(`only ${passed} checks ran`);
   console.log(`smoke: ${passed} checks passed`);
 } catch (err) {
   console.error(String(err.message ?? err));

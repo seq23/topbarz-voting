@@ -167,3 +167,14 @@ export function uploadFailure(copy, { code, status, message } = {}) {
   if (typeof message === "string" && message.trim()) return message.trim();
   return copy.failed;
 }
+
+// A file the engineer is holding (Scooter, 20 Nov 2026: "the file waits until the right recording
+// pops up, the engineer confirms the names, and only then it attaches"). The station as it was seen:
+// its take key and its names. Whether to ask about the held file now: only when a recording is at
+// the station, nothing is going up or being asked, and it is not the station they said "Not them" to.
+// It never says "upload": only the engineer's Yes does that.
+export const stationSig = (next) => (next ? `${next.key}|${next.names}` : "");
+export function askAboutHeld(held, next, { busy = false, asking = false } = {}) {
+  if (!held?.file || !next || busy || asking) return false;
+  return stationSig(next) !== held.refused;
+}

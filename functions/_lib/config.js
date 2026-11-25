@@ -33,6 +33,14 @@ export const LIMITS = {
   entryUploadsPerIp: { window: 3600, max: 10 },
   entryUploadsPerDay: { window: 86400, max: 300 },
   entriesPerIp: { window: 3600, max: 10 },
+  // The holiday party (17 Nov 2026). A bar's Wi-Fi is one address for every guest, so the
+  // per-connection limits are wide; each guest's own actions are capped by their email or key.
+  boothStatusPerMinute: { window: 60, max: 300 },
+  partyJoinsPerIp: { window: 3600, max: 150 },
+  partyReadsPerIp: { window: 60, max: 600 },
+  teamCodesPerIp: { window: 3600, max: 20 },
+  teamVerifyPerIp: { window: 600, max: 40 },
+  teamPerMember: { window: 60, max: 240 },
 };
 export const COMMENT_MAX_CHARS = 500;
 export const NAME_MAX_CHARS = 80;
@@ -46,7 +54,13 @@ export const GIPHY = { budgetPerHour: 90, searchTtl: 30 * 60, trendingTtl: 60 * 
 // rolling 24 hours. THE ONE PLACE that number is written. Times are seconds unless named ms.
 export const VERIFICATION = {
   dailySendBudget: 50,
-  previewSendShare: 5, // of the 50: what staging / preview may send. Production gets the rest.
+  previewSendShare: 15, // of the 50: what staging / preview may send (voter AND team codes; 5 ran out on one partner
+  // signing in on his devices, 17 Nov 2026). Production gets the rest.
+  // Of each environment's share, the last few are kept for the team's sign-in codes (/team): the
+  // voters' codes stop this many short, so testing or running the vote can never lock the team out
+  // (Scooter, 18 Nov 2026: "look at the code-sending on the preview ... so I can get back in").
+  // A voter past their share is let in unverified, as ever; nothing here raises the 50.
+  teamReserve: 5,
   codeTtl: 10 * 60,
   maxTries: 5,
   resendCooldown: 60,
@@ -68,8 +82,17 @@ function parseTime(value) {
   return Number.isFinite(ms) ? ms : null;
 }
 
-// The end time for this environment, in ms. Order: a `settings` row (only where the environment
-// allows it — preview), then the env var VOTING_ENDS_AT, then the constant above.
+// The holiday party's end (Scooter, 19 Nov 2026: "Voting closes Friday, November 27 at 11:59pm
+// Eastern. Restore the countdown with the cutoff date and time visible, and make sure votes after the
+// cutoff don't count"). 11:59 PM EST (UTC-5) on 27 Nov = 04:59 UTC on 28 Nov. While the party is on
+// (HOLIDAY_EVENT) the server refuses likes, comments and contest moves from this moment, and a vote
+// counts only if its voter entered the 6-digit code before it (countedLikesClause). The page shows it
+// in Eastern time (HOLIDAY.dates.zone).
+export const PARTY_VOTING_ENDS_AT = "2026-11-28T04:59:00Z";
+
+// The end time for this environment, in ms (Infinity: no end set). Order: a `settings` row (only
+// where the environment allows it — preview), then the env var VOTING_ENDS_AT, then, while the
+// holiday party is on, PARTY_VOTING_ENDS_AT (null would mean no end), else the constant above.
 export function votingEndsAtMs(env, settingsValue) {
   if (env?.ALLOW_END_OVERRIDE === "1") {
     const fromSettings = parseTime(settingsValue);
@@ -77,6 +100,7 @@ export function votingEndsAtMs(env, settingsValue) {
   }
   const fromEnv = parseTime(env?.VOTING_ENDS_AT);
   if (fromEnv !== null) return fromEnv;
+  if (env?.HOLIDAY_EVENT === "on") return parseTime(PARTY_VOTING_ENDS_AT) ?? Infinity;
   return Date.parse(VOTING_ENDS_AT);
 }
 
@@ -125,6 +149,10 @@ export function gateStatus(env) {
 export function sendBudget(env) {
   const { dailySendBudget, previewSendShare } = VERIFICATION;
   return env?.APP_ENV === "preview" ? previewSendShare : dailySendBudget - previewSendShare;
+}
+// What the voters' codes may use of that share: all of it but the team's reserve.
+export function voterSendBudget(env) {
+  return sendBudget(env) - VERIFICATION.teamReserve;
 }
 
 // The code step is on only when the switch says so AND there is a key to send mail with.

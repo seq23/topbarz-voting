@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#000000">
+<meta name="color-scheme" content="dark">
+<title>The line for the booth | Top Barz</title>
+<meta name="description" content="The Top Barz team's line for the booth: sign-ups, status and ready texts.">
+<link rel="icon" type="image/png" href="/img/favicon.png">
+<link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
+<link rel="preload" href="/fonts/dela-gothic-one-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/epilogue-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/css/site.css">
+<link rel="modulepreload" href="/js/dom.js">
+<link rel="modulepreload" href="/js/api.js">
+<link rel="modulepreload" href="/js/logic.js">
+<link rel="modulepreload" href="/js/festive.js">
+<link rel="modulepreload" href="/js/party-copy.js">
+<link rel="modulepreload" href="/js/party-rules.js">
+<link rel="modulepreload" href="/js/team-copy.js">
+<script type="module" src="/js/team.js"></script>
+</head>
+<body>
+<a class="skip" href="#tbz-team-main">Skip to the line</a>
+
+<header class="top">
+  <a class="logo" href="https://www.topbarz.xyz/"><img src="/img/logo.png" width="212" height="186" alt="Top Barz"></a>
+  <h1 class="slogan">JUMP IN THE BOOTH</h1>
+</header>
+
+<main id="tbz-team-main">
+  <section class="intro">
+    <h2 id="tbz-team-headline" class="page-title"></h2>
+    <p id="tbz-team-intro" class="lede"></p>
+  </section>
+  <p id="tbz-team-loading" class="list-note" role="status"></p>
+
+  <section id="tbz-team-off" class="empty" hidden>
+    <p id="tbz-team-off-title" class="empty-title"></p>
+    <p id="tbz-team-off-note"></p>
+  </section>
+
+  <section id="tbz-team-signin" class="booth" aria-labelledby="tbz-team-signin-title" hidden>
+    <h2 id="tbz-team-signin-title" class="page-title"></h2>
+    <p id="tbz-team-signin-intro" class="switch-note"></p>
+    <form id="tbz-team-email-form" class="gate-form" novalidate>
+      <div class="field field-email"><label for="tbz-team-email" id="tbz-team-email-label"></label><input id="tbz-team-email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="254" aria-describedby="tbz-team-signin-error"></div>
+      <button type="submit" id="tbz-team-send" class="btn btn-gate"></button>
+    </form>
+    <form id="tbz-team-code-form" class="gate-form" novalidate hidden>
+      <p id="tbz-team-code-sent" class="code-sent" role="status"></p>
+      <div class="field field-code"><label for="tbz-team-code" id="tbz-team-code-label"></label><input id="tbz-team-code" type="text" inputmode="numeric" autocomplete="one-time-code" autocorrect="off" spellcheck="false" enterkeyhint="go" aria-describedby="tbz-team-signin-error"></div>
+      <button type="submit" id="tbz-team-check" class="btn btn-gate"></button>
+      <div class="code-actions">
+        <button type="button" id="tbz-team-resend" class="link-btn"></button>
+        <button type="button" id="tbz-team-change" class="link-btn"></button>
+      </div>
+    </form>
+    <p id="tbz-team-signin-error" class="field-error" role="alert" hidden></p>
+  </section>
+
+  <section id="tbz-team-board" class="board" aria-labelledby="tbz-team-headline" hidden>
+    <div class="board-bar">
+      <p id="tbz-team-who" class="switch-note"></p>
+      <button type="button" id="tbz-team-signout" class="btn btn-small btn-ghost"></button>
+    </div>
+    <div class="board-next" aria-live="polite">
+      <div class="next-box"><p id="tbz-team-next-label" class="next-label"></p><p id="tbz-team-next" class="next-names"></p></div>
+      <div class="next-box"><p id="tbz-team-after-label" class="next-label"></p><p id="tbz-team-after" class="next-names"></p></div>
+    </div>
+    <p id="tbz-team-line-note" class="list-note" role="status" hidden></p>
+    <section class="board-lane" aria-labelledby="tbz-team-booth-title">
+      <h3 id="tbz-team-booth-title" class="done-title"></h3>
+      <p id="tbz-team-booth-intro" class="switch-note"></p>
+      <p id="tbz-team-booth-none" class="switch-note"></p>
+      <ol id="tbz-team-booth" class="line"></ol>
+    </section>
+    <h3 id="tbz-team-waiting-title" class="done-title"></h3>
+    <ol id="tbz-team-line" class="line"></ol>
+    <section class="board-lane" aria-labelledby="tbz-team-upload-title">
+      <h3 id="tbz-team-upload-title" class="done-title"></h3>
+      <p id="tbz-team-upload-intro" class="switch-note"></p>
+      <p id="tbz-team-upload-none" class="switch-note"></p>
+      <ol id="tbz-team-upload" class="line"></ol>
+    </section>
+    <h3 id="tbz-team-done-title" class="done-title"></h3>
+    <ol id="tbz-team-done" class="line line-done"></ol>
+
+    <section class="board-section" aria-labelledby="tbz-team-songs-title">
+      <h3 id="tbz-team-songs-title" class="done-title"></h3>
+      <p id="tbz-team-songs-intro" class="switch-note"></p>
+      <p id="tbz-team-songs-none" class="switch-note" hidden></p>
+      <ol id="tbz-team-songs" class="line"></ol>
+    </section>
+
+    <section class="board-section" aria-labelledby="tbz-team-export-title">
+      <h3 id="tbz-team-export-title" class="done-title"></h3>
+      <p id="tbz-team-export-intro" class="switch-note"></p>
+      <div class="walkup-actions">
+        <button type="button" id="tbz-team-export-line" class="btn btn-small"></button>
+        <button type="button" id="tbz-team-export-songs" class="btn btn-small"></button>
+      </div>
+      <p id="tbz-team-export-msg" class="switch-note" role="status" hidden></p>
+    </section>
+
+    <section class="board-section" aria-labelledby="tbz-team-gifs-title">
+      <h3 id="tbz-team-gifs-title" class="done-title"></h3>
+      <p id="tbz-team-gifs-intro" class="switch-note"></p>
+      <p id="tbz-team-gifs-chosen-title" class="next-label"></p>
+      <ul id="tbz-team-gifs-chosen" class="gif-grid gif-chosen-grid"></ul>
+      <p id="tbz-team-gifs-none" class="switch-note" hidden></p>
+      <div class="field"><label for="tbz-team-gif-search" id="tbz-team-gif-search-label"></label><input id="tbz-team-gif-search" class="gif-search" type="search" autocomplete="off" maxlength="50"></div>
+      <p id="tbz-team-gif-status" class="gif-status" role="status"></p>
+      <ul id="tbz-team-gif-results" class="gif-grid"></ul>
+      <p id="tbz-team-gif-by" class="gif-by"></p>
+    </section>
+
+    <section class="board-section" aria-labelledby="tbz-team-members-title">
+      <h3 id="tbz-team-members-title" class="done-title"></h3>
+      <p id="tbz-team-members-intro" class="switch-note"></p>
+      <ul id="tbz-team-members" class="log"></ul>
+      <form id="tbz-team-add-form" class="code-form" novalidate>
+        <div class="field"><label for="tbz-team-add" id="tbz-team-add-label"></label><input id="tbz-team-add" type="email" inputmode="email" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="254" aria-describedby="tbz-team-add-msg"></div>
+        <button type="submit" id="tbz-team-add-go" class="btn btn-small"></button>
+      </form>
+      <p id="tbz-team-add-msg" class="field-error" role="alert" hidden></p>
+    </section>
+  </section>
+
+  <dialog id="tbz-team-person" class="gate team-dialog" aria-labelledby="tbz-team-person-title">
+    <h2 id="tbz-team-person-title"></h2>
+    <dl id="tbz-team-person-list" class="details"></dl>
+    <button type="button" id="tbz-team-person-close" class="btn btn-small"></button>
+  </dialog>
+
+  <dialog id="tbz-team-repoint" class="gate team-dialog" aria-labelledby="tbz-team-repoint-title">
+    <h2 id="tbz-team-repoint-title"></h2>
+    <p id="tbz-team-repoint-intro" class="switch-note"></p>
+    <div class="field"><label for="tbz-team-repoint-find" id="tbz-team-repoint-find-label"></label><input id="tbz-team-repoint-find" type="search" autocomplete="off" maxlength="60"></div>
+    <ul id="tbz-team-repoint-list" class="repoint-list"></ul>
+    <div class="field"><label for="tbz-team-repoint-note" id="tbz-team-repoint-note-label"></label><input id="tbz-team-repoint-note" type="text" autocomplete="off" maxlength="200"></div>
+    <p id="tbz-team-repoint-msg" class="field-error" role="alert" hidden></p>
+    <div class="confirm-actions">
+      <button type="button" id="tbz-team-repoint-save" class="btn"></button>
+      <button type="button" id="tbz-team-repoint-cancel" class="btn btn-ghost"></button>
+    </div>
+  </dialog>
+
+  <dialog id="tbz-team-confirm" class="gate team-dialog" aria-labelledby="tbz-team-confirm-title">
+    <h2 id="tbz-team-confirm-title"></h2>
+    <p id="tbz-team-confirm-note" class="flag-note" hidden></p>
+    <div class="confirm-actions">
+      <button type="button" id="tbz-team-confirm-yes" class="btn"></button>
+      <button type="button" id="tbz-team-confirm-alt" class="btn btn-status btn-wait" hidden></button>
+      <button type="button" id="tbz-team-confirm-no" class="btn btn-ghost"></button>
+    </div>
+  </dialog>
+
+  <div id="tbz-team-toast" class="toast" role="status" hidden>
+    <span id="tbz-team-toast-text"></span>
+    <button type="button" id="tbz-team-undo" class="btn btn-small"></button>
+  </div>
+  <noscript><p class="list-note">This page needs JavaScript. Turn it on and reload.</p></noscript>
+</main>
+
+<footer class="foot">
+  <div class="foot-inner">
+    <p class="foot-mark">Top Barz</p>
+  </div>
+</footer>
+</body>
+</html>

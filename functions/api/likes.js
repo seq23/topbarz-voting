@@ -6,6 +6,9 @@ import { END_SETTING_SQL, LIMITS, START_SETTING_SQL, votingPhase } from "../_lib
 import { HttpError, ipHash, json, readJson, route } from "../_lib/http.js";
 import { assertUnderLimit, limitStatement, maybePrune } from "../_lib/ratelimit.js";
 import { requireVoter } from "../_lib/token.js";
+import { holidayOn, partyTrackClause } from "../_lib/party.js";
+import { HOLIDAY } from "../../public/js/party-copy.js";
+import { countedLikesClause } from "../_lib/state.js";
 
 const LAST_ACTION = "COALESCE((SELECT action FROM like_events WHERE voter_id = ?1 AND track_id = ?2 ORDER BY id DESC LIMIT 1), 'unlike')";
 // One statement each, so two taps racing can never leave two active likes.
@@ -13,9 +16,10 @@ const TOGGLE_SQL = `INSERT INTO like_events (voter_id, track_id, action, created
   SELECT ?1, ?2, CASE WHEN ${LAST_ACTION} = 'like' THEN 'unlike' ELSE 'like' END, ?3`;
 const SET_SQL = `INSERT INTO like_events (voter_id, track_id, action, created_at)
   SELECT ?1, ?2, ?4, ?3 WHERE ${LAST_ACTION} <> ?4`;
-const AFTER_SQL = `SELECT ${LAST_ACTION} AS action,
+// The count after the like, counted the way /api/state counts it (countedLikesClause).
+const afterSql = (env) => `SELECT ${LAST_ACTION} AS action,
   (SELECT COALESCE(SUM(CASE e.action WHEN 'like' THEN 1 ELSE -1 END), 0) FROM like_events e
-    WHERE e.track_id = ?2 AND e.voter_id NOT IN (SELECT id FROM voters WHERE flagged = 1)) AS likes`;
+    WHERE e.track_id = ?2 AND ${countedLikesClause(env)}) AS likes`;
 
 export const onRequest = route({
   async POST(context) {
@@ -32,14 +36,14 @@ export const onRequest = route({
     const [ipLimit, voterLimit, trackRes, voterRes, settingRes, startRes] = await db.batch([
       limitStatement(db, `likes:ip:${ip}`, LIMITS.likesPerIp, now),
       limitStatement(db, `likes:voter:${voterId}`, LIMITS.likesPerVoter, now),
-      db.prepare("SELECT id FROM tracks WHERE slug = ?1 AND active = 1").bind(slug),
+      db.prepare(`SELECT id FROM tracks t WHERE slug = ?1 AND active = 1${partyTrackClause(env)}`).bind(slug),
       db.prepare("SELECT id FROM voters WHERE id = ?1").bind(voterId),
       db.prepare(END_SETTING_SQL),
       db.prepare(START_SETTING_SQL),
     ]);
     const phase = votingPhase(env, now, startRes.results[0]?.value ?? null, settingRes.results[0]?.value ?? null);
     if (phase.closed) throw new HttpError(403, "voting_closed", "Voting has closed.");
-    if (phase.notOpen) throw new HttpError(403, "voting_not_open", "Voting opens Sunday, October 11, at 10 AM ET.");
+    if (phase.notOpen) throw new HttpError(403, "voting_not_open", holidayOn(env) ? HOLIDAY.home.notOpenRefusal : "Voting opens Sunday, October 11, at 10 AM ET.");
     if (!voterRes.results[0]) throw new HttpError(401, "invalid_token", "Sign in again to continue.");
     assertUnderLimit(ipLimit, LIMITS.likesPerIp, "likes");
     assertUnderLimit(voterLimit, LIMITS.likesPerVoter, "likes");
@@ -50,7 +54,7 @@ export const onRequest = route({
     const write = body.liked === undefined
       ? db.prepare(TOGGLE_SQL).bind(voterId, track.id, at)
       : db.prepare(SET_SQL).bind(voterId, track.id, at, body.liked ? "like" : "unlike");
-    const [, after] = await db.batch([write, db.prepare(AFTER_SQL).bind(voterId, track.id)]);
+    const [, after] = await db.batch([write, db.prepare(afterSql(env)).bind(voterId, track.id)]);
     maybePrune(context);
     const row = after.results[0];
     return json({ track: slug, liked: row.action === "like", likes: Math.max(0, row.likes) });

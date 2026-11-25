@@ -110,17 +110,20 @@ export function countdownSpoken(ms) {
 }
 
 // The end of voting in California time, as the page writes it: "Sunday, October 11 at 11:59 PM PDT".
-export function formatEndsLine(endMs) {
+// `timeZone`: CultureCon's end is said in California time; the holiday party's in Eastern
+// (Scooter, 19 Nov 2026: "Friday, November 27 at 11:59pm Eastern").
+const ZONE_FALLBACK = { "GMT-7": "PDT", "GMT-4": "EDT", "GMT-5": "EST" };
+export function formatEndsLine(endMs, timeZone = "America/Los_Angeles") {
   const d = new Date(endMs);
   if (Number.isNaN(d.getTime())) return "";
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat("en-US", {
-      timeZone: "America/Los_Angeles", weekday: "long", month: "long", day: "numeric",
+      timeZone, weekday: "long", month: "long", day: "numeric",
       hour: "numeric", minute: "2-digit", hour12: true, timeZoneName: "short",
     }).formatToParts(d).map((p) => [p.type, p.value]),
   );
   // A browser without zone names answers "GMT-7" for California daylight time.
-  const zone = parts.timeZoneName === "GMT-7" ? "PDT" : parts.timeZoneName;
+  const zone = ZONE_FALLBACK[parts.timeZoneName] ?? parts.timeZoneName;
   return `${parts.weekday}, ${parts.month} ${parts.day} at ${parts.hour}:${parts.minute} ${parts.dayPeriod} ${zone}`;
 }
 
@@ -418,3 +421,10 @@ export function displayOrder(tracks) {
 // card never moves under a thumb. Monotonic ms; null = never touched.
 export const REORDER_STILL_MS = 2500;
 export const canReorder = (lastInput, now) => lastInput == null || now - lastInput >= REORDER_STILL_MS;
+
+// "by Carla & Ken" under a party song on the vote ("" with no names, or when its name is them).
+export function byLine(template, track) {
+  const n = Array.isArray(track?.people) ? track.people.filter((x) => typeof x === "string" && x.trim()) : [];
+  const list = n.length <= 1 ? n[0] ?? "" : `${n.slice(0, -1).join(", ")} & ${n[n.length - 1]}`;
+  return !list || list === String(track?.label ?? "") ? "" : String(template).replace("{names}", list);
+}

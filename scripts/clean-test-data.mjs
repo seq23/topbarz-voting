@@ -20,6 +20,7 @@
 // (reachable only by the key the deleted row held). Prints what it did (first names only) and
 // stops non-zero when a kept song is missing, before anything is written.
 import { fileURLToPath } from "node:url";
+import { isCode } from "../functions/_lib/booth.js";
 import { isTestName } from "../functions/_lib/exclusions.js";
 import { d1, parseArgs, sqlText, stopOnError, targets } from "./lib/cf.mjs";
 
@@ -109,7 +110,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (!args.keep) { console.error('STOPPED: say which songs to keep: --keep 4380 (or --keep none).'); process.exit(2); }
   const split = (v) => String(v ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   const keep = args.keep === "none" ? [] : split(args.keep);
-  if (keep.some((c) => !/^\d{4}$/.test(c))) { console.error("STOPPED: --keep takes 4-digit song codes, comma-separated."); process.exit(2); }
+  if (keep.some((c) => !isCode(c))) { console.error("STOPPED: --keep takes song codes (12 digits, or 4 for an older song), comma-separated."); process.exit(2); }
   const { lines } = await cleanTestData(targets(args.env), { keep, names: split(args.names), codes: split(args.codes), dryRun: Boolean(args["dry-run"]) });
   // One line: the job's run record keeps only the last line printed, and the 18 Nov dry run's record
   // read "dry run: nothing written." with the list itself lost. Everything it saw is on that line.

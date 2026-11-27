@@ -1,6 +1,8 @@
-// The booth: an engineer hands a finished recording back by a 4-digit code.
+// The booth: an engineer hands a finished recording back by a code (12 digits; 4 for a song from before 27 Nov 2026).
 //   POST /api/booth/tracks         the raw file (not multipart), streamed into R2 → { code, file_name, uploaded_at }
-//   GET  /api/booth/tracks         the log, newest first, at most 200 rows
+//   GET  /api/booth/tracks         the log, newest first, at most 200 rows: the signed-in team only (a team token,
+//                                  functions/_lib/team.js requireMember; 401 team_sign_in for anyone else), because
+//                                  every row carries its song's code (27 Nov 2026)
 //   POST /api/booth/tracks/<code>/enter   { email } → the track (as below) + { you: { email, vote_opt_in }, people, opted, everyone_in }
 //                                         the rapper's way in (4 Oct 2026): attaches the email to the track and counts the open
 //   POST /api/booth/tracks/<code>/vote    { email, opt_in: true|false } → { code, you, people, opted, everyone_in }   this person's own consent to the public vote
@@ -24,7 +26,7 @@
 // connection, 300 a day for the whole site, code entries 5 a minute and 30 an hour per connection
 // (so codes cannot be guessed by trying them all; a wrong code on any change route counts as a
 // try, so no route is a second way in), 30 changes and 30 listen reads a minute per connection,
-// and never a list or a search. Since 4 Oct 2026 the code is entered WITH an email, and every
+// and never a list or a search for anyone but the signed-in team. Since 4 Oct 2026 the code is entered WITH an email, and every
 // route that changes a song (public, art, vote) takes the email and answers 403 not_attached
 // unless that email entered that code: share is anyone's call, the vote is everyone's consent.
 // An email is never in a URL, never in the log, and never answered to anyone but its owner.
@@ -37,6 +39,7 @@ import { ATTACH_PERSON_SQL, CHANGE_SQL, ENTER_SQL, MARK_PERSON_SQL, SESSION_DONE
 import { CLAIM_TAKE_SQL, IN_BOOTH_NOW_SQL, NEXT_TAKE_SQL, RECORDING_NOW_SQL, RULES_VERSION, STATION_TAKES_SQL, TAKE_PEOPLE_SQL, firstOf, groupLabel, guestFlags, takeKey } from "../../_lib/party.js";
 import { HttpError, fail, ipHash, json, readJson, route } from "../../_lib/http.js";
 import { assertUnderLimit, limitStatement, maybePrune } from "../../_lib/ratelimit.js";
+import { requireMember } from "../../_lib/team.js";
 
 const segments = (params) => (Array.isArray(params?.path) ? params.path : [params?.path]).filter((s) => typeof s === "string" && s !== "");
 
@@ -104,8 +107,11 @@ async function upload(context) {
   return json({ code: reserved.code, file_name: fileName, uploaded_at: new Date(now).toISOString(), ...(tagged ? { tagged: true } : {}) });
 }
 
+// The log is the team's: each row's code opens that song (hear, download, and while the party is
+// off, its share, art and vote switches), so a stranger gets 401 before anything is read.
 async function log(context) {
   const { request, env } = context;
+  await requireMember(request, env);
   const db = env.DB;
   const ip = await ipHash(request, env);
   const [limit, rows] = await db.batch([

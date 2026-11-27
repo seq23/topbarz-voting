@@ -8,6 +8,7 @@ import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { signTeamToken } from "../functions/_lib/team.js";
 import { DRIVE_DIR } from "../scripts/lib/cf.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
@@ -56,6 +57,9 @@ try {
   wr(["r2", "object", "put", "topbarz-voting-media/beats/smoke-beat-0000000000.mp3", "--file", audio, "--content-type", "audio/mpeg", "--local"]);
   wr(["d1", "execute", "topbarz-voting", "--local", "--yes", "--command",
     "INSERT INTO beats (slug, name, source_name, audio_key, duration_ms, sort, active, stand_in, credit_label, credit_url, created_at, updated_at) VALUES ('smoke-beat', 'Smoke Beat', 'Smoke Beat File', 'beats/smoke-beat-0000000000.mp3', 2000, 10, 1, 0, 'Smoke Producer', 'https://example.com/producer', '2026-10-02T00:00:00.000Z', '2026-10-02T00:00:00.000Z')"]);
+
+  // One team member (id 1), so the booth's log can be read the way the team reads it (27 Nov 2026).
+  wr(["d1", "execute", "topbarz-voting", "--local", "--yes", "--command", "INSERT INTO team_members (id, email, added_at) VALUES (1, 'smoke-crew@example.com', 1764000000000)"]);
 
   const port = await freePort();
   const base = `http://127.0.0.1:${port}`;
@@ -158,9 +162,9 @@ try {
   wavBytes.write("RIFF", 0); wavBytes.writeUInt32LE(36 + 8000, 4); wavBytes.write("WAVEfmt ", 8); wavBytes.writeUInt32LE(16, 16); wavBytes.writeUInt16LE(1, 20); wavBytes.writeUInt16LE(1, 22);
   wavBytes.writeUInt32LE(8000, 24); wavBytes.writeUInt32LE(8000, 28); wavBytes.writeUInt16LE(1, 32); wavBytes.writeUInt16LE(8, 34); wavBytes.write("data", 36); wavBytes.writeUInt32LE(8000, 40);
   const up = await sendFile("Smoke Take 1.wav", wavBytes, "audio/wav");
-  ok(up.status === 200 && /^\d{4}$/.test(up.body?.code ?? "") && up.body.file_name === "Smoke Take 1.wav" && Object.keys(up.body).join() === "code,file_name,uploaded_at", `POST /api/booth/tracks takes a generated WAV and answers a 4-digit code (${up.body?.code})`);
+  ok(up.status === 200 && /^\d{12}$/.test(up.body?.code ?? "") && up.body.file_name === "Smoke Take 1.wav" && Object.keys(up.body).join() === "code,file_name,uploaded_at", `POST /api/booth/tracks takes a generated WAV and answers a 12-digit code (${up.body?.code})`);
   const found = await look(up.body.code);
-  ok(found.status === 200 && found.body.file_name === "Smoke Take 1.wav" && found.body.size === wavBytes.length && /^\/media\/booth\/\d{4}-[0-9a-f]{16}\.wav$/.test(found.body.audio_url) && found.body.download_url === `${found.body.audio_url}?dl=1`, "POST /api/booth/tracks/<code>/enter with an email finds it, with its audio and download addresses");
+  ok(found.status === 200 && found.body.file_name === "Smoke Take 1.wav" && found.body.size === wavBytes.length && /^\/media\/booth\/[0-9a-f]{32}\.wav$/.test(found.body.audio_url) && !found.body.audio_url.includes(up.body.code) && found.body.download_url === `${found.body.audio_url}?dl=1`, "POST /api/booth/tracks/<code>/enter with an email finds it, with its audio and download addresses");
   ok(JSON.stringify(found.body.you) === JSON.stringify({ email: ME, vote_opt_in: false }) && found.body.people === 1 && found.body.opted === 0 && found.body.everyone_in === false, "and answers this person's own state: attached, out, the only one so far");
   const oldGet = await j(`/api/booth/tracks/${up.body.code}`, { headers: { "cf-connecting-ip": "203.0.113.19" } });
   ok([404, 405].includes(oldGet.status) && !("audio_url" in (oldGet.body ?? {})), `the old GET /api/booth/tracks/<code> lookup is gone (${oldGet.status}): no track without an email`);
@@ -209,8 +213,14 @@ try {
     realUploads++;
   }
   ok(realUploads === 4 && songs.length === 4, `the four sample songs went up: ${songSource}`);
-  const logRes = await j("/api/booth/tracks");
-  ok(logRes.status === 200 && logRes.body.tracks.length === 1 + realUploads && logRes.body.tracks[0].code === lastCode && logRes.body.tracks.at(-1).code === up.body.code && logRes.body.tracks.every((t) => /^\d{4}$/.test(t.code) && t.opened === 1 && !("media_key" in t)), `GET /api/booth/tracks lists the ${1 + realUploads} uploads, newest first, each opened once, no key`);
+  // The log is the signed-in team's (27 Nov 2026): a stranger gets 401 and not one code.
+  const strangerLog = await fetch(base + "/api/booth/tracks", { headers: { "cf-connecting-ip": "203.0.113.29" } });
+  const strangerText = await strangerLog.text();
+  ok(strangerLog.status === 401 && /team_sign_in/.test(strangerText) && !strangerText.includes(up.body.code) && !strangerText.includes(lastCode), `GET /api/booth/tracks refuses a stranger (${strangerLog.status}) with no code in the answer`);
+  // The team member seeded above (id 1), signed with the smoke's own secret, as /team's verify would.
+  const crewToken = await signTeamToken({ VOTER_TOKEN_SECRET: "smoke-only-not-a-secret" }, 1, Math.floor(Date.now() / 1000));
+  const logRes = await j("/api/booth/tracks", { headers: { authorization: `Bearer ${crewToken}`, "cf-connecting-ip": "203.0.113.30" } });
+  ok(logRes.status === 200 && logRes.body.tracks.length === 1 + realUploads && logRes.body.tracks[0].code === lastCode && logRes.body.tracks.at(-1).code === up.body.code && logRes.body.tracks.every((t) => /^\d{12}$/.test(t.code) && t.opened === 1 && !("media_key" in t)), `GET /api/booth/tracks with a team token lists the ${1 + realUploads} uploads, newest first, each opened once, no key`);
   const wrongCode = up.body.code === "0000" ? "0001" : "0000";
   const none = await look(wrongCode);
   ok(none.status === 404 && none.body.error === "not_found", "a wrong code with an email is a 404 not_found");
@@ -352,7 +362,7 @@ try {
   };
   await stopServer();
   const refused = promote("--env", "local", "--code", lastCode);
-  ok(refused.status === 1 && /REFUSED: 1 of the 1 people attached to code \d{4} has not opted in/.test(refused.out), `promote-booth refuses a track whose one person is out, exit ${refused.status}`);
+  ok(refused.status === 1 && /REFUSED: 1 of the 1 people attached to code \d{12} has not opted in/.test(refused.out), `promote-booth refuses a track whose one person is out, exit ${refused.status}`);
   const unknown = promote("--env", "local", "--code", wrongCode);
   ok(unknown.status === 1 && /REFUSED: no booth track has that code/.test(unknown.out), "and an unknown code");
   const dry = promote("--env", "local", "--code", up.body.code, "--dry-run");

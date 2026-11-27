@@ -1,14 +1,15 @@
-// The engineer's page (/booth): drop or choose a finished file, watch it go up, read the 4-digit
-// code out to the artist, next file. Under it, today's uploads (GET /api/booth/tracks). The
+// The engineer's page (/booth): drop or choose a finished file, watch it go up, read the code
+// out to the artist, next file. Under it, today's uploads (GET /api/booth/tracks, team token only). The
 // upload is an XMLHttpRequest because fetch has no upload progress. While the holiday party is on,
 // the page shows whose song the file goes to (the next recording at the upload station) before the
 // drop, and the upload carries which one it showed. Each row says how many people
 // entered its code ("3 people") and "all in" when every one of them opted in to the public vote:
 // counts only, never a name or an address (the log route carries none). Nothing here is part of
-// the vote, and nothing here is remembered on the device.
+// the vote, and nothing here is written to the device.
 import { $, h } from "./dom.js";
 import { COPY } from "./booth-copy.js";
-import { askAboutHeld, formatSize, formatTime, openedWords, peopleWords, refuseFile, stationSig, todayRows, uploadFailure } from "./booth-rules.js";
+import { askAboutHeld, codeGroups, formatSize, formatTime, isCode, openedWords, peopleWords, refuseFile, stationSig, todayRows, uploadFailure } from "./booth-rules.js";
+const TEAM_KEY = "tbz.team"; // the team page's (party-rules.js TEAM_KEY; tests/booth.test.mjs pins them the same)
 
 const els = {
   headline: $("tbz-booth-headline"),
@@ -138,7 +139,8 @@ function done({ code, file_name: name }) {
   app.busy = false;
   loadGroups(); // that recording is done: the station shows the next one
   app.lastFile = null;
-  els.code.textContent = code;
+  els.code.replaceChildren(...codeGroups(code).map((g) => h("span", { class: "code-group", text: g })));
+  els.code.setAttribute("aria-label", codeGroups(code).join(" "));
   els.doneFile.textContent = name;
   show("done");
   els.code.focus({ preventScroll: true });
@@ -185,7 +187,7 @@ function upload(file, { confirmed = null } = {}) {
   xhr.upload.addEventListener("progress", (ev) => { if (ev.lengthComputable) setProgress(ev.loaded / ev.total); });
   xhr.addEventListener("load", () => {
     const body = xhr.response && typeof xhr.response === "object" ? xhr.response : {};
-    if (xhr.status === 200 && /^\d{4}$/.test(body.code ?? "") && typeof body.file_name === "string") done(body);
+    if (xhr.status === 200 && isCode(body.code) && typeof body.file_name === "string") done(body);
     else if (body.error === "take_changed") { app.busy = false; hold(file, null, COPY.sessionGone); loadGroups(); }
     else failed(uploadFailure(COPY, { code: body.error, status: xhr.status, message: body.message }));
   });
@@ -234,17 +236,23 @@ els.retry.addEventListener("click", () => {
 // ── Today's log
 function renderLog(rows) {
   els.logList.replaceChildren(...rows.map((r) => h("li", { class: r.art_url ? "has-art" : null },
-    h("span", { class: "log-code", text: r.code }),
+    h("span", { class: "log-code", "aria-label": codeGroups(r.code).join(" ") }, ...codeGroups(r.code).map((g) => h("span", { class: "code-group", text: g }))),
     r.art_url ? h("img", { class: "log-art", src: r.art_url, width: 40, height: 40, alt: "", loading: "lazy" }) : null,
     h("span", { class: "log-file", text: r.file_name }),
     h("span", { class: "log-meta", text: [formatTime(r.uploaded_at), formatSize(r.size), openedWords(r.opened), peopleWords(COPY, r.people), r.everyone_in ? COPY.allIn : "", r.public ? "public" : ""].filter(Boolean).join(" · ") }))));
   els.logNote.textContent = rows.length ? "" : COPY.logEmpty;
   els.logNote.hidden = rows.length > 0;
 }
+function teamToken() {
+  try { const v = JSON.parse(localStorage.getItem(TEAM_KEY) ?? "null"); return typeof v?.token === "string" ? v.token : null; } catch { return null; }
+}
 async function loadLog() {
   try {
-    const res = await fetch("/api/booth/tracks", { headers: { accept: "application/json" }, credentials: "same-origin" });
+    const token = teamToken();
+    if (!token) { els.logList.replaceChildren(); els.logNote.textContent = COPY.logTeamOnly; els.logNote.hidden = false; return; }
+    const res = await fetch("/api/booth/tracks", { headers: { accept: "application/json", authorization: `Bearer ${token}` }, credentials: "same-origin" });
     const data = await res.json();
+    if (res.status === 401) { els.logList.replaceChildren(); els.logNote.textContent = COPY.logTeamOnly; els.logNote.hidden = false; return; }
     if (!res.ok) throw new Error(data?.message || COPY.logFailed);
     renderLog(todayRows(data.tracks));
   } catch (err) {

@@ -3,6 +3,7 @@
 // sides, the page and its copy, the export, the promotion's verdict — and the rule that matters
 // most: an entry is never in the vote, and no route ever answers a name, an email or a phone number.
 import assert from "node:assert/strict";
+import { signTeamToken } from "../functions/_lib/team.js";
 import fs from "node:fs";
 import path from "node:path";
 import { after, before, test } from "node:test";
@@ -275,7 +276,8 @@ test("an entry is never in /api/state, the tally, /api/beats or the booth; no ro
   const probes = [
     await call(state.onRequest, env, { path: "/api/state" }),
     await call(beats.onRequest, env, { path: "/api/beats" }),
-    await call(booth.onRequest, env, { path: "/api/booth/tracks", params: { path: ["tracks"] } }),
+    // The booth's log as the signed-in team reads it (27 Nov 2026: strangers get 401).
+    await call(booth.onRequest, env, { path: "/api/booth/tracks", params: { path: ["tracks"] }, token: await signTeamToken(env, (await env.DB.prepare("INSERT INTO team_members (email, added_at) VALUES ('entry-crew@example.com', 1) ON CONFLICT (email) DO UPDATE SET removed_at = NULL RETURNING id").first()).id, Math.floor(Date.now() / 1000)) }),
   ];
   for (const p of probes) {
     assert.equal(p.status, 200);

@@ -2,8 +2,8 @@
 // The only door from the booth onto the voting site (the client's rule, 4 Oct 2026): a booth
 // track becomes a vote track here and nowhere else, and only when every person attached to it has
 // opted in. Share is anyone's call; the vote is everyone's consent.
-//   node scripts/promote-booth.mjs --env preview --code 2468
-//   node scripts/promote-booth.mjs --env production --code 2468 --label "Jane"
+//   node scripts/promote-booth.mjs --env preview --code 482109375512
+//   node scripts/promote-booth.mjs --env production --code 482109375512 --label "Jane"
 //   flags: --dry-run (print the verdict and do nothing)
 // REFUSES, with a named reason and a non-zero exit (functions/_lib/booth.js promoteVerdict):
 //   the code does not exist; the file is Scooter Taylor's (the loaders' rule, by file name);
@@ -19,7 +19,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
-import { promoteVerdict } from "../functions/_lib/booth.js";
+import { isCode, promoteVerdict } from "../functions/_lib/booth.js";
 import { ROOT, d1, parseArgs, r2Get, r2Put, sqlText, stopOnError, targets } from "./lib/cf.mjs";
 import { assignSlugs, slugify } from "./lib/names.mjs";
 
@@ -30,7 +30,7 @@ const SITE = { production: "https://voting.topbarz.xyz", preview: "https://stagi
 stopOnError();
 const args = parseArgs(process.argv.slice(2), { env: "value", code: "value", label: "value", "dry-run": "flag" });
 if (!args.env) { console.error("STOPPED: say where the track goes: --env preview | production"); process.exit(2); }
-if (!/^\d{4}$/.test(args.code ?? "")) { console.error("STOPPED: say which booth track: --code <its 4 digits>"); process.exit(2); }
+if (!isCode(args.code ?? "")) { console.error("STOPPED: say which booth track: --code <its 12 digits, or 4 for an older song>"); process.exit(2); }
 const target = targets(args.env);
 
 // The verdict first, from the booth row and its people's opt-ins (never their emails).

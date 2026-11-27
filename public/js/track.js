@@ -1,5 +1,5 @@
-// The rapper's page (/track): the 4-digit code WITH an email → the track, the vote's player, and
-// Download. The code box moves on to the email box on the fourth digit (or sends, when the email
+// The rapper's page (/track): the code WITH an email → the track, the vote's player, and
+// Download. The code box moves on to the email box on the twelfth digit (or sends, when the email
 // is already there); ?code=1234 fills the code on load. The track can be made public (a switch,
 // off until someone attached flips it), shared (the listen link through the share sheet, a text,
 // or the clipboard) and given artwork (a 1024 px square JPEG made on the device). Everyone who
@@ -18,7 +18,7 @@
 import { api } from "./api.js";
 import { $, h } from "./dom.js";
 import { boothShareMessage, detectPlatform, listenLink, safeMediaUrl, smsHref } from "./logic.js";
-import { artworkFor, cleanEmail, cleanPeople, cleanTrack, codeDigits, codeFromSearch, isCode, safeArtUrl, shareRoute, squareCrop, voteWords } from "./booth-rules.js";
+import { CODE_LENGTH, artworkFor, cleanEmail, cleanPeople, cleanTrack, codeDigits, codeFromSearch, isCode, safeArtUrl, shareRoute, squareCrop, voteWords } from "./booth-rules.js";
 import { createControls, createPlayer } from "./player.js";
 import { COPY } from "./track-copy.js";
 import { festive } from "./festive.js";
@@ -470,7 +470,7 @@ els.code.addEventListener("input", () => {
   const digits = codeDigits(els.code.value);
   if (els.code.value !== digits) els.code.value = digits;
   say("");
-  if (digits.length === 4) { if (cleanEmail(els.email.value)) enterFromForm(); else els.email.focus(); }
+  if (digits.length === CODE_LENGTH) { if (cleanEmail(els.email.value)) enterFromForm(); else els.email.focus(); }
 });
 els.email.addEventListener("input", () => say(""));
 els.form.addEventListener("submit", (ev) => {

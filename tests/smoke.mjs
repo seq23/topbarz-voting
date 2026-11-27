@@ -219,6 +219,7 @@ try {
   ok(strangerLog.status === 401 && /team_sign_in/.test(strangerText) && !strangerText.includes(up.body.code) && !strangerText.includes(lastCode), `GET /api/booth/tracks refuses a stranger (${strangerLog.status}) with no code in the answer`);
   // The team member seeded above (id 1), signed with the smoke's own secret, as /team's verify would.
   const crewToken = await signTeamToken({ VOTER_TOKEN_SECRET: "smoke-only-not-a-secret" }, 1, Math.floor(Date.now() / 1000));
+  const crewLog = () => ({ headers: { authorization: `Bearer ${crewToken}` } });
   const logRes = await j("/api/booth/tracks", { headers: { authorization: `Bearer ${crewToken}`, "cf-connecting-ip": "203.0.113.30" } });
   ok(logRes.status === 200 && logRes.body.tracks.length === 1 + realUploads && logRes.body.tracks[0].code === lastCode && logRes.body.tracks.at(-1).code === up.body.code && logRes.body.tracks.every((t) => /^\d{12}$/.test(t.code) && t.opened === 1 && !("media_key" in t)), `GET /api/booth/tracks with a team token lists the ${1 + realUploads} uploads, newest first, each opened once, no key`);
   const wrongCode = up.body.code === "0000" ? "0001" : "0000";
@@ -262,9 +263,9 @@ try {
   ok((await look(up.body.code)).body.share_id === shareId, "the next lookup says public, with the same id");
   const heard = await hear(shareId);
   ok(heard.status === 200 && heard.body.file_name === "Smoke Take 1.wav" && heard.body.audio_url === found.body.audio_url && heard.body.art_url === null && Object.keys(heard.body).join() === "file_name,audio_url,art_url", "GET /api/booth/listen/<share_id> answers a public track's name and audio, nothing else");
-  const openedBefore = (await j("/api/booth/tracks")).body.tracks.find((t) => t.code === up.body.code).opened;
+  const openedBefore = (await j("/api/booth/tracks", crewLog())).body.tracks.find((t) => t.code === up.body.code).opened;
   await hear(shareId); await hear(shareId);
-  ok((await j("/api/booth/tracks")).body.tracks.find((t) => t.code === up.body.code).opened === openedBefore, "listening never counts as an open");
+  ok((await j("/api/booth/tracks", crewLog())).body.tracks.find((t) => t.code === up.body.code).opened === openedBefore, "listening never counts as an open");
   const unknownId = shareId.replace(/./g, (c) => (c === "0" ? "1" : "0"));
   const nobody = await hear(unknownId);
   ok(nobody.status === 404 && nobody.body.error === "not_found" && nobody.body.message === "Sorry, this song is private.", "an unknown share id is a 404 not_found that says private");
@@ -288,7 +289,7 @@ try {
   ok((await hear(shareId)).body.art_url === put.body.art_url, "and so does the listen page's read, once the track is public again");
   const fake = await sendArt(up.body.code, Buffer.from("GIF89a not a jpeg at all, no matter the type"), "image/jpeg");
   ok(fake.status === 415 && fake.body.error === "not_image", "bytes that are not a JPEG are refused whatever the type says (415 not_image)");
-  const logNow = (await j("/api/booth/tracks")).body.tracks;
+  const logNow = (await j("/api/booth/tracks", crewLog())).body.tracks;
   const myRow = logNow.find((t) => t.code === up.body.code);
   ok(myRow && myRow.public === true && myRow.art_url === put.body.art_url && logNow.every((t) => typeof t.public === "boolean" && "art_url" in t && !("share_id" in t) && !("art_key" in t)), "GET /api/booth/tracks says which tracks are public and which have artwork, never a share id or a key");
   ok(myRow.people === 2 && myRow.everyone_in === true && logNow.every((t) => Number.isInteger(t.people) && typeof t.everyone_in === "boolean") && !JSON.stringify(logNow).includes("@"), "and how many people each has and whether all are in: counts, never an email (no \"@\" in the whole log)");
@@ -379,7 +380,7 @@ try {
   ok(promoted && promoted.label === "Smoke Group" && promoted.duration_ms === 1000 && /^\/media\/tracks\/smoke-group-[0-9a-f]{10}\.wav$/.test(promoted.audio_url) && s4.body.tracks.length === 2, "the promoted track is in /api/state beside the seeded one, with its label and duration");
   const promotedAudio = await fetch(base + promoted.audio_url, { headers: { range: "bytes=0-3" } });
   ok(promotedAudio.status === 206 && Buffer.from(await promotedAudio.arrayBuffer()).toString() === "RIFF" && promotedAudio.headers.get("content-type") === "audio/wav", "and its audio plays by Range from tracks/");
-  ok((await look(up.body.code)).status === 200 && (await j("/api/booth/tracks")).body.tracks.find((t) => t.code === up.body.code).everyone_in === true, "the booth row is untouched");
+  ok((await look(up.body.code)).status === 200 && (await j("/api/booth/tracks", crewLog())).body.tracks.find((t) => t.code === up.body.code).everyone_in === true, "the booth row is untouched");
   ok(!JSON.stringify(s4.body).includes("@") && !/booth/.test(JSON.stringify(s4.body)), "nothing of the people and nothing of the booth is in /api/state");
 
 

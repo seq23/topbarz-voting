@@ -452,7 +452,8 @@ dialog::backdrop { background: var(--color-backdrop); }
 }
 .done-title { font: 400 var(--text-head)/1.17 var(--font-display); letter-spacing: var(--tracking-display); color: var(--color-warm); }
 /* The code is read from across the room: as wide as the phone allows, four digits on one line. */
-.booth-code { font: 400 clamp(4.5rem, 23vw, 12rem)/1 var(--font-display); letter-spacing: 0.06em; margin-left: 0.06em; color: var(--color-warm); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.booth-code { display: flex; flex-wrap: wrap; justify-content: center; gap: 0 0.35em; font: 400 clamp(3rem, 15vw, 7rem)/1.05 var(--font-display); letter-spacing: 0.06em; margin-left: 0.06em; color: var(--color-warm); font-variant-numeric: tabular-nums; }
+.booth-code .code-group { white-space: nowrap; }
 .booth-code:focus { outline: none; }
 .done-file { color: var(--color-ink-2); overflow-wrap: anywhere; }
 .done .btn { margin-top: var(--space-3); }
@@ -466,11 +467,13 @@ dialog::backdrop { background: var(--color-backdrop); }
 .log li { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--space-1) var(--space-3); align-items: baseline; padding: var(--space-3) var(--space-2); border-bottom: 1px solid var(--color-rule); }
 .log li.has-art { grid-template-columns: max-content 40px minmax(0, 1fr); }
 .log-code { grid-row: span 2; font: 400 1.4rem/1.2 var(--font-display); color: var(--color-warm); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.log-code .code-group { display: block; }
 .log-art { grid-row: span 2; align-self: center; width: 40px; height: 40px; object-fit: cover; border: 1px solid var(--color-rule); }
 .log-file { overflow-wrap: anywhere; }
 .log-meta { font-size: var(--text-sm); color: var(--color-ink-2); }
 .code-form { max-width: var(--measure); margin: var(--space-6) auto 0; padding-inline: var(--space-5); display: grid; gap: var(--space-4); justify-items: center; }
 .code-form .field { width: min(100%, 300px); text-align: center; }
+#tbz-code { font-size: clamp(1.25rem, 6.4vw, 1.7rem); letter-spacing: 0.1em; padding-inline: 8px; }
 .code-form .btn { min-width: 160px; }
 .found { max-width: var(--column); margin: var(--space-8) auto 0; padding: var(--space-6) var(--space-3) var(--space-16); display: grid; gap: var(--space-4); justify-items: center; text-align: center; scroll-margin-top: var(--space-3); }
 .found h2 { font: 400 var(--text-head)/1.17 var(--font-display); letter-spacing: var(--tracking-display); color: var(--color-warm); }

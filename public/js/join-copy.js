@@ -23,7 +23,7 @@ export const COPY = {
   placeNext: "You're next. Stay close.",
   placeN: "You're number {n} in line.",
   placeUpload: "You're out of the booth. The engineer is saving your song now.",
-  placeDone: "Your song is uploaded. Ask your engineer for its 4-digit code to hear it, download it and enter it in the contest.",
+  placeDone: "Your song is uploaded. Ask your engineer for its code to hear it, download it and enter it in the contest.",
   placeUnknown: "You're in line.",
   // What happens next, under the place (never a silent block).
   nextWaiting: "Keep this page open: it updates by itself. We text you when it is your turn.",

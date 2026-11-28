@@ -97,20 +97,30 @@ export function downloadName(raw) {
   return clean || "track";
 }
 
-// Four digits from the platform's random source, with no bias (rejection sampling), 0000–9999.
-export function randomCode(random = (n) => crypto.getRandomValues(new Uint16Array(n))) {
-  for (;;) {
-    const [v] = random(1);
-    if (v < 60000) return String(v % 10000).padStart(4, "0");
+// A new code is twelve digits from the platform's random source, with no bias (rejection
+// sampling: a byte of 250 or more is drawn again), so it cannot be found by trying them (10^12 of
+// them, behind the lookup limits). Read out in three groups of four. The four-digit codes handed
+// out before 27 Nov 2026 still open their songs: isCode takes both lengths, and nothing new is
+// ever four digits.
+export const CODE_LENGTH = 12;
+export const LEGACY_CODE_LENGTH = 4;
+export function randomCode(random = (n) => crypto.getRandomValues(new Uint8Array(n))) {
+  let code = "";
+  while (code.length < CODE_LENGTH) {
+    for (const b of random(CODE_LENGTH)) {
+      if (b < 250 && code.length < CODE_LENGTH) code += String(b % 10);
+    }
   }
+  return code;
 }
-export const isCode = (s) => typeof s === "string" && /^\d{4}$/.test(s);
+export const isCode = (s) => typeof s === "string" && /^(\d{4}|\d{12})$/.test(s);
 
-// The key is the code plus 16 random hex characters: a track is reachable only with the key the
-// lookup hands out, never by guessing a code against /media.
-export function mediaKey(code, ext, random = (n) => crypto.getRandomValues(new Uint8Array(n))) {
-  const hex = [...random(8)].map((b) => b.toString(16).padStart(2, "0")).join("");
-  return `booth/${code}-${hex}.${ext}`;
+// The key is 32 random hex characters and never the code: an audio address (the listen page, the
+// vote's player) hands out nothing that opens the song's controls. Keys from before 27 Nov 2026
+// are booth/<code>-<16 hex>; they keep working where they are.
+export function mediaKey(ext, random = (n) => crypto.getRandomValues(new Uint8Array(n))) {
+  const hex = [...random(16)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return `booth/${hex}.${ext}`;
 }
 
 // The share id: 16 hex characters from the platform's random source, drawn on its own, so it is
@@ -154,7 +164,7 @@ const INSERT_SQL = `INSERT OR IGNORE INTO booth_tracks (code, file_name, content
 export async function reserveCode(db, { fileName, contentType, size, ext, uploadedAt }, { random, tries = BOOTH_CODE_TRIES } = {}) {
   for (let i = 0; i < tries; i++) {
     const code = randomCode(random);
-    const key = mediaKey(code, ext);
+    const key = mediaKey(ext);
     const res = await db.prepare(INSERT_SQL).bind(code, fileName, contentType, size, key, uploadedAt, shareId()).all();
     const id = res.results?.[0]?.id;
     if (id !== undefined) return { id, code, mediaKey: key };

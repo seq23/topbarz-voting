@@ -1,13 +1,14 @@
 // The rules of the booth pages (/booth, /track) with no screen in them: what a code is, which
 // files the drop zone takes, what the server's answers may be shown as, and the words for a size
 // or a time. Unit-tested in tests/booth.test.mjs; booth.js and track.js import it as it is.
-export const CODE_LENGTH = 4;
+export const CODE_LENGTH = 12;
 export const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 export const UPLOAD_EXTENSIONS = ["wav", "mp3", "m4a", "aif", "aiff", "flac"];
 
-export const isCode = (s) => typeof s === "string" && /^\d{4}$/.test(s);
+export const isCode = (s) => typeof s === "string" && /^(\d{4}|\d{12})$/.test(s);
+export const codeGroups = (c) => (isCode(c) ? c.match(/\d{4}/g) : []);
 
-// Whatever was typed or pasted → its digits, at most four. "" when there are none.
+// Typed or pasted → its digits, at most twelve; "" if none.
 export function codeDigits(value) {
   return String(value ?? "").replace(/\D/g, "").slice(0, CODE_LENGTH);
 }

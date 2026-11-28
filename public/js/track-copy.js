@@ -2,8 +2,8 @@
 //   The page's elements are empty in track.html and filled from here.
 export const COPY = {
   headline: "Hear your track",
-  intro: "Type the 4-digit code your engineer gave you, and your email.",
-  codeLabel: "4-digit code",
+  intro: "Type the code your engineer gave you, and your email.",
+  codeLabel: "Your code",
   emailLabel: "Your email",
   go: "Go",
   looking: "Looking it up",
@@ -12,7 +12,7 @@ export const COPY = {
   another: "Enter another code",
   notFound: "No track with that code yet. Ask your engineer.",
   tooMany: "Too many tries. Give it a minute.",
-  needCode: "Type all 4 digits.",
+  needCode: "Type the whole code: 12 digits, or 4 for an older song.",
   needEmail: "Enter your email.",
   badEmail: "That email does not look right. Check it and try again.",
   notAttached: "Enter the code with your email first.",

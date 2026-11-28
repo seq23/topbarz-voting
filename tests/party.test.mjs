@@ -915,7 +915,7 @@ test("the team's downloads (Scooter, 20 Nov 2026: \"a CSV export on the team pag
   assert.ok(pia.includes('"Pia Solo.mp3"'));
   await B(up.body.code, "contest", { email: "pia.quotes@gmail.com", enter: false });
   const out = (await get("team/export/songs.csv", { token })).text.split("\r\n").find((r) => r.startsWith(`"${up.body.code}",`));
-  assert.match(out, /^"\d{4}","Pia's Carol","Pia Quotes","1","no \(withdrawn\)","2","1","withdrawn by Pia at /, "withdrawn: no longer in the vote, its votes kept");
+  assert.match(out, /^"\d{12}","Pia's Carol","Pia Quotes","1","no \(withdrawn\)","2","1","withdrawn by Pia at /, "withdrawn: no longer in the vote, its votes kept");
 });
 
 test("the held file (Scooter, 20 Nov 2026: \"the file waits until the right recording pops up, the engineer confirms the names, and only then it attaches\"): the page asks again only for a recording the engineer has not refused; only Yes uploads", async () => {

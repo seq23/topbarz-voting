@@ -2,7 +2,7 @@
 //   {name} in `uploading` becomes the file's name. The page's elements are empty in booth.html.
 export const COPY = {
   headline: "Hand back a track",
-  intro: "Drop the finished file here. You get a 4-digit code to give the artist: they enter it at voting.topbarz.xyz/track to hear and download their track.",
+  intro: "Drop the finished file here. You get a code to give the artist: they enter it at voting.topbarz.xyz/track to hear and download their track.",
   zone: "Drop the file here, or tap to choose",
   zoneHint: "WAV, MP3, M4A, AIFF or FLAC, up to 100 MB",
   uploading: "Uploading {name}",
@@ -18,6 +18,7 @@ export const COPY = {
   logTitle: "Today's uploads",
   logEmpty: "Nothing uploaded today yet.",
   logFailed: "The log did not load.",
+  logTeamOnly: "This list is for the signed-in team. Each code still shows above as its upload finishes.",
   // The people (4 Oct 2026): how many entered the code on /track, and whether all opted in to the vote. Never a name.
   nobody: "nobody yet",
   onePerson: "1 person",

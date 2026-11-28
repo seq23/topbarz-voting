@@ -22,11 +22,14 @@ import {
   allIn, artKey, artMagic, artSize, artType, audioExtension, audioType, cleanEmail, cleanFileName, countPeople, downloadName, everyoneIn, isCode, isShareId, mediaKey, promoteVerdict, randomCode, reserveCode, shareId, uploadSize,
 } from "../functions/_lib/booth.js";
 import { LIMITS } from "../functions/_lib/config.js";
+import { signTeamToken } from "../functions/_lib/team.js";
+import { TEAM_KEY as PARTY_TEAM_KEY } from "../public/js/party-rules.js";
+import { signVoterToken } from "../functions/_lib/token.js";
 import { isScooterTaylor, isTestName } from "../functions/_lib/exclusions.js";
 import { computeTally } from "../functions/_lib/tally.js";
 import { COPY as BOOTH_COPY } from "../public/js/booth-copy.js";
 import {
-  ART_SIDE, CODE_LENGTH, EMAIL_MAX as PAGE_EMAIL_MAX, MAX_UPLOAD_BYTES, UPLOAD_EXTENSIONS, artworkFor, cleanEmail as pageCleanEmail, cleanListen, cleanPeople, cleanTrack, codeDigits, codeFromSearch, formatSize, openedWords, peopleWords, refuseFile, safeArtUrl, safeBoothUrl, shareIdFromPath, shareRoute, squareCrop, todayRows, uploadFailure, voteWords,
+  ART_SIDE, CODE_LENGTH, EMAIL_MAX as PAGE_EMAIL_MAX, MAX_UPLOAD_BYTES, UPLOAD_EXTENSIONS, artworkFor, cleanEmail as pageCleanEmail, cleanListen, cleanPeople, cleanTrack, codeDigits, codeFromSearch, codeGroups, formatSize, openedWords, peopleWords, refuseFile, safeArtUrl, safeBoothUrl, shareIdFromPath, shareRoute, squareCrop, todayRows, uploadFailure, voteWords, isCode as pageIsCode,
 } from "../public/js/booth-rules.js";
 import { COPY as LISTEN_COPY } from "../public/js/listen-copy.js";
 import { boothShareMessage, detectPlatform, listenLink, smsHref } from "../public/js/logic.js";
@@ -63,7 +66,16 @@ const enter = (env, code, email = ME, ip = freshIp()) => call(booth.onRequest, e
 const lookup = (env, code, ip) => enter(env, code, ME, ip);
 const lookupGet = (env, code, ip = freshIp()) => call(booth.onRequest, env, { path: `/api/booth/tracks/${code}`, ip, params: { path: ["tracks", code] } });
 const vote = (env, code, body, ip = freshIp()) => call(booth.onRequest, env, { method: "POST", path: `/api/booth/tracks/${code}/vote`, ip, body: { email: ME, ...body }, params: { path: ["tracks", code, "vote"] } });
-const log = (env, ip = freshIp()) => call(booth.onRequest, env, { path: "/api/booth/tracks", ip, params: { path: ["tracks"] } });
+// The log is the signed-in team's (27 Nov 2026): a team token of a member still on the list.
+const teamTokens = new WeakMap();
+async function boothTeamToken(env, email = "engineer@example.com") {
+  const row = await env.DB.prepare("INSERT INTO team_members (email, added_at) VALUES (?1, ?2) ON CONFLICT (email) DO UPDATE SET removed_at = NULL RETURNING id").bind(email, Date.now()).first();
+  return signTeamToken(env, row.id, Math.floor(Date.now() / 1000));
+}
+const log = async (env, ip = freshIp(), token) => {
+  if (token === undefined) { if (!teamTokens.has(env)) teamTokens.set(env, await boothTeamToken(env)); token = teamTokens.get(env); }
+  return call(booth.onRequest, env, { path: "/api/booth/tracks", ip, token: token || undefined, params: { path: ["tracks"] } });
+};
 const getMedia = (env, url, headers = {}) => { const [p, q] = url.split("?"); return call(media.onRequest, env, { path: p + (q ? `?${q}` : ""), headers, params: { path: p.replace("/media/", "").split("/") } }); };
 // The share (4 Oct 2026): the switch, the listen page's read, and the artwork (a raw body, as the page sends it).
 // The change routes carry the email (the body for the switch and the vote, the x-email header for the artwork); ME unless a test says otherwise.
@@ -95,20 +107,23 @@ before(async () => {
 after(() => dispose());
 
 // ── Codes ────────────────────────────────────────────────────────────────────────────────────
-test("a code is four digits from the platform's random source, with no bias, and the key under it is unguessable", () => {
-  for (let i = 0; i < 500; i++) assert.match(randomCode(), /^\d{4}$/);
-  // Rejection sampling: 60000–65535 is thrown away, so every code is equally likely.
-  const draws = [60000, 65535, 9999, 0, 12345];
-  assert.equal(randomCode((n) => Uint16Array.from([draws.shift()])), "9999", "a draw of 60000 or more is drawn again");
-  assert.equal(randomCode(() => Uint16Array.from([0])), "0000");
-  assert.equal(randomCode(() => Uint16Array.from([12345])), "2345");
-  assert.equal(randomCode(() => Uint16Array.from([59999])), "9999");
-  for (const good of ["0000", "2468", "9999"]) assert.equal(isCode(good), true, good);
-  for (const bad of ["246", "24685", "24a8", " 2468", "2468\n", 2468, null, undefined, ""]) assert.equal(isCode(bad), false, String(bad));
-  assert.match(mediaKey("2468", "mp3"), /^booth\/2468-[0-9a-f]{16}\.mp3$/);
-  assert.equal(mediaKey("0001", "wav", (n) => new Uint8Array(n).fill(0xab)), "booth/0001-abababababababab.wav");
-  assert.ok(new Set(Array.from({ length: 50 }, () => mediaKey("2468", "mp3"))).size === 50, "fifty keys for one code are fifty different keys");
-  assert.equal(CODE_LENGTH, 4);
+test("a new code is twelve digits from the platform's random source, with no bias; four-digit codes from before still open; the key under it never carries the code", () => {
+  for (let i = 0; i < 500; i++) assert.match(randomCode(), /^\d{12}$/);
+  // Rejection sampling: a byte of 250–255 is thrown away, so every digit is equally likely.
+  const bytes = (...v) => { const q = [...v]; return (n) => Uint8Array.from(q.splice(0, n)); };
+  assert.equal(randomCode(bytes(250, 255, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 249)), "123456789019", "a byte of 250 or more is drawn again, and the draw goes on until there are twelve (10 → 0, 249 → 9)");
+  assert.equal(randomCode(() => new Uint8Array(12)), "000000000000");
+  assert.equal(randomCode(() => new Uint8Array(12).fill(249)), "999999999999");
+  // A guesser's odds: one code in 10^12, behind 30 tries an hour per connection.
+  const seen = new Set(Array.from({ length: 2000 }, () => randomCode()));
+  assert.equal(seen.size, 2000, "two thousand codes, two thousand different ones");
+  for (const good of ["0000", "2468", "9999", "482109375512", "000000000000"]) assert.equal(isCode(good), true, good);
+  for (const bad of ["246", "24685", "24a8", " 2468", "2468\n", 2468, null, undefined, "", "48210937551", "4821093755123", "4821 0937 5512", "48210937551a", 482109375512]) assert.equal(isCode(bad), false, String(bad));
+  assert.match(mediaKey("mp3"), /^booth\/[0-9a-f]{32}\.mp3$/);
+  assert.equal(mediaKey("wav", (n) => new Uint8Array(n).fill(0xab)), `booth/${"ab".repeat(16)}.wav`);
+  assert.ok(new Set(Array.from({ length: 50 }, () => mediaKey("mp3"))).size === 50, "fifty keys are fifty different keys");
+  assert.equal(CODE_LENGTH, 12);
+  assert.deepEqual(["2468", "482109375512", "48210937551", "x"].map(pageIsCode), ["2468", "482109375512", "48210937551", "x"].map(isCode), "the page's code rule is the server's");
 });
 
 test("reserving a code: UNIQUE in the table decides; a collision is retried with a fresh code, bounded; never two rows on one code", async () => {
@@ -116,19 +131,20 @@ test("reserving a code: UNIQUE in the table decides; a collision is retried with
   try {
     const db = fresh.env.DB;
     const row = { fileName: "a.wav", contentType: "audio/wav", size: 10, ext: "wav", uploadedAt: 1700000000000 };
-    const seq = (...codes) => { const q = [...codes]; return () => Uint16Array.from([q.length > 1 ? q.shift() : q[0]]); }; // the last draw repeats
-    const first = await reserveCode(db, row, { random: seq(1234) });
-    assert.equal(first.code, "1234");
-    const second = await reserveCode(db, row, { random: seq(1234, 1234, 5678) });
-    assert.equal(second.code, "5678", "two collisions, then a free code");
-    const stuck = await reserveCode(db, row, { random: seq(1234), tries: 3 });
+    const A = "123412341234", B = "567856785678";
+    const seq = (...codes) => { const q = [...codes]; return () => Uint8Array.from([...(q.length > 1 ? q.shift() : q[0])].map(Number)); }; // the last draw repeats
+    const first = await reserveCode(db, row, { random: seq(A) });
+    assert.equal(first.code, A);
+    const second = await reserveCode(db, row, { random: seq(A, A, B) });
+    assert.equal(second.code, B, "two collisions, then a free code");
+    const stuck = await reserveCode(db, row, { random: seq(A), tries: 3 });
     assert.equal(stuck, null, "every try collided: null, not a throw and not a duplicate");
     const all = (await db.prepare("SELECT code, media_key FROM booth_tracks ORDER BY id").all()).results;
-    assert.deepEqual(all.map((r) => r.code), ["1234", "5678"]);
-    assert.ok(all.every((r) => r.media_key.startsWith(`booth/${r.code}-`)));
+    assert.deepEqual(all.map((r) => r.code), [A, B]);
+    assert.ok(all.every((r) => /^booth\/[0-9a-f]{32}\.wav$/.test(r.media_key) && !r.media_key.includes(r.code)), "the key never carries the code");
     assert.equal(BOOTH_CODE_TRIES, 25);
     // The constraint itself, not the code around it, is what refuses a second row.
-    await assert.rejects(db.prepare("INSERT INTO booth_tracks (code, file_name, media_key, uploaded_at) VALUES ('1234', 'b.wav', 'booth/1234-x.wav', 1)").run(), /UNIQUE/);
+    await assert.rejects(db.prepare("INSERT INTO booth_tracks (code, file_name, media_key, uploaded_at) VALUES (?1, 'b.wav', 'booth/x.wav', 1)").bind(A).run(), /UNIQUE/);
     const codes = new Set();
     for (let i = 0; i < 40; i++) codes.add((await reserveCode(db, row)).code);
     assert.equal(codes.size, 40, "forty random reservations are forty different codes");
@@ -179,19 +195,20 @@ test("audio only: the extension and the declared type both have to say so; the s
 });
 
 // ── The upload route ─────────────────────────────────────────────────────────────────────────
-test("POST /api/booth/tracks: the raw file goes to R2 under booth/<code>-<random>.<ext> with the name kept; the answer is the code", async () => {
+test("POST /api/booth/tracks: the raw file goes to R2 under booth/<32 random hex>.<ext> (never the code) with the name kept; the answer is a 12-digit code", async () => {
   const bytes = wav(3000);
   const res = await upload(env, { name: "Test - Carlos & Damien.wav", type: "audio/x-wav", bytes });
   assert.equal(res.status, 200, res.text);
   assert.deepEqual(Object.keys(res.body), ["code", "file_name", "uploaded_at"]);
-  assert.match(res.body.code, /^\d{4}$/);
+  assert.match(res.body.code, /^\d{12}$/);
   assert.equal(res.body.file_name, "Test - Carlos & Damien.wav");
   assert.ok(Date.now() - Date.parse(res.body.uploaded_at) < 10_000);
   const row = await env.DB.prepare("SELECT * FROM booth_tracks WHERE code = ?1").bind(res.body.code).first();
   assert.equal(row.file_name, "Test - Carlos & Damien.wav");
   assert.equal(row.content_type, "audio/x-wav");
   assert.equal(row.size, 3000);
-  assert.match(row.media_key, new RegExp(`^booth/${res.body.code}-[0-9a-f]{16}\\.wav$`));
+  assert.match(row.media_key, /^booth\/[0-9a-f]{32}\.wav$/);
+  assert.ok(!row.media_key.includes(res.body.code), "the key never carries the code");
   assert.equal(row.opened, 0);
   assert.equal(row.last_opened_at, null);
   const obj = await env.MEDIA.get(row.media_key);
@@ -294,7 +311,8 @@ test("POST /api/booth/tracks/<code>/enter: the right code WITH an email gives th
   assert.deepEqual([found.body.people, found.body.opted, found.body.everyone_in], [1, 0, false], "one person attached, nobody in: not everyone in");
   assert.equal(found.body.code, code);
   assert.equal(found.body.file_name, "Test - Chelos x Madame Prez x Cam.mp3");
-  assert.match(found.body.audio_url, new RegExp(`^/media/booth/${code}-[0-9a-f]{16}\\.mp3$`));
+  assert.match(found.body.audio_url, /^\/media\/booth\/[0-9a-f]{32}\.mp3$/);
+  assert.ok(!found.body.audio_url.includes(code), "the audio address never carries the code: a public listen link or the vote's player hands out nothing that opens the song");
   assert.equal(found.body.download_url, `${found.body.audio_url}?dl=1`);
   assert.equal(found.body.size, 1200);
   assert.equal(found.body.uploaded_at, up.body.uploaded_at);
@@ -335,7 +353,9 @@ test("POST /api/booth/tracks/<code>/enter: the right code WITH an email gives th
   // The old lookup is gone: there is no track without an email. The log keeps its trailing-slash address.
   assert.equal((await lookupGet(env, code)).status, 404, "GET /api/booth/tracks/<code> is no route");
   assert.equal((await call(booth.onRequest, env, { path: `/api/booth/tracks/${code}/enter`, params: { path: ["tracks", code, "enter"] } })).status, 404, "GET on enter is no route");
-  assert.equal((await call(booth.onRequest, env, { path: "/api/booth/tracks/", params: { path: ["tracks", ""] } })).status, 200, "a trailing slash is the log, not a lookup");
+  const slash = await call(booth.onRequest, env, { path: "/api/booth/tracks/", params: { path: ["tracks", ""] } });
+  assert.equal(slash.status, 401, "a trailing slash is the log (the team's: 401 without a team token), not a lookup");
+  assert.equal(slash.body.error, "team_sign_in");
   assert.equal((await call(booth.onRequest, env, { path: `/api/booth/tracks/${code}/x`, params: { path: ["tracks", code, "x"] } })).status, 404);
   assert.equal((await call(booth.onRequest, env, { method: "POST", path: `/api/booth/tracks/${code}/x`, params: { path: ["tracks", code, "x"] }, body: { email: ME } })).status, 404);
   const source = src("functions/api/booth/[[path]].js") + src("functions/_lib/booth.js");
@@ -413,6 +433,48 @@ test("GET /api/booth/tracks is the log: newest first, at most 200 rows, 60 reads
     assert.equal(await acceptedBeforeLimit(() => log(fresh.env, ip), LIMITS.boothLogPerIp.max), 60);
     assert.deepEqual(LIMITS.boothLogPerIp, { window: 60, max: 60 });
   } finally { await fresh.dispose(); }
+});
+
+test("GET /api/booth/tracks is the signed-in team's only: a stranger, a voter, a forged or expired token and a member taken off the list all get 401 and no code", async () => {
+  const fresh = await makeEnv();
+  try {
+    const db = fresh.env.DB;
+    await db.prepare("INSERT INTO booth_tracks (code, file_name, content_type, size, media_key, uploaded_at) VALUES ('482109375512', 'Private Take.wav', 'audio/wav', 10, 'booth/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.wav', ?1)").bind(Date.now()).run();
+    const nowS = Math.floor(Date.now() / 1000);
+    const member = await db.prepare("INSERT INTO team_members (email, added_at) VALUES ('crew@example.com', ?1) RETURNING id").bind(Date.now()).first();
+    const live = await signTeamToken(fresh.env, member.id, nowS);
+    const refused = async (token, why) => {
+      const res = await log(fresh.env, freshIp(), token);
+      assert.equal(res.status, 401, why);
+      assert.equal(res.body.error, "team_sign_in", why);
+      assert.ok(!res.text.includes("482109375512") && !res.text.includes("Private Take"), `${why}: no code, no file name`);
+    };
+    await refused(null, "no token (a stranger)");
+    await refused("t1.1.9999999999." + "0".repeat(64), "a forged token");
+    await refused(await signTeamToken({ VOTER_TOKEN_SECRET: "another-secret" }, member.id, nowS), "a token signed with another secret");
+    await refused(await signTeamToken(fresh.env, member.id, nowS - 31 * 86400), "an expired token (30 days)");
+    await refused(await signTeamToken(fresh.env, 999999, nowS), "a token for nobody on the list");
+    await refused(await signVoterToken(fresh.env, 1), "a voter's token is never a team token");
+    const ok = await log(fresh.env, freshIp(), live);
+    assert.equal(ok.status, 200, "the signed-in team reads it");
+    assert.deepEqual(ok.body.tracks.map((t) => t.code), ["482109375512"]);
+    await db.prepare("UPDATE team_members SET removed_at = ?2 WHERE id = ?1").bind(member.id, Date.now()).run();
+    await refused(live, "a member taken off the list, with a token still in date");
+    // The signing secret missing (an outage of config) is a refusal, never the list.
+    const { VOTER_TOKEN_SECRET: _gone, ...noSecret } = fresh.env;
+    const outage = await log(noSecret, freshIp(), live);
+    assert.equal(outage.status, 503);
+    assert.ok(!outage.text.includes("482109375512"), "no secret: refused, no code");
+  } finally { await fresh.dispose(); }
+});
+
+test("the booth page asks for the log with the team token the team page kept, and without one says the list is the team's", () => {
+  const js = src("public/js/booth.js");
+  assert.match(js, /authorization: `Bearer \$\{token\}`/, "the log fetch carries the team token");
+  assert.match(js, /if \(!token\) \{[^}]*COPY\.logTeamOnly/, "no token: the note, and no request");
+  assert.match(js, /res\.status === 401\) \{[^}]*COPY\.logTeamOnly/, "a dead token: the same note");
+  assert.ok(BOOTH_COPY.logTeamOnly.length > 0 && !/\d{4}/.test(BOOTH_COPY.logTeamOnly));
+  assert.ok(js.includes(`const TEAM_KEY = ${JSON.stringify(PARTY_TEAM_KEY)};`), "the same key the team page keeps its token under");
 });
 
 // ── The media ────────────────────────────────────────────────────────────────────────────────
@@ -546,10 +608,14 @@ test("a booth track is never in the vote: not in /api/state, /api/beats, the tal
 });
 
 // ── The pages' rules (public/js/booth-rules.js) ──────────────────────────────────────────────
-test("the code box: digits only, four at most; ?code= in the address is a code or nothing", () => {
+test("the code box: digits only, twelve at most, read out in groups of four; ?code= in the address is a code or nothing", () => {
   assert.equal(codeDigits("2468"), "2468");
   assert.equal(codeDigits(" 24-68 "), "2468", "a pasted code with a dash");
-  assert.equal(codeDigits("246890"), "2468", "never more than four");
+  assert.equal(codeDigits("4821 0937 5512"), "482109375512", "a code read out in groups");
+  assert.equal(codeDigits("48210937551299"), "482109375512", "never more than twelve");
+  assert.deepEqual(codeGroups("482109375512"), ["4821", "0937", "5512"], "read out in three groups of four");
+  assert.deepEqual(codeGroups("2468"), ["2468"], "an older code as it is");
+  assert.deepEqual(codeGroups("24680"), [], "not a code: nothing shown");
   assert.equal(codeDigits("abc"), "");
   assert.equal(codeDigits(null), "");
   assert.equal(codeFromSearch("?code=2468"), "2468");
@@ -629,7 +695,7 @@ test("today's log: today's rows only, newest first, well-formed only; sizes, tim
 
 // ── The pages ────────────────────────────────────────────────────────────────────────────────
 test("the copy of each page is one object with exactly these keys, and the page's elements are empty until it is read", () => {
-  assert.deepEqual(Object.keys(BOOTH_COPY), ["headline", "intro", "zone", "zoneHint", "uploading", "doneTitle", "next", "retry", "failed", "notAudio", "tooBig", "empty", "dailyLimit", "rateLimited", "logTitle", "logEmpty", "logFailed", "nobody", "onePerson", "people", "allIn", "groupsTitle", "queued", "inBoothNow", "groupsNone", "flagTest", "flagStale", "flagged", "walkUpConfirm", "walkUpPick", "walkUpGo", "walkUpHeld", "heldForget", "heldAgain", "groupsNote", "sessionGone"].flatMap((k) => (k === "inBoothNow" ? [k, "recordingNow", "inBooth", "outOfBooth"] : k === "groupsNone" ? [k, "confirmGroup", "confirmGroupNote", "confirmGroupGo", "confirmGroupNo", "confirmGroupHeld"] : [k])));
+  assert.deepEqual(Object.keys(BOOTH_COPY), ["headline", "intro", "zone", "zoneHint", "uploading", "doneTitle", "next", "retry", "failed", "notAudio", "tooBig", "empty", "dailyLimit", "rateLimited", "logTitle", "logEmpty", "logFailed", "logTeamOnly", "nobody", "onePerson", "people", "allIn", "groupsTitle", "queued", "inBoothNow", "groupsNone", "flagTest", "flagStale", "flagged", "walkUpConfirm", "walkUpPick", "walkUpGo", "walkUpHeld", "heldForget", "heldAgain", "groupsNote", "sessionGone"].flatMap((k) => (k === "inBoothNow" ? [k, "recordingNow", "inBooth", "outOfBooth"] : k === "groupsNone" ? [k, "confirmGroup", "confirmGroupNote", "confirmGroupGo", "confirmGroupNo", "confirmGroupHeld"] : [k])));
   assert.deepEqual(Object.keys(TRACK_COPY), ["headline", "intro", "codeLabel", "emailLabel", "go", "looking", "found", "download", "another", "notFound", "tooMany", "needCode", "needEmail", "badEmail", "notAttached", "you", "audioNone", "audioFailed", "publicLabel", "publicOff", "publicOn", "publicFailed", "publicNote", "share", "shareMessage", "copied", "copyFailed", "addArt", "changeArt", "artWorking", "artUnreadable", "artFailed", "voteLabel", "voteWaiting", "voteAll", "voteOnlyYou", "voteFailed", "downloadSong", "shareSong", "viewContest", "listenOnly", "accessOne", "accessMany", "accessNobody", "youreOn", "contestTitle", "contestHelp", "contestBox", "contestRules", "titleLabel", "titleSave", "titleSaved", "contestEntered", "contestEnteredAt", "contestWithdrawn", "contestNotYet", "contestSomeone", "testEntry", "notEligible", "contestClosed", "contestSignUp", "contestFailed", "contestPulled"]);
   assert.deepEqual(Object.keys(LISTEN_COPY), ["title", "loading", "line", "private", "instagram", "artAlt", "audioNone", "audioFailed"]);
   for (const copy of [BOOTH_COPY, TRACK_COPY, LISTEN_COPY]) for (const [k, v] of Object.entries(copy)) assert.ok(typeof v === "string" && v.trim(), `${k} is a sentence`);
@@ -677,8 +743,10 @@ test("the copy of each page is one object with exactly these keys, and the page'
     const found = [...new Set([...js.matchAll(/[\w$-]*email[\w$-]*/gi)].map((m) => m[0]))].sort();
     assert.deepEqual(found, (EMAIL_MENTIONS[file] ?? []).slice().sort(), `${file}: every mention of an email is one of the named ones (${found.join(", ")})`);
     const stored = [...js.matchAll(/localStorage\.(\w+)\(([^)]*)\)/g)].map((m) => `${m[1]}(${m[2]})`);
-    // track.js keeps only its email (the contest entry no longer reads the sign-up phone's key).
-    assert.deepEqual(stored, file === "track.js" ? ["getItem(EMAIL_KEY)", "setItem(EMAIL_KEY, email)"] : [], `${file}: ${file === "track.js" ? "the device keeps the email and nothing else" : "nothing is kept on the device"}`);
+    // track.js keeps only its email (the contest entry no longer reads the sign-up phone's key);
+    // booth.js only READS the team token the team page kept (27 Nov 2026: the log is the team's), and writes nothing.
+    const expected = { "track.js": ["getItem(EMAIL_KEY)", "setItem(EMAIL_KEY, email)"], "booth.js": ["getItem(TEAM_KEY)"] }[file] ?? [];
+    assert.deepEqual(stored, expected, `${file}: ${file === "track.js" ? "the device keeps the email and nothing else" : file === "booth.js" ? "the team token is read, nothing is written" : "nothing is kept on the device"}`);
     assert.ok(!/sessionStorage|document\.cookie|indexedDB/.test(js), `${file}: no cookie, no session store, no database`);
   }
   const track = src("public/js/track.js");
@@ -708,7 +776,9 @@ test("/booth: a drop zone that is also tap-to-choose, an upload with progress, t
   for (const ev of ["dragover", "drop"]) assert.ok(js.includes(`"${ev}"`), `${ev} is handled`);
   assert.match(js, /ev\.dataTransfer\?\.files\?\.\[0\]/);
   assert.match(html, /<p id="tbz-code" class="booth-code" tabindex="-1"><\/p>/);
-  assert.match(css, /\n\.booth-code \{ font: 400 clamp\(4\.5rem, 23vw, 12rem\)\/1 var\(--font-display\);[^}]*white-space: nowrap;/, "the code is as big as the phone allows, on one line (390px wide: no sideways scroll)");
+  assert.match(css, /\n\.booth-code \{ display: flex; flex-wrap: wrap; justify-content: center;[^}]*font: 400 clamp\(3rem, 15vw, 7rem\)\/1\.05 var\(--font-display\);/, "the code is as big as the phone allows, its groups wrapping (320px wide: no sideways scroll)");
+  assert.match(css, /\n\.booth-code \.code-group \{ white-space: nowrap; \}/, "a group of four never breaks");
+  assert.match(src("public/js/booth.js"), /els\.code\.replaceChildren\(\.\.\.codeGroups\(code\)\.map\(\(g\) => h\("span", \{ class: "code-group", text: g \}\)\)\);/, "the code is drawn as its groups, as text");
   assert.match(html, /<button type="button" id="tbz-next" class="btn"><\/button>/);
   assert.match(css, /\n\.log li \{ display: grid; grid-template-columns: max-content minmax\(0, 1fr\);/, "the log's code column is as wide as the code, never a fixed width that wraps it (390px wide it broke 2947 into 294 / 7)");
   assert.match(css, /\n\.log-code \{[^}]*white-space: nowrap;/, "a code in the log stays on one line");
@@ -725,11 +795,12 @@ test("/booth: a drop zone that is also tap-to-choose, an upload with progress, t
   assert.ok(!/\.(innerHTML|outerHTML)/.test(js));
 });
 
-test("/track: Hear your track, a numeric code box that moves on to the email box on the fourth digit (or sends, with the email filled in), the vote's player, Download; ?code= fills the code on load; this person's own vote switch", () => {
+test("/track: Hear your track, a numeric code box that moves on to the email box on the twelfth digit (or sends, with the email filled in), the vote's player, Download; ?code= fills the code on load; this person's own vote switch", () => {
   const html = src("public/track.html");
   const js = src("public/js/track.js");
   assert.ok(!/name="robots"/.test(html), "the rapper's page is open");
-  assert.match(html, /<input id="tbz-code" type="text" inputmode="numeric" autocomplete="off" autocorrect="off" spellcheck="false" maxlength="4" pattern="\[0-9\]\*" enterkeyhint="next" aria-describedby="tbz-code-msg">/);
+  assert.match(html, /<input id="tbz-code" type="text" inputmode="numeric" autocomplete="off" autocorrect="off" spellcheck="false" maxlength="16" pattern="\[0-9\]\*" enterkeyhint="next" aria-describedby="tbz-code-msg">/);
+  assert.match(src("public/css/site.css"), /\n#tbz-code \{ font-size: clamp\(1\.25rem, 6\.4vw, 1\.7rem\); letter-spacing: 0\.1em;/, "twelve digits fit the box at 320px (a wider spacing hid the last three)");
   assert.match(html, /<input id="tbz-email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="254" enterkeyhint="go" aria-describedby="tbz-code-msg">/, "the email box: the email keyboard, the phone's own address offered, Go on the keyboard");
   assert.ok(html.indexOf('id="tbz-code"') < html.indexOf('id="tbz-email"') && html.indexOf('id="tbz-email"') < html.indexOf('id="tbz-go"'), "code, email, then Go: the client's order");
   assert.match(html, /<button type="submit" id="tbz-go" class="btn"><\/button>/);
@@ -737,7 +808,7 @@ test("/track: Hear your track, a numeric code box that moves on to the email box
   assert.match(html, /<div class="field field-code">/, "the same big code field the gate uses");
   assert.match(html, /<div class="field field-email">/, "and the same email field");
   assert.equal(PAGE_EMAIL_MAX, 254);
-  assert.match(js, /if \(digits\.length === 4\) \{ if \(cleanEmail\(els\.email\.value\)\) enterFromForm\(\); else els\.email\.focus\(\); \}/, "the fourth digit sends it when the email is there, else moves to the email box");
+  assert.match(js, /if \(digits\.length === CODE_LENGTH\) \{ if \(cleanEmail\(els\.email\.value\)\) enterFromForm\(\); else els\.email\.focus\(\); \}/, "the twelfth digit sends it when the email is there, else moves to the email box (a four-digit code is sent with Go)");
   assert.match(js, /const enterFromForm = \(\) => enter\(codeDigits\(els\.code\.value\), els\.email\.value\);/);
   assert.match(js, /if \(!email\) \{ say\(String\(rawEmail \?\? ""\)\.trim\(\) \? COPY\.badEmail : COPY\.needEmail\); els\.email\.focus\(\); return; \}/, "a missing or malformed email is said so before anything is sent");
   assert.match(js, /api\(`\/api\/booth\/tracks\/\$\{code\}\/enter`, \{ method: "POST", body: \{ email \}, timeout: 10000 \}\)/, "the code and the email go in the body: never in the address");
@@ -1038,7 +1109,8 @@ test("the people's rules, pure: an email as it is kept (the page and the server 
 test("npm run promote-booth is the only door onto the voting site: it asks promoteVerdict and exits non-zero on a refusal, never writes a booth row, copies the audio under tracks/ and upserts the vote track; --dry-run writes nothing", () => {
   assert.equal(JSON.parse(src("package.json")).scripts["promote-booth"], "node scripts/promote-booth.mjs");
   const script = src("scripts/promote-booth.mjs");
-  assert.match(script, /import \{ promoteVerdict \} from "\.\.\/functions\/_lib\/booth\.js";/);
+  assert.match(script, /import \{ isCode, promoteVerdict \} from "\.\.\/functions\/_lib\/booth\.js";/);
+  assert.match(script, /if \(!isCode\(args\.code \?\? ""\)\)/, "the code is the server's own rule: 12 digits, or 4 for an older song");
   assert.match(script, /const verdict = promoteVerdict\(\{ track, people, env: args\.env \}\);/);
   assert.match(script, /if \(!verdict\.ok\) \{ console\.error\(`REFUSED: \$\{verdict\.message\}`\); process\.exit\(1\); \}/, "a refusal is named and exits 1");
   assert.ok(script.indexOf("const verdict = promoteVerdict(") < script.indexOf("r2Get(") && script.indexOf("process.exit(1); }") < script.indexOf("r2Get("), "the verdict comes before any copy");
